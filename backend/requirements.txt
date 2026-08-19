@@ -1,0 +1,6 @@
+# Dependências do backend — WhatsApp Inbox (standalone).
+Flask>=3.0
+PyJWT>=2.8
+waitress>=3.0
+requests>=2.31
+pyotp>=2.9
