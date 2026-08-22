@@ -25,12 +25,18 @@ if __name__ == "__main__":
             "Defina a variável de ambiente WPP_JWT_SECRET antes de iniciar "
             "(ex.: export WPP_JWT_SECRET=$(python -c \"import secrets;print(secrets.token_hex(32))\"))"
         )
-    # 0.0.0.0 — escuta em todas as interfaces de rede (não só localhost),
-    # pra outros computadores da mesma rede local conseguirem acessar,
-    # não só esta máquina. waitress em vez do servidor de desenvolvimento
-    # do Flask porque agora é uso real com várias pessoas ao mesmo tempo,
-    # não só um teste local — é o mesmo servidor que o README já indicava
-    # pra produção.
+    # Onde escutar:
+    #   0.0.0.0   = toda a rede (uso em rede local, sem proxy na frente)
+    #   127.0.0.1 = só a própria máquina — é o certo quando tem um proxy
+    #               com HTTPS na frente (Caddy/nginx), porque aí ninguém
+    #               alcança o app em texto puro nem se o firewall falhar.
+    # Configurável por WPP_HOST pra não precisar editar código conforme
+    # o ambiente (na VPS o systemd define 127.0.0.1).
+    # waitress em vez do servidor de desenvolvimento do Flask porque é
+    # uso real com várias pessoas ao mesmo tempo — é o mesmo servidor que
+    # o README já indicava pra produção.
     from waitress import serve
-    print("Whatts Inbox rodando em http://0.0.0.0:5050 (acessível pela rede local)")
-    serve(app, host="0.0.0.0", port=5050)
+    host = os.environ.get("WPP_HOST", "0.0.0.0")
+    porta = int(os.environ.get("WPP_PORT", "5050"))
+    print(f"Whatts Inbox rodando em http://{host}:{porta}")
+    serve(app, host=host, port=porta)
