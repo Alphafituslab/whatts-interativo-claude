@@ -30,6 +30,8 @@ SCHEMA_FILES = [
     "schema_015_digitando.sql",
     "schema_016_menu_tentativas.sql",
     "schema_017_setores_configuraveis.sql",
+    "schema_018_apelidos.sql",
+    "schema_019_dashboard_reset.sql",
 ]
 
 

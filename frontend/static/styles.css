@@ -211,8 +211,8 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
    --------------------------------------------------------------------- */
 .layout { display: flex; height: 100vh; overflow: hidden; }
 .barra-lateral {
-  width: 232px; flex-shrink: 0; background: var(--superficie); border-right: 1px solid var(--borda);
-  display: flex; flex-direction: column; padding: 18px 14px;
+  width: 204px; flex-shrink: 0; background: var(--superficie); border-right: 1px solid var(--borda);
+  display: flex; flex-direction: column; padding: 18px 12px;
 }
 .marca {
   display: flex; align-items: center; gap: 10px; padding: 4px 6px 22px;
@@ -251,7 +251,7 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .usuario-atual-nome { font-size: 13px; font-weight: 700; line-height: 1.2; }
 .usuario-atual-email { font-size: 11px; color: var(--texto-suave); }
 
-.conteudo-principal { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.conteudo-principal { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .pagina { padding: 22px 26px; flex: 1; overflow-y: auto; }
 .pagina h2 { margin: 0 0 16px; font-size: 19px; letter-spacing: -0.01em; }
 .wpp-cabecalho-tela { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
@@ -280,29 +280,34 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 /* Tela de conversa maior: menos ar em volta, mais espaço pra lista +
    chat de verdade — pediram explicitamente pra deixar bem maior (e
    depois pediram ainda mais). */
-.pagina:has(.wpp-layout) { padding: 6px 10px 4px; }
-.wpp-layout { display: flex; gap: 12px; height: calc(100vh - 58px); min-height: 420px; }
+/* flex em coluna: o .wpp-layout preenche automaticamente o que sobrar
+   depois do que tiver acima dele (título, abas, avisos) — funciona igual
+   em qualquer tela, mesmo as que têm mais linhas de cabeçalho (ex.: chat
+   interno tem título+abas+aviso, a mais que o WhatsApp) sem precisar
+   calcular um número fixo de pixels que quebra em telas diferentes. */
+.pagina:has(.wpp-layout) { padding: 10px 14px 8px; display: flex; flex-direction: column; min-height: 0; }
+.wpp-layout { display: flex; gap: 10px; flex: 1; min-height: 420px; }
 
 .wpp-painel-lista {
-  width: 350px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;
+  width: 290px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;
   background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio);
-  box-shadow: var(--sombra); overflow: hidden; padding: 10px;
+  box-shadow: var(--sombra); overflow: hidden; padding: 8px;
 }
 .wpp-lista-conversas { flex: 1; overflow-y: auto; margin: 0 -10px; }
 .wpp-lista-vazia { padding: 40px 18px; text-align: center; }
 .wpp-lista-vazia-icone { font-size: 34px; margin-bottom: 8px; opacity: 0.6; }
 
 .wpp-conversa-item {
-  display: flex; align-items: center; gap: 12px; padding: 11px 14px; text-decoration: none; color: inherit;
-  border-left: 3px solid transparent; border-radius: 14px; transition: background 0.12s ease, transform 0.1s ease;
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; text-decoration: none; color: inherit;
+  border-left: 3px solid transparent; border-radius: 12px; transition: background 0.12s ease, transform 0.1s ease;
 }
 .wpp-conversa-item:hover { transform: translateX(2px); }
 .wpp-conversa-item:hover { background: var(--superficie-2); }
 .wpp-conversa-item.ativa { background: color-mix(in srgb, var(--primaria) 10%, transparent); border-left-color: var(--primaria); }
 
 .wpp-avatar {
-  width: 42px; height: 42px; border-radius: 999px; flex-shrink: 0; display: flex; align-items: center;
-  justify-content: center; color: #fff; font-weight: 700; font-size: 14px;
+  width: 36px; height: 36px; border-radius: 999px; flex-shrink: 0; display: flex; align-items: center;
+  justify-content: center; color: #fff; font-weight: 700; font-size: 13px;
 }
 .wpp-avatar-foto { object-fit: cover; }
 .wpp-avatar-botao { border: none; background: none; padding: 0; cursor: pointer; border-radius: 999px; flex-shrink: 0; }
@@ -324,10 +329,10 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-avatar-atualizar:hover { background: var(--borda); }
 .wpp-conversa-info { min-width: 0; flex: 1; }
 .wpp-conversa-linha1 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.wpp-conversa-nome { font-weight: 700; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wpp-conversa-hora { font-size: 11px; color: var(--texto-suave); flex-shrink: 0; }
+.wpp-conversa-nome { font-weight: 700; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wpp-conversa-hora { font-size: 10.5px; color: var(--texto-suave); flex-shrink: 0; }
 .wpp-conversa-linha2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 2px; }
-.wpp-conversa-preview { font-size: 12.5px; color: var(--texto-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wpp-conversa-preview { font-size: 11.5px; color: var(--texto-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wpp-badge-nao-lidas {
   background: var(--primaria); color: #fff; font-size: 11px; font-weight: 700; min-width: 19px; height: 19px;
   border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; flex-shrink: 0;
@@ -346,26 +351,26 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 @media (prefers-reduced-motion: reduce) { .piscando { animation: none; } }
 
 .wpp-painel-chat {
-  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio);
   box-shadow: var(--sombra); overflow: hidden;
 }
 .wpp-chat-vazio { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 32px; }
 .wpp-chat-vazio-icone { font-size: 44px; opacity: 0.45; }
 
-.wpp-chat-cabecalho { display: flex; align-items: center; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--borda); flex-shrink: 0; }
-.wpp-chat-nome { font-weight: 700; font-size: 14px; }
-.wpp-chat-telefone { font-size: 12px; }
+.wpp-chat-cabecalho { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--borda); flex-shrink: 0; }
+.wpp-chat-nome { font-weight: 700; font-size: 13px; }
+.wpp-chat-telefone { font-size: 11px; }
 .wpp-botao-voltar { display: none; font-size: 18px; }
 
 .wpp-mensagens {
-  flex: 1; overflow-y: auto; padding: 20px 22px; display: flex; flex-direction: column; gap: 2px;
+  flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 2px;
   background-image: radial-gradient(circle, color-mix(in srgb, var(--texto) 6%, transparent) 1px, transparent 1px);
   background-size: 18px 18px; background-color: var(--fundo);
 }
-.wpp-bolha { max-width: 72%; padding: 9px 13px; border-radius: 18px; margin: 3px 0; box-shadow: 0 1px 1px rgba(0,0,0,0.06); animation: wpp-entra 0.15s ease-out; }
+.wpp-bolha { max-width: 68%; padding: 7px 11px; border-radius: 16px; margin: 2px 0; box-shadow: 0 1px 1px rgba(0,0,0,0.06); animation: wpp-entra 0.15s ease-out; }
 @keyframes wpp-entra { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-.wpp-bolha-texto { font-size: 13.5px; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+.wpp-bolha-texto { font-size: 12.5px; white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
 .wpp-bolha-rodape { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 3px; }
 .wpp-bolha-hora { font-size: 10.5px; opacity: 0.65; }
 .wpp-bolha-status { font-size: 11px; opacity: 0.75; }
@@ -380,7 +385,7 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-bolha:hover .wpp-bolha-excluir { opacity: 0.55; }
 .wpp-bolha-excluir:hover { opacity: 1 !important; }
 
-.wpp-chat-input { display: flex; align-items: flex-end; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--borda); flex-shrink: 0; }
+.wpp-chat-input { display: flex; align-items: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--borda); flex-shrink: 0; }
 .wpp-textarea {
   flex: 1; resize: none; max-height: 120px; padding: 11px 15px; border-radius: 22px; border: 1px solid var(--borda);
   background: var(--superficie-2); color: var(--texto); font: inherit; font-size: 13.5px;

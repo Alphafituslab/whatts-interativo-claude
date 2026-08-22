@@ -227,6 +227,22 @@ def definir_horario(usuario_id):
     return jsonify({"ok": True})
 
 
+@bp.put("/perfil")
+@requires_auth
+def editar_perfil():
+    """Cada usuário troca o próprio nome de exibição — mesma lógica de
+    autosserviço da foto de perfil e da senha, sem precisar de admin."""
+    usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
+    nome = (dados.get("nome") or "").strip()
+    if not nome:
+        raise ApiError("Informe um nome.", status=400)
+    conn = get_db()
+    conn.execute("UPDATE usuarios SET nome = ? WHERE id = ?", (nome, usuario["id"]))
+    usuario_atualizado = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario["id"],)).fetchone()
+    return jsonify(_publico(usuario_atualizado))
+
+
 @bp.post("/foto")
 @requires_auth
 def enviar_foto():

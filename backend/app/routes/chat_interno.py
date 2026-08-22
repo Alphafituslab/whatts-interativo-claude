@@ -91,6 +91,28 @@ def listar_mensagens(conversa_id):
     return jsonify(mensagens)
 
 
+@bp.put("/conversas/<int:conversa_id>/apelido")
+@requires_auth
+def definir_apelido(conversa_id):
+    """Apelido é sempre "de quem estou falando NESSA conversa" — só faz
+    sentido pra quem é de fato um dos dois lados (não pro admin espiando
+    pela aba "Todas", que não tem relação pessoal com essa conversa)."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if conversa["criado_por_id"] == usuario["id"]:
+        alvo_id = conversa["participante_id"]
+    elif conversa["participante_id"] == usuario["id"]:
+        alvo_id = conversa["criado_por_id"]
+    else:
+        raise ApiError("Você não participa dessa conversa.", status=403, codigo="sem_permissao")
+    if alvo_id is None:
+        raise ApiError("Essa conversa ainda não tem participante definido.", status=400)
+    dados = request.get_json(silent=True) or {}
+    chat_interno_service.definir_apelido(conn, usuario["id"], alvo_id, dados.get("apelido"))
+    return jsonify({"ok": True})
+
+
 @bp.post("/conversas/<int:conversa_id>/mensagens")
 @requires_auth
 def enviar_mensagem(conversa_id):

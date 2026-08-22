@@ -169,6 +169,9 @@ def trocar_senha():
     if problemas:
         raise ApiError(" ".join(problemas), status=400)
     conn.execute("UPDATE usuarios SET senha_hash = ? WHERE id = ?", (security.hash_password(senha_nova), usuario["id"]))
+    # Revoga todas as sessões (inclusive a atual) — trocar a senha deve
+    # sempre exigir logar de novo com ela, em qualquer aparelho.
+    conn.execute("UPDATE sessoes SET revogado = 1 WHERE usuario_id = ?", (usuario["id"],))
     whatsapp_service.registrar_atividade(conn, usuario["id"], "senha_alterada")
     return jsonify({"ok": True})
 

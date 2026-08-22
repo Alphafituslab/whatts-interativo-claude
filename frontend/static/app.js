@@ -35,6 +35,13 @@
       .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   }
 
+  function fmtNomeBackup(nome) {
+    const m = nome.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
+    if (!m) return nome;
+    const [, ano, mes, dia, h, min, s] = m;
+    return `${dia}/${mes}/${ano} às ${h}:${min}:${s}`;
+  }
+
   function fmtData(iso) {
     if (!iso) return "—";
     try {
@@ -299,9 +306,10 @@
   });
 
   // Enter envia a mensagem (padrão de todo chat); Shift+Enter quebra linha.
+  // Cobre tanto o WhatsApp quanto o chat interno.
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.shiftKey) return;
-    const textarea = e.target.closest('form[data-form="enviar-mensagem"] textarea[name="texto"]');
+    const textarea = e.target.closest('form[data-form="enviar-mensagem"] textarea[name="texto"], form[data-form="enviar-mensagem-interna"] textarea[name="texto"]');
     if (!textarea) return;
     e.preventDefault();
     textarea.closest("form").requestSubmit();
@@ -346,6 +354,18 @@
       { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id, rotulo: arquivada ? "📤 Desarquivar" : "🗄️ Arquivar" },
       { acao: "excluir-conversa", id, rotulo: "🗑️ Excluir conversa" },
     ]);
+  });
+
+  // Clique direito em cima do nome no topo da conversa (WhatsApp ou chat
+  // interno) já abre direto a tela de editar nome/apelido — mesmo botão
+  // ✏️ que já existe ali, só um atalho mais rápido pra chegar nele.
+  document.addEventListener("contextmenu", (e) => {
+    const nomeEl = e.target.closest(".wpp-chat-nome");
+    if (!nomeEl) return;
+    const botaoEditar = nomeEl.querySelector('[data-acao="renomear-contato"], [data-acao="abrir-apelido-interno"]');
+    if (!botaoEditar) return;
+    e.preventDefault();
+    botaoEditar.click();
   });
 
   // =======================================================================
@@ -506,20 +526,18 @@
         return;
       }
       if (resp.versao === state.versaoServidor) return;
-      // Importante: atualiza a baseline ANTES de tudo — sem isso, ao logar
-      // de novo na mesma aba (sem recarregar a página de verdade), o
-      // próximo tick comparava com a versão velha de novo e derrubava a
-      // pessoa em loop infinito a cada 20s, mesmo sem o servidor ter
-      // atualizado de novo.
-      state.versaoServidor = resp.versao;
       pararPollingStatusGlobal();
       pararPollingLembretes();
       pararPollingWhatsapp();
       pararPollingStatusWhatsapp();
       try { await chamarApi("/auth/logout", { method: "POST", body: { refresh_token: state.refreshToken } }); } catch (e) { /* ignora */ }
       limparSessao();
-      definirFlash("ok", "O sistema foi atualizado — faça login novamente pra usar a versão mais recente.");
-      navegarPara("#/login");
+      // Recarrega a página de verdade (não só troca de tela dentro do
+      // SPA) — só assim o navegador busca o app.js/styles.css novos.
+      // Sem isso, a aba continuava rodando o JS/CSS antigo em memória
+      // pra sempre, mesmo depois de deslogar e logar de novo nela mesma.
+      localStorage.setItem("whatts_flash_pos_reload", "O sistema foi atualizado — faça login novamente pra usar a versão mais recente.");
+      location.reload();
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
@@ -811,7 +829,7 @@
           <button type="button" class="wpp-avatar-atualizar" data-acao="atualizar-foto-contato" data-id="${conversa.id}" title="Atualizar foto do contato">🔄</button>
         </span>
         <div style="flex:1; min-width:0;">
-          <div class="wpp-chat-nome">${escapeHtml(nome)}</div>
+          <div class="wpp-chat-nome">${escapeHtml(nome)} <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-telefone="${escapeHtml(conversa.telefone)}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Renomear contato">✏️</button></div>
           <div class="texto-suave wpp-chat-telefone">${escapeHtml(conversa.telefone)}${conversa.menu_setor ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
         </div>
         <div class="wpp-chat-acoes">
@@ -862,15 +880,19 @@
     return `<div class="wpp-abas">${abas.map((a) => `<button type="button" class="wpp-aba ${state.escopoConversas === a.chave ? "ativa" : ""}" data-acao="trocar-escopo-conversas" data-escopo="${a.chave}">${a.label}</button>`).join("")}</div>`;
   }
 
+  function _queryConversas() {
+    const arquivadas = state.escopoConversas === "arquivadas";
+    const escopoQuery = arquivadas ? (state.usuarioAtual.admin ? "todas" : "minhas") : state.escopoConversas;
+    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}`;
+  }
+
   async function renderWhatsapp(conversaId) {
     app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
     let conversas;
     if (state.buscaConversas) {
       conversas = await chamarApi(`/whatsapp/conversas/buscar?q=${encodeURIComponent(state.buscaConversas)}`);
     } else {
-      const arquivadas = state.escopoConversas === "arquivadas";
-      const escopoQuery = arquivadas ? (state.usuarioAtual.admin ? "todas" : "minhas") : state.escopoConversas;
-      conversas = await chamarApi(`/whatsapp/conversas?escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}`);
+      conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
     }
 
     let conversaAtual = null, mensagens = [], agendadas = [], respostasProntas = [], notas = [];
@@ -924,7 +946,8 @@
   async function atualizarListaConversasNoDom() {
     const lista = document.querySelector("[data-wpp-lista]");
     if (!lista) return;
-    const conversas = await chamarApi(`/whatsapp/conversas?escopo=${state.escopoConversas}`);
+    if (state.buscaConversas) return; // não sobrescreve um resultado de busca ativo
+    const conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
     const conversaAtivaId = Number(location.hash.split("/")[2]) || null;
     lista.innerHTML = htmlListaConversas(conversas, conversaAtivaId);
   }
@@ -1030,7 +1053,7 @@
         <button type="button" class="botao-icone wpp-botao-voltar" data-acao="voltar-lista-interno" title="Voltar">←</button>
         <div class="wpp-avatar" style="background:${corAvatar(outroNome)};">${escapeHtml(iniciaisContato(outroNome))}</div>
         <div style="flex:1; min-width:0;">
-          <div class="wpp-chat-nome">${escapeHtml(outroNome)}</div>
+          <div class="wpp-chat-nome">${escapeHtml(outroNome)}${souAlheio ? "" : ` <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="abrir-apelido-interno" data-conversa-id="${conversa.id}" data-apelido="${escapeHtml(outroNome)}" title="Definir apelido (só você vê)">✏️</button>`}</div>
           <div class="texto-suave wpp-chat-telefone">${souAlheio ? "👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${conversa.setor_destino ? `${souAlheio ? " · " : ""}🏷️ ${escapeHtml(conversa.setor_destino)}` : (souAlheio ? "" : "Chat interno")}</div>
         </div>
         <div class="wpp-chat-acoes">
@@ -1179,6 +1202,11 @@
     const contatos = await chamarApi("/whatsapp/contatos");
     abrirModal(`
       <h3 style="margin-top:0;">Contatos</h3>
+      <form data-form="criar-contato" style="display:flex; gap:6px; margin-bottom:16px;">
+        <input name="telefone" type="tel" placeholder="Telefone (com DDD)" required style="flex:1;">
+        <input name="nome" placeholder="Nome" style="flex:1;">
+        <button type="submit" class="botao secundario pequeno">Adicionar</button>
+      </form>
       <form data-form="importar-contatos" style="margin-bottom:16px;">
         <div class="campo">
           <label>Importar contatos do celular (arquivo .csv ou .vcf exportado da agenda)</label>
@@ -1390,6 +1418,32 @@
       </form>`);
   }
 
+  function modalRenomearContato(telefone, nomeAtual) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Renomear contato</h3>
+      <form data-form="renomear-contato">
+        <input type="hidden" name="telefone" value="${escapeHtml(telefone)}">
+        <div class="campo"><label>Nome</label><input name="nome" value="${escapeHtml(nomeAtual)}" autofocus required></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Salvar</button>
+        </div>
+      </form>`);
+  }
+
+  function modalApelidoInterno(conversaId, apelidoAtual) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Apelido</h3>
+      <p class="dica">Só você vê esse nome — não muda o cadastro da pessoa pra mais ninguém. Deixe em branco pra voltar ao nome de cadastro.</p>
+      <form data-form="definir-apelido-interno" data-conversa-id="${conversaId}">
+        <div class="campo"><label>Apelido</label><input name="apelido" value="${escapeHtml(apelidoAtual || "")}" autofocus></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Salvar</button>
+        </div>
+      </form>`);
+  }
+
   function modalCodigoPareamento(codigo) {
     abrirModal(`
       <h3 style="margin-top:0;">Código de pareamento</h3>
@@ -1411,9 +1465,10 @@
 
   async function renderWhatsappConfiguracao() {
     app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
-    const [{ config, webhookUrl }, setoresDetalhado] = await Promise.all([
+    const [{ config, webhookUrl }, setoresDetalhado, backups] = await Promise.all([
       buscarConfigECriarWebhookUrl(),
       chamarApi("/usuarios/setores/detalhado"),
+      chamarApi("/sistema/backups"),
     ]);
     const setoresAtuais = setoresDetalhado.map((s) => s.nome);
 
@@ -1497,6 +1552,27 @@
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">Backup</h3>
+         <p class="dica">Backup automático todo dia, guardando os últimos 14 dias. Baixe uma cópia de vez em quando pra guardar fora deste computador — se algo acontecer, é só importar de volta.</p>
+         <div class="barra-acoes" style="margin-bottom:14px;">
+           <button type="button" class="botao secundario" data-acao="fazer-backup-agora">Fazer backup agora</button>
+         </div>
+         <ul style="list-style:none; padding:0; margin:0 0 16px; display:flex; flex-direction:column; gap:8px;">
+           ${backups.length ? backups.map((nome) => `
+             <li style="display:flex; align-items:center; gap:8px;">
+               <span style="flex:1;">${fmtNomeBackup(nome)}</span>
+               <button type="button" class="botao secundario pequeno" data-acao="baixar-backup" data-nome="${escapeHtml(nome)}">Baixar</button>
+               <button type="button" class="botao secundario pequeno" data-acao="restaurar-backup" data-nome="${escapeHtml(nome)}">Restaurar</button>
+             </li>`).join("") : '<li class="texto-suave">Nenhum backup ainda.</li>'}
+         </ul>
+         <form data-form="importar-backup" style="display:flex; gap:8px; align-items:center;">
+           <input type="file" name="arquivo" accept=".zip" required style="flex:1;">
+           <button type="submit" class="botao secundario">Importar e restaurar</button>
+         </form>
+         <p class="dica" style="margin-top:8px;">Restaurar (de qualquer uma das duas formas) substitui todos os dados atuais pelo estado salvo — um backup de segurança do momento atual é feito automaticamente antes, então dá pra desfazer se for engano.</p>
        </div>`,
       "configuracao"
     );
@@ -1763,8 +1839,12 @@
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Dashboard</h2>
-         <a class="botao secundario pequeno" href="${API}/whatsapp/dashboard/exportar" data-acao="exportar-dashboard">⬇ Exportar CSV</a>
+         <div style="display:flex; gap:8px;">
+           <a class="botao secundario pequeno" href="${API}/whatsapp/dashboard/exportar" data-acao="exportar-dashboard">⬇ Exportar CSV</a>
+           <button type="button" class="botao secundario pequeno" data-acao="resetar-dashboard">↺ Resetar contadores</button>
+         </div>
        </div>
+       ${t.dashboard_reset_em ? `<p class="dica" style="margin-top:-8px;">Contando desde ${fmtData(t.dashboard_reset_em)} — as conversas de antes continuam salvas, só não entram nesses números.</p>` : ""}
        <div class="dash-cartoes">${cartoes}</div>
 
        <div class="cartao">
@@ -1820,6 +1900,14 @@
 
     renderShell(
       `<h2>Segurança</h2>
+       <div class="cartao" style="max-width:520px;">
+         <h3 style="margin-top:0;">Meu perfil</h3>
+         <form data-form="editar-meu-perfil">
+           <div class="campo"><label>Nome de exibição</label><input name="nome" value="${escapeHtml(usuario.nome)}" required></div>
+           <button type="submit" class="botao">Salvar nome</button>
+         </form>
+       </div>
+
        <div class="cartao" style="max-width:520px;">
          <h3 style="margin-top:0;">Trocar senha</h3>
          <form data-form="trocar-senha" autocomplete="off">
@@ -2477,6 +2565,49 @@
         await chamarApi("/whatsapp/conectar", { method: "POST" });
         return renderWhatsappConfiguracao();
       }
+      case "renomear-contato": {
+        modalRenomearContato(alvo.dataset.telefone, alvo.dataset.nome);
+        return;
+      }
+      case "resetar-dashboard": {
+        if (!confirm("Zerar os contadores do Dashboard? As conversas e mensagens continuam salvas normalmente — só os números voltam a contar a partir de agora.")) return;
+        await chamarApi("/whatsapp/dashboard/resetar", { method: "POST" });
+        definirFlash("ok", "Dashboard resetado.");
+        return renderDashboard();
+      }
+      case "fazer-backup-agora": {
+        await chamarApi("/sistema/backups", { method: "POST" });
+        definirFlash("ok", "Backup criado.");
+        return renderWhatsappConfiguracao();
+      }
+      case "baixar-backup": {
+        const nome = alvo.dataset.nome;
+        const resp = await fetch(`${API}/sistema/backups/${encodeURIComponent(nome)}/download`, {
+          headers: { Authorization: "Bearer " + state.accessToken },
+        });
+        if (!resp.ok) { definirFlash("erro", "Não foi possível baixar o backup."); return; }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `whatts-backup-${nome}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return;
+      }
+      case "restaurar-backup": {
+        const nome = alvo.dataset.nome;
+        if (!confirm(`Restaurar o backup de ${fmtNomeBackup(nome)}? Isso substitui TODOS os dados atuais (conversas, contatos, tudo) pelo estado salvo nesse backup. Um backup de segurança do estado atual é feito automaticamente antes, mas essa ação ainda assim desfaz o que mudou depois dessa data. Confirma?`)) return;
+        await chamarApi(`/sistema/backups/${encodeURIComponent(nome)}/restaurar`, { method: "POST" });
+        definirFlash("ok", "Backup restaurado.");
+        return renderWhatsappConfiguracao();
+      }
+      case "abrir-apelido-interno": {
+        modalApelidoInterno(Number(alvo.dataset.conversaId), alvo.dataset.apelido);
+        return;
+      }
       case "abrir-conectar-numero": {
         modalConectarPorNumero();
         return;
@@ -2596,10 +2727,17 @@
         definirFlash("ok", "Verificação em duas etapas desativada.");
         return renderSeguranca();
       }
+      case "editar-meu-perfil": {
+        const atualizado = await chamarApi("/usuarios/perfil", { method: "PUT", body: { nome: dados.get("nome") } });
+        state.usuarioAtual = atualizado;
+        definirFlash("ok", "Nome atualizado.");
+        return renderSeguranca();
+      }
       case "trocar-senha": {
         await chamarApi("/auth/senha", { method: "POST", body: { senha_atual: dados.get("senha_atual"), senha_nova: dados.get("senha_nova") } });
-        definirFlash("ok", "Senha alterada com sucesso.");
-        return renderSeguranca();
+        limparSessao();
+        definirFlash("ok", "Senha alterada. Faça login novamente com a nova senha.");
+        return navegarPara("#/login");
       }
       case "buscar-conversas": {
         const q = (dados.get("q") || "").trim();
@@ -2610,6 +2748,35 @@
         const contatos = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(dados.get("q") || "")}`);
         document.querySelector("[data-wpp-contatos-lista]").innerHTML = htmlListaContatosModal(contatos);
         return;
+      }
+      case "criar-contato": {
+        await chamarApi("/whatsapp/contatos", { method: "POST", body: { telefone: dados.get("telefone"), nome: dados.get("nome") || "" } });
+        definirFlash("ok", "Contato salvo.");
+        fecharModais();
+        return modalContatos();
+      }
+      case "importar-backup": {
+        const arquivo = form.querySelector('[name="arquivo"]').files[0];
+        if (!arquivo) return;
+        if (!confirm("Importar esse backup vai SUBSTITUIR todos os dados atuais pelo que estiver no arquivo. Um backup de segurança do estado atual é feito automaticamente antes. Confirma?")) return;
+        const formData = new FormData();
+        formData.append("arquivo", arquivo);
+        const botao = form.querySelector('button[type="submit"]');
+        botao.disabled = true;
+        try {
+          await fetch(`${API}/sistema/backups/importar`, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + state.accessToken },
+            body: formData,
+          }).then(async (r) => {
+            if (!r.ok) { const c = await r.json().catch(() => ({})); throw new Error(c.mensagem || `Erro ${r.status}`); }
+            return r.json();
+          });
+          definirFlash("ok", "Backup importado e restaurado.");
+          return renderWhatsappConfiguracao();
+        } finally {
+          botao.disabled = false;
+        }
       }
       case "importar-contatos": {
         const arquivo = form.querySelector('[name="arquivo"]').files[0];
@@ -2689,11 +2856,11 @@
         if (!texto) return;
         const conversaId = Number(form.dataset.conversaId);
         const textarea = form.querySelector("textarea");
-        textarea.disabled = true;
-        try { await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto } }); }
-        finally { textarea.disabled = false; }
         form.reset();
-        return renderChatInterno(conversaId);
+        textarea.focus();
+        await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto } });
+        await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
+        return;
       }
       case "encaminhar-interno": {
         const conversaId = Number(form.dataset.conversaId);
@@ -2792,6 +2959,19 @@
         definirFlash("ok", "Mensagem de saudação salva.");
         return renderWhatsappConfiguracao();
       }
+      case "renomear-contato": {
+        await chamarApi("/whatsapp/contatos", { method: "POST", body: { telefone: dados.get("telefone"), nome: dados.get("nome") || "" } });
+        fecharModais();
+        definirFlash("ok", "Contato renomeado.");
+        return renderWhatsapp(Number(location.hash.split("/")[2]) || null);
+      }
+      case "definir-apelido-interno": {
+        const conversaId = Number(form.dataset.conversaId);
+        await chamarApi(`/chat-interno/conversas/${conversaId}/apelido`, { method: "PUT", body: { apelido: dados.get("apelido") || "" } });
+        fecharModais();
+        definirFlash("ok", "Apelido salvo.");
+        return renderChatInterno(conversaId);
+      }
       case "criar-setor": {
         await chamarApi("/usuarios/setores", { method: "POST", body: { nome: dados.get("nome") || "" } });
         definirFlash("ok", "Setor criado.");
@@ -2868,5 +3048,10 @@
     }
   }
 
+  const flashPosReload = localStorage.getItem("whatts_flash_pos_reload");
+  if (flashPosReload) {
+    state.flash = { tipo: "ok", texto: flashPosReload };
+    localStorage.removeItem("whatts_flash_pos_reload");
+  }
   montarRota();
 })();

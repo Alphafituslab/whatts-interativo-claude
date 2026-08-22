@@ -140,6 +140,7 @@ def obter_configuracao(conn, empresa_id: int):
             "expediente_ativo": 0, "expediente_janelas": None, "expediente_mensagem": None,
             "saudacao_mensagem": None,
             "sla_minutos_alerta": 15,
+            "dashboard_reset_em": None,
         }
     return dict(row)
 
@@ -406,6 +407,31 @@ def _registrar_webhook(config):
         pass
 
 
+def _numero_da_instancia(config):
+    """Consulta a Evolution API pelo número de WhatsApp que está de fato
+    conectado nessa instância agora — não é algo que a gente escolhe ou
+    guarda no momento de conectar (o pareamento pode ter sido feito por
+    QR Code ou por código, com qualquer número que tenha aceitado), então
+    a única fonte confiável é perguntar pra Evolution API depois de já
+    estar conectado."""
+    try:
+        requests = _requests()
+        resp = requests.get(
+            f"{config['evolution_url']}/instance/fetchInstances",
+            params={"instanceName": config["instancia_nome"]},
+            headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+        )
+        corpo = _tratar_resposta(resp)
+        instancias = corpo if isinstance(corpo, list) else [corpo]
+        for inst in instancias:
+            owner_jid = inst.get("ownerJid") or (inst.get("instance") or {}).get("owner")
+            if owner_jid:
+                return owner_jid.split("@")[0]
+    except Exception:
+        pass
+    return None
+
+
 def consultar_status(conn, config):
     _exigir_configurado(config)
     requests = _requests()
@@ -423,7 +449,15 @@ def consultar_status(conn, config):
     # a espera do QR rebaixava pra "desconectado" e o QR sumia da tela.
     if estado == "close" and config.get("status_conexao") == "aguardando_qrcode":
         return "aguardando_qrcode"
-    _atualizar_estado_conexao(conn, config["empresa_id"], status_conexao=status_conexao, limpar_qrcode=(status_conexao == "conectado"))
+    # Só consulta o número quando ainda não sabe (evita uma chamada extra
+    # à Evolution API em toda consulta de status de rotina).
+    numero_conectado = None
+    if status_conexao == "conectado" and not config.get("numero_conectado"):
+        numero_conectado = _numero_da_instancia(config)
+    _atualizar_estado_conexao(
+        conn, config["empresa_id"], status_conexao=status_conexao,
+        numero_conectado=numero_conectado, limpar_qrcode=(status_conexao == "conectado"),
+    )
     return status_conexao
 
 
@@ -1095,6 +1129,26 @@ def obter_ou_criar_contato(conn, empresa_id: int, telefone: str, nome: str = Non
     return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
+def salvar_contato_manual(conn, empresa_id: int, telefone_bruto: str, nome: str = None):
+    """Diferente de obter_ou_criar_contato (que só preenche o nome se
+    ainda estiver vazio, pra não sobrescrever à toa durante o fluxo
+    automático de conversa), aqui é uma ação explícita do usuário — o
+    nome informado sempre vale, inclusive pra renomear um contato que já
+    existia."""
+    telefone = normalizar_telefone(telefone_bruto)
+    nome = (nome or "").strip() or None
+    agora = _now_iso()
+    row = conn.execute("SELECT id FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ?", (empresa_id, telefone)).fetchone()
+    if row:
+        conn.execute("UPDATE whatsapp_contatos SET nome = ?, atualizado_em = ? WHERE id = ?", (nome, agora, row["id"]))
+        return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (row["id"],)).fetchone())
+    cur = conn.execute(
+        "INSERT INTO whatsapp_contatos (empresa_id, telefone, nome, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)",
+        (empresa_id, telefone, nome, agora, agora),
+    )
+    return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
 _COLUNAS_NOME_CSV = {"nome", "name", "contato", "contact"}
 _COLUNAS_TELEFONE_CSV = {"telefone", "phone", "celular", "numero", "número", "tel", "whatsapp", "mobile"}
 
@@ -1299,15 +1353,33 @@ def _media(valores):
     return round(sum(valores) / len(valores), 1) if valores else None
 
 
+def resetar_dashboard(conn, empresa_id: int):
+    """Não apaga NADA — só marca a partir de quando os contadores do
+    Dashboard voltam a contar (ver calcular_dashboard). As conversas e
+    mensagens de antes continuam salvas normalmente, só saem da conta."""
+    conn.execute(
+        "UPDATE configuracoes_whatsapp SET dashboard_reset_em = ? WHERE empresa_id = ?", (_now_iso(), empresa_id)
+    )
+
+
 def calcular_dashboard(conn, empresa_id: int):
+    reset_em = obter_configuracao(conn, empresa_id).get("dashboard_reset_em")
+    filtro_data = " AND criado_em >= ?" if reset_em else ""
+    filtro_data_c = " AND c.criado_em >= ?" if reset_em else ""
+    filtro_data_a = " AND a.criado_em >= ?" if reset_em else ""
+    params_data = (reset_em,) if reset_em else ()
+
     usuarios = conn.execute("SELECT * FROM usuarios WHERE empresa_id = ? ORDER BY nome", (empresa_id,)).fetchall()
     resultado_usuarios = []
 
     for u in usuarios:
         uid = u["id"]
-        conversas = conn.execute("SELECT * FROM whatsapp_conversas WHERE atribuida_usuario_id = ?", (uid,)).fetchall()
+        conversas = conn.execute(
+            f"SELECT * FROM whatsapp_conversas WHERE atribuida_usuario_id = ?{filtro_data}", (uid, *params_data)
+        ).fetchall()
         mensagens_enviadas = conn.execute(
-            "SELECT COUNT(*) AS n FROM whatsapp_mensagens WHERE usuario_id = ? AND direcao = 'saida'", (uid,)
+            f"SELECT COUNT(*) AS n FROM whatsapp_mensagens WHERE usuario_id = ? AND direcao = 'saida'{filtro_data}",
+            (uid, *params_data),
         ).fetchone()["n"]
 
         duracoes_atendimento = []
@@ -1335,7 +1407,9 @@ def calcular_dashboard(conn, empresa_id: int):
                             ja_registrou_primeira = True
                         break
 
-        avaliacoes = conn.execute("SELECT nota FROM whatsapp_avaliacoes WHERE usuario_id = ?", (uid,)).fetchall()
+        avaliacoes = conn.execute(
+            f"SELECT nota FROM whatsapp_avaliacoes WHERE usuario_id = ?{filtro_data}", (uid, *params_data)
+        ).fetchall()
         notas = [a["nota"] for a in avaliacoes]
 
         resultado_usuarios.append({
@@ -1362,35 +1436,36 @@ def calcular_dashboard(conn, empresa_id: int):
     )
 
     avaliacoes_recentes = conn.execute(
-        """
+        f"""
         SELECT a.nota, a.comentario, a.criado_em, u.nome AS usuario_nome, ct.nome AS contato_nome, ct.telefone
         FROM whatsapp_avaliacoes a
         LEFT JOIN usuarios u ON u.id = a.usuario_id
         JOIN whatsapp_conversas c ON c.id = a.conversa_id
         JOIN whatsapp_contatos ct ON ct.id = c.contato_id
-        WHERE ct.empresa_id = ?
+        WHERE ct.empresa_id = ?{filtro_data_a}
         ORDER BY a.criado_em DESC
         LIMIT 20
         """,
-        (empresa_id,),
+        (empresa_id, *params_data),
     ).fetchall()
 
     hoje = _now_iso()[:10]
-    base_conversas = "FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE ct.empresa_id = ?"
+    base_conversas = f"FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE ct.empresa_id = ?{filtro_data_c}"
     totais = {
-        "conversas": conn.execute(f"SELECT COUNT(*) AS n {base_conversas}", (empresa_id,)).fetchone()["n"],
-        "fila": conn.execute(f"SELECT COUNT(*) AS n {base_conversas} AND c.atribuida_usuario_id IS NULL", (empresa_id,)).fetchone()["n"],
-        "abertas": conn.execute(f"SELECT COUNT(*) AS n {base_conversas} AND c.status = 'aberta'", (empresa_id,)).fetchone()["n"],
-        "fechadas": conn.execute(f"SELECT COUNT(*) AS n {base_conversas} AND c.status = 'fechada'", (empresa_id,)).fetchone()["n"],
+        "conversas": conn.execute(f"SELECT COUNT(*) AS n {base_conversas}", (empresa_id, *params_data)).fetchone()["n"],
+        "fila": conn.execute(f"SELECT COUNT(*) AS n {base_conversas} AND c.atribuida_usuario_id IS NULL", (empresa_id, *params_data)).fetchone()["n"],
+        "abertas": conn.execute(f"SELECT COUNT(*) AS n {base_conversas} AND c.status = 'aberta'", (empresa_id, *params_data)).fetchone()["n"],
+        "fechadas": conn.execute(f"SELECT COUNT(*) AS n {base_conversas} AND c.status = 'fechada'", (empresa_id, *params_data)).fetchone()["n"],
         "mensagens_hoje": conn.execute(
             "SELECT COUNT(*) AS n FROM whatsapp_mensagens m JOIN whatsapp_conversas c ON c.id = m.conversa_id "
             "JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE ct.empresa_id = ? AND m.criado_em LIKE ?",
             (empresa_id, hoje + "%"),
         ).fetchone()["n"],
+        "dashboard_reset_em": reset_em,
         "media_avaliacao_geral": _media([r["nota"] for r in conn.execute(
-            "SELECT a.nota FROM whatsapp_avaliacoes a JOIN whatsapp_conversas c ON c.id = a.conversa_id "
-            "JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE ct.empresa_id = ?",
-            (empresa_id,),
+            f"SELECT a.nota FROM whatsapp_avaliacoes a JOIN whatsapp_conversas c ON c.id = a.conversa_id "
+            f"JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE ct.empresa_id = ?{filtro_data_a}",
+            (empresa_id, *params_data),
         ).fetchall()]),
     }
     return {
@@ -1766,11 +1841,17 @@ def _rotear_para_setor(conn, empresa_id, conversa, setor, _responder):
     final (assumido ou não, o roteamento terminou aqui)."""
     online = usuarios_online_do_setor(conn, empresa_id, setor)
     if not online:
+        # Diferente dos outros dois casos abaixo, aqui NÃO limpa o menu —
+        # deixa o cliente tentar outro setor (digitando outro número) em
+        # vez de só deixá-lo esperando sem alternativa. menu_setor fica
+        # marcado (mostra a etiqueta na lista), mas o menu continua ativo;
+        # zera as tentativas invalidas pra ele ter as 2 chances de novo.
+        setores = obter_setores(conn, empresa_id)
         conn.execute(
-            "UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL, menu_setor = ? WHERE id = ?",
-            (setor, conversa["id"]),
+            "UPDATE whatsapp_conversas SET menu_estado = 'setor', menu_opcoes = ?, menu_tentativas_invalidas = 0, menu_setor = ? WHERE id = ?",
+            (json.dumps(setores), setor, conversa["id"]),
         )
-        _responder(f"No momento não há ninguém disponível em {setor}. Deixe sua mensagem que retornaremos assim que possível! 🙏")
+        _responder(f"No momento não há ninguém disponível em {setor}. Deixe sua mensagem que retornaremos assim que possível, ou digite outro número pra tentar outro setor. 🙏")
         return {"processado": True, "tipo": "menu_setor_sem_online", "conversa_id": conversa["id"]}
 
     if len(online) == 1:

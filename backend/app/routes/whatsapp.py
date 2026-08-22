@@ -314,6 +314,18 @@ def listar_contatos():
     return jsonify([dict(r) for r in rows])
 
 
+@bp.post("/contatos")
+@requires_auth
+def criar_contato():
+    dados = request.get_json(silent=True) or {}
+    telefone = (dados.get("telefone") or "").strip()
+    if not telefone:
+        raise ApiError("Informe o telefone.", status=400)
+    conn = get_db()
+    contato = whatsapp_service.salvar_contato_manual(conn, g.empresa_id, telefone, dados.get("nome"))
+    return jsonify(contato), 201
+
+
 @bp.post("/contatos/importar")
 @requires_auth
 def importar_contatos():
@@ -539,12 +551,24 @@ def assumir_conversa(conversa_id):
     """Pega uma conversa da fila (sem dono) para si. Se já tiver dono,
     só um admin pode 'assumir por cima' — qualquer outro usuário recebe
     409 (evita duas pessoas assumindo a mesma conversa da fila em uma
-    corrida de cliques)."""
+    corrida de cliques).
+
+    Usuário comum só pode assumir uma conversa do PRÓPRIO setor — e só
+    depois que ela já tem um setor definido (o cliente respondeu o menu,
+    ou caiu no fallback). Enquanto não tem setor (ainda no meio do menu,
+    ou o cliente nunca respondeu), só o admin consegue assumir — regra
+    explícita pra evitar gente de qualquer área pegando conversa que
+    ainda nem sabe pra onde vai."""
     usuario = g.usuario_atual
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if conversa["atribuida_usuario_id"] is not None and not usuario["admin"]:
         raise ApiError("Esta conversa já foi assumida por outro usuário.", status=409, codigo="ja_atribuida")
+    if not usuario["admin"]:
+        if not conversa["menu_setor"]:
+            raise ApiError("Essa conversa ainda não tem setor definido — só um administrador pode assumi-la.", status=403, codigo="sem_permissao")
+        if conversa["menu_setor"] != usuario["setor"]:
+            raise ApiError("Essa conversa é de outro setor — você só pode assumir conversas do seu setor.", status=403, codigo="sem_permissao")
     whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
     whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_assumida", conversa["telefone"], conversa_id)
     return jsonify({"ok": True})
@@ -646,6 +670,16 @@ def excluir_conversa(conversa_id):
 def dashboard():
     conn = get_db()
     return jsonify(whatsapp_service.calcular_dashboard(conn, g.empresa_id))
+
+
+@bp.post("/dashboard/resetar")
+@requires_admin
+def resetar_dashboard():
+    """Zera os contadores do Dashboard a partir de agora — não apaga
+    nenhuma conversa/mensagem real, só marca daqui pra frente."""
+    conn = get_db()
+    whatsapp_service.resetar_dashboard(conn, g.empresa_id)
+    return jsonify({"ok": True})
 
 
 @bp.get("/dashboard/mapa")

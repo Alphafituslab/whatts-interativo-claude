@@ -85,6 +85,44 @@ def enviar_mensagem(conn, conversa_id: int, usuario_id: int, texto: str, tipo="t
     conn.execute(f"UPDATE chat_interno_conversas SET status = 'aberta', fechada_em = NULL, {campo} = {campo} + 1 WHERE id = ?", (conversa_id,))
 
 
+def obter_apelidos(conn, usuario_id: int):
+    """Apelidos que ESSE usuário definiu pra colegas — só ele vê, o
+    cadastro real da outra pessoa não muda pra mais ninguém."""
+    rows = conn.execute(
+        "SELECT alvo_usuario_id, apelido FROM usuarios_apelidos WHERE usuario_id = ?", (usuario_id,)
+    ).fetchall()
+    return {r["alvo_usuario_id"]: r["apelido"] for r in rows}
+
+
+def definir_apelido(conn, usuario_id: int, alvo_usuario_id: int, apelido: str):
+    apelido = (apelido or "").strip() or None
+    if apelido is None:
+        conn.execute("DELETE FROM usuarios_apelidos WHERE usuario_id = ? AND alvo_usuario_id = ?", (usuario_id, alvo_usuario_id))
+        return
+    existe = conn.execute(
+        "SELECT 1 FROM usuarios_apelidos WHERE usuario_id = ? AND alvo_usuario_id = ?", (usuario_id, alvo_usuario_id)
+    ).fetchone()
+    if existe:
+        conn.execute(
+            "UPDATE usuarios_apelidos SET apelido = ?, atualizado_em = ? WHERE usuario_id = ? AND alvo_usuario_id = ?",
+            (apelido, _now_iso(), usuario_id, alvo_usuario_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO usuarios_apelidos (usuario_id, alvo_usuario_id, apelido, atualizado_em) VALUES (?, ?, ?, ?)",
+            (usuario_id, alvo_usuario_id, apelido, _now_iso()),
+        )
+
+
+def _aplicar_apelidos(conversas, apelidos):
+    for c in conversas:
+        if c["criado_por_id"] in apelidos:
+            c["criado_por_nome"] = apelidos[c["criado_por_id"]]
+        if c.get("participante_id") in apelidos:
+            c["participante_nome"] = apelidos[c["participante_id"]]
+    return conversas
+
+
 def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, empresa_id_admin: int = None):
     """Por padrão só mostra as em aberto — encerrar uma conversa faz ela
     sumir da lista (sem apagar nada, ver fechar_conversa), pra tela não
@@ -112,7 +150,8 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
         """,
         params,
     ).fetchall()
-    return [dict(r) for r in rows]
+    conversas = [dict(r) for r in rows]
+    return _aplicar_apelidos(conversas, obter_apelidos(conn, usuario_id))
 
 
 def carregar_conversa(conn, conversa_id: int):
