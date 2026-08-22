@@ -1776,6 +1776,7 @@
       { rotulo: "Conversas abertas", valor: t.abertas, icone: "💬" },
       { rotulo: "Conversas fechadas", valor: t.fechadas, icone: "✅" },
       { rotulo: "Mensagens hoje", valor: t.mensagens_hoje, icone: "📨" },
+      { rotulo: `Paradas +${t.limite_demora_min}min`, valor: t.paradas_agora, icone: "⏰" },
       { rotulo: "Avaliação média", valor: t.media_avaliacao_geral !== null ? `${t.media_avaliacao_geral.toFixed(1)} ★` : "—", icone: "⭐" },
     ].map((c) => `<div class="dash-cartao"><span class="dash-cartao-icone">${c.icone}</span><div><div class="dash-cartao-valor">${c.valor}</div><div class="dash-cartao-rotulo">${c.rotulo}</div></div></div>`).join("");
 
@@ -1807,6 +1808,10 @@
         <td>${fmtMinutos(u.tempo_medio_primeira_resposta_min)}</td>
         <td>${fmtMinutos(u.tempo_medio_resposta_min)}</td>
         <td>${fmtMinutos(u.tempo_medio_atendimento_min)}</td>
+        <td>${u.respostas_demoradas > 0
+              ? `<span class="selo bloqueado">${u.respostas_demoradas}</span><span class="texto-suave"> de ${u.total_respostas}</span>${u.pior_demora_min ? `<div class="texto-suave">pior: ${fmtMinutos(u.pior_demora_min)}</div>` : ""}`
+              : (u.total_respostas ? '<span class="selo ativo">0</span>' : "—")}</td>
+        <td>${u.paradas_agora > 0 ? `<span class="selo bloqueado piscando">${u.paradas_agora}</span>` : "—"}</td>
         <td>${htmlEstrelas(u.media_avaliacao)}${u.total_avaliacoes ? ` <span class="texto-suave">(${u.total_avaliacoes})</span>` : ""}</td>
       </tr>`).join("");
 
@@ -1876,7 +1881,7 @@
          <h3 style="margin-top:0;">Desempenho por usuário</h3>
          <p class="dica">Tempo de 1ª resposta: da chegada da conversa até a primeira resposta. Tempo de resposta: média entre cada mensagem do cliente e a resposta seguinte. Tempo de atendimento: duração média das conversas já fechadas. Avaliação: nota que o próprio cliente deu ao final do atendimento.</p>
          <table>
-           <thead><tr><th>Usuário</th><th>Conversas</th><th>Não lidas</th><th>Msgs enviadas</th><th>1ª resposta</th><th>Resposta média</th><th>Atendimento</th><th>Avaliação</th></tr></thead>
+           <thead><tr><th>Usuário</th><th>Conversas</th><th>Não lidas</th><th>Msgs enviadas</th><th>1ª resposta</th><th>Resposta média</th><th>Atendimento</th><th title="Respostas que passaram do limite de ${t.limite_demora_min} min">Demoras</th><th title="Conversas paradas agora, cliente esperando">Paradas agora</th><th>Avaliação</th></tr></thead>
            <tbody>${linhas}</tbody>
          </table>
        </div>

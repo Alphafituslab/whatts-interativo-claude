@@ -314,7 +314,11 @@ def buscar_conversas():
 def sla_alertas():
     usuario = g.usuario_atual
     conn = get_db()
-    rows = whatsapp_service.listar_conversas_sla_estourado(conn, g.empresa_id, None if usuario["admin"] else usuario["id"])
+    rows = whatsapp_service.listar_conversas_sla_estourado(
+        conn, g.empresa_id,
+        None if usuario["admin"] else usuario["id"],
+        None if usuario["admin"] else usuario["setor"],
+    )
     return jsonify([_conversa_para_json(r) for r in rows])
 
 

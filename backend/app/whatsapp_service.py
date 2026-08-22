@@ -1363,11 +1363,23 @@ def resetar_dashboard(conn, empresa_id: int):
 
 
 def calcular_dashboard(conn, empresa_id: int):
-    reset_em = obter_configuracao(conn, empresa_id).get("dashboard_reset_em")
+    config_dash = obter_configuracao(conn, empresa_id)
+    reset_em = config_dash.get("dashboard_reset_em")
+    # Mesmo limite usado pelo alerta de conversa parada (ver
+    # listar_conversas_sla_estourado) — o Dashboard conta quantas vezes
+    # cada um passou desse tempo pra responder o cliente.
+    limite_demora_min = config_dash.get("sla_minutos_alerta") or 15
     filtro_data = " AND criado_em >= ?" if reset_em else ""
     filtro_data_c = " AND c.criado_em >= ?" if reset_em else ""
     filtro_data_a = " AND a.criado_em >= ?" if reset_em else ""
     params_data = (reset_em,) if reset_em else ()
+
+    # Conversas que ESTÃO paradas agora (cliente esperando resposta há
+    # mais que o limite), agrupadas por responsável.
+    paradas_por_usuario = {}
+    for c in listar_conversas_sla_estourado(conn, empresa_id):
+        if c.get("atribuida_usuario_id"):
+            paradas_por_usuario[c["atribuida_usuario_id"]] = paradas_por_usuario.get(c["atribuida_usuario_id"], 0) + 1
 
     usuarios = conn.execute("SELECT * FROM usuarios WHERE empresa_id = ? ORDER BY nome", (empresa_id,)).fetchall()
     resultado_usuarios = []
@@ -1424,6 +1436,12 @@ def calcular_dashboard(conn, empresa_id: int):
             "tempo_medio_atendimento_min": _media(duracoes_atendimento),
             "media_avaliacao": _media(notas),
             "total_avaliacoes": len(notas),
+            # Demora: quantas vezes deixou o cliente esperando mais que o
+            # limite, e quantas conversas estão paradas assim AGORA.
+            "respostas_demoradas": sum(1 for t in tempos_resposta if t is not None and t > limite_demora_min),
+            "total_respostas": len(tempos_resposta),
+            "paradas_agora": paradas_por_usuario.get(uid, 0),
+            "pior_demora_min": max(tempos_resposta) if tempos_resposta else None,
         })
 
     # Ranking de negociações fechadas — o "controle total" que o admin
@@ -1462,6 +1480,8 @@ def calcular_dashboard(conn, empresa_id: int):
             (empresa_id, hoje + "%"),
         ).fetchone()["n"],
         "dashboard_reset_em": reset_em,
+        "limite_demora_min": limite_demora_min,
+        "paradas_agora": sum(paradas_por_usuario.values()),
         "media_avaliacao_geral": _media([r["nota"] for r in conn.execute(
             f"SELECT a.nota FROM whatsapp_avaliacoes a JOIN whatsapp_conversas c ON c.id = a.conversa_id "
             f"JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE ct.empresa_id = ?{filtro_data_a}",
@@ -2063,7 +2083,7 @@ def tags_por_conversa(conn, conversa_ids: list):
 # ============================================================
 # ALERTA DE SLA — conversa parada há tempo demais sem resposta nossa
 # ============================================================
-def listar_conversas_sla_estourado(conn, empresa_id: int, usuario_id=None):
+def listar_conversas_sla_estourado(conn, empresa_id: int, usuario_id=None, setor=None):
     config = obter_configuracao(conn, empresa_id)
     limite_min = config.get("sla_minutos_alerta") or 15
     limite = (datetime.datetime.utcnow() - datetime.timedelta(minutes=limite_min)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -2076,8 +2096,12 @@ def listar_conversas_sla_estourado(conn, empresa_id: int, usuario_id=None):
     ]
     params = [empresa_id, limite]
     if usuario_id:
-        condicoes.append("(c.atribuida_usuario_id = ? OR c.atribuida_usuario_id IS NULL)")
-        params.append(usuario_id)
+        # Mesma régua de visibilidade do resto do sistema: a dele, mais
+        # as da fila do setor dele (nunca as de outro setor).
+        condicoes.append(
+            "(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IS NOT NULL AND c.menu_setor = ?))"
+        )
+        params.extend([usuario_id, setor])
     where = "WHERE " + " AND ".join(condicoes)
     rows = conn.execute(
         f"""
