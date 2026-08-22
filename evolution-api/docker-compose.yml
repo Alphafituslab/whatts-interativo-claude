@@ -17,7 +17,16 @@ services:
     depends_on:
       - postgres
     ports:
-      - "8080:8080"
+      # só localhost — o Flask (fora do Docker, no mesmo host) já alcança
+      # por aqui; o firewall (ufw) também bloqueia 8080 de fora, isso é
+      # uma segunda camada de proteção, não a única
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      # host.docker.internal funciona sozinho no Docker Desktop
+      # (Windows/Mac), mas no Linux (como esta VPS) precisa ser mapeado
+      # manualmente pro gateway do host — sem isso a Evolution API não
+      # consegue chamar de volta o Flask rodando fora do container.
+      - "host.docker.internal:host-gateway"
     environment:
       AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY}
       DATABASE_ENABLED: "true"
