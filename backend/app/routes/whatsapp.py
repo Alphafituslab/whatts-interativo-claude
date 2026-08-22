@@ -198,19 +198,35 @@ def _carregar_conversa(conn, empresa_id, conversa_id):
 
 
 def _pode_visualizar(usuario, conversa):
+    """Atribuída: só o dono (e o admin). Sem dono (na fila): só quem é do
+    MESMO setor pra onde o cliente foi direcionado — mesma régua do botão
+    Assumir. Enquanto o setor não está definido (cliente ainda não
+    respondeu o menu), só o admin vê: não dá pra saber de quem é."""
     if usuario["admin"]:
         return True
-    return conversa["atribuida_usuario_id"] is None or conversa["atribuida_usuario_id"] == usuario["id"]
+    if conversa["atribuida_usuario_id"] is not None:
+        return conversa["atribuida_usuario_id"] == usuario["id"]
+    return bool(conversa["menu_setor"]) and conversa["menu_setor"] == usuario["setor"]
+
+
+# Mesma regra do _pode_visualizar, em SQL, pra filtrar as listas direto no
+# banco (o usuário nunca chega a receber a conversa de outro setor).
+_SQL_VISIVEL_NAO_ADMIN = (
+    "(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IS NOT NULL AND c.menu_setor = ?))"
+)
+
+
+def _params_visivel(usuario):
+    return [usuario["id"], usuario["setor"]]
 
 
 def _pode_agir(usuario, conversa):
-    """Responder/fechar/encaminhar. Uma conversa da fila (sem dono
-    ainda) pode ser respondida por qualquer usuário — a primeira
-    resposta assume ela automaticamente (ver enviar_mensagem) — mas,
-    uma vez atribuída, só o dono (ou um admin) pode agir nela."""
-    if usuario["admin"]:
-        return True
-    return conversa["atribuida_usuario_id"] in (None, usuario["id"])
+    """Responder/fechar/encaminhar. Uma conversa da fila (sem dono ainda)
+    pode ser respondida por quem é do setor dela — a primeira resposta
+    assume ela automaticamente (ver enviar_mensagem). Uma vez atribuída,
+    só o dono (ou um admin). Quem consegue agir é sempre um subconjunto
+    de quem consegue ver, então a régua é a mesma do _pode_visualizar."""
+    return _pode_visualizar(usuario, conversa)
 
 
 @bp.get("/conversas")
@@ -232,6 +248,10 @@ def listar_conversas():
     """
     if escopo == "fila":
         condicoes, params = ["c.atribuida_usuario_id IS NULL"], []
+        if not usuario["admin"]:
+            # Usuário comum só enxerga na fila o que é do setor dele.
+            condicoes.append("c.menu_setor IS NOT NULL AND c.menu_setor = ?")
+            params.append(usuario["setor"])
     elif escopo == "todas":
         if not usuario["admin"]:
             raise ApiError("Só um administrador pode ver todas as conversas.", status=403, codigo="sem_permissao")
@@ -271,8 +291,8 @@ def buscar_conversas():
     ]
     params = [g.empresa_id, termo, termo, termo]
     if not usuario["admin"]:
-        condicoes.append("(c.atribuida_usuario_id = ? OR c.atribuida_usuario_id IS NULL)")
-        params.append(usuario["id"])
+        condicoes.append(_SQL_VISIVEL_NAO_ADMIN)
+        params.extend(_params_visivel(usuario))
     where = "WHERE " + " AND ".join(condicoes)
     rows = conn.execute(
         f"""
