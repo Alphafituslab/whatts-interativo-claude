@@ -465,8 +465,20 @@
   // pessoa não esteja olhando pra nenhuma das duas telas agora.
   async function atualizarBadgesNaoLidos() {
     try {
-      const conversas = await chamarApi("/whatsapp/conversas?escopo=minhas");
-      const total = conversas.reduce((soma, c) => soma + (c.nao_lidas || 0), 0);
+      // Conta pelas duas abas: "fila" é onde ficam as que estão
+      // esperando resposta (é lá que a mensagem nova cai), e "minhas"
+      // pega as em andamento que receberam algo novo entre uma resposta
+      // e outra. Sem somar as duas, o aviso ficaria sempre zerado.
+      const [emAndamento, aguardando] = await Promise.all([
+        chamarApi("/whatsapp/conversas?escopo=minhas"),
+        chamarApi("/whatsapp/conversas?escopo=fila"),
+      ]);
+      const vistas = new Set();
+      const total = [...emAndamento, ...aguardando].reduce((soma, c) => {
+        if (vistas.has(c.id)) return soma; // não conta a mesma conversa duas vezes
+        vistas.add(c.id);
+        return soma + (c.nao_lidas || 0);
+      }, 0);
       const badge = document.querySelector("[data-wpp-nao-lidas-badge]");
       if (badge) {
         badge.hidden = total === 0;
@@ -686,9 +698,9 @@
   function htmlListaConversas(conversas, conversaAtivaId) {
     if (!conversas.length) {
       const msgs = {
-        fila: "A fila está vazia — nenhuma conversa nova aguardando.",
+        fila: "Nada aguardando resposta no momento. 👏",
         todas: "Nenhuma conversa no sistema ainda.",
-        minhas: "Nenhuma conversa atribuída a você ainda.",
+        minhas: "Nenhuma conversa em andamento — as que estão esperando resposta ficam na aba Fila.",
         arquivadas: "Nenhuma conversa arquivada.",
       };
       return `<div class="wpp-lista-vazia"><div class="wpp-lista-vazia-icone">📭</div><p class="texto-suave">${msgs[state.escopoConversas]}</p></div>`;
@@ -872,12 +884,12 @@
   function htmlAbasConversas() {
     const usuario = state.usuarioAtual;
     const abas = [
-      { chave: "minhas", label: "Minhas" },
-      { chave: "fila", label: "Fila" },
+      { chave: "minhas", label: "Minhas", dica: "Conversas em andamento — você já respondeu, aguardando o cliente" },
+      { chave: "fila", label: "Fila", dica: "Aguardando resposta sua — inclui as ainda sem dono do seu setor" },
     ];
     if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
     abas.push({ chave: "arquivadas", label: "Arquivadas" });
-    return `<div class="wpp-abas">${abas.map((a) => `<button type="button" class="wpp-aba ${state.escopoConversas === a.chave ? "ativa" : ""}" data-acao="trocar-escopo-conversas" data-escopo="${a.chave}">${a.label}</button>`).join("")}</div>`;
+    return `<div class="wpp-abas">${abas.map((a) => `<button type="button" class="wpp-aba ${state.escopoConversas === a.chave ? "ativa" : ""}" data-acao="trocar-escopo-conversas" data-escopo="${a.chave}"${a.dica ? ` title="${escapeHtml(a.dica)}"` : ""}>${a.label}</button>`).join("")}</div>`;
   }
 
   function _queryConversas() {

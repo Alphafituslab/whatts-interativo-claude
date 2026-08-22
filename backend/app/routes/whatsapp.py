@@ -220,6 +220,15 @@ def _params_visivel(usuario):
     return [usuario["id"], usuario["setor"]]
 
 
+# Direção da última mensagem da conversa: 'entrada' = o cliente falou por
+# último (está esperando resposta), 'saida' = nós falamos por último.
+# É o que separa a aba "Fila" (aguardando) da "Minhas" (em andamento).
+_SQL_ULTIMA_DIRECAO = (
+    "(SELECT m.direcao FROM whatsapp_mensagens m WHERE m.conversa_id = c.id "
+    "AND m.excluida_em IS NULL ORDER BY m.criado_em DESC, m.id DESC LIMIT 1)"
+)
+
+
 def _pode_agir(usuario, conversa):
     """Responder/fechar/encaminhar. Uma conversa da fila (sem dono ainda)
     pode ser respondida por quem é do setor dela — a primeira resposta
@@ -247,17 +256,24 @@ def listar_conversas():
         LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id
     """
     if escopo == "fila":
-        condicoes, params = ["c.atribuida_usuario_id IS NULL"], []
-        if not usuario["admin"]:
-            # Usuário comum só enxerga na fila o que é do setor dele.
-            condicoes.append("c.menu_setor IS NOT NULL AND c.menu_setor = ?")
-            params.append(usuario["setor"])
+        # "Fila" = aguardando alguma resposta nossa: as minhas em que o
+        # cliente falou por último, mais as do meu setor que ninguém
+        # assumiu ainda. Admin vê todas as que estão nesse estado.
+        if usuario["admin"]:
+            condicoes, params = [], []
+        else:
+            condicoes = [_SQL_VISIVEL_NAO_ADMIN]
+            params = _params_visivel(usuario)
+        condicoes.append(f"({_SQL_ULTIMA_DIRECAO} IS NULL OR {_SQL_ULTIMA_DIRECAO} = 'entrada')")
     elif escopo == "todas":
         if not usuario["admin"]:
             raise ApiError("Só um administrador pode ver todas as conversas.", status=403, codigo="sem_permissao")
         condicoes, params = [], []
     else:
-        condicoes, params = ["c.atribuida_usuario_id = ?"], [usuario["id"]]
+        # "Minhas" = as que já estão em andamento comigo (a última
+        # mensagem foi minha; a bola está com o cliente).
+        condicoes = ["c.atribuida_usuario_id = ?", f"{_SQL_ULTIMA_DIRECAO} = 'saida'"]
+        params = [usuario["id"]]
     condicoes.append("ct.empresa_id = ?")
     params.append(g.empresa_id)
 
