@@ -242,7 +242,7 @@
       <div class="layout">
         <div class="fundo-menu-mobile" data-acao="alternar-menu-mobile"></div>
         <aside class="barra-lateral">
-          <div class="marca"><span class="marca-icone">💬</span> Whatts Inbox</div>
+          <div class="marca"><img class="marca-icone marca-logo" src="${state.logoUrl || "/static/img/logo_alphafitus.png"}" alt="" data-wpp-logo> Whatts Inbox</div>
           <div class="wpp-status-linha" data-wpp-status-linha>
             <span class="wpp-status-bolinha wpp-status-desconhecido" data-wpp-status-bolinha></span>
             <span data-wpp-status-texto>Verificando…</span>
