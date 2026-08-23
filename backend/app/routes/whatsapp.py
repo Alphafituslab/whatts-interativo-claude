@@ -161,10 +161,25 @@ def desconectar():
 # CONVERSAS E MENSAGENS — visibilidade por atribuição (ver nota do
 # topo do arquivo): dono da conversa, ou admin, ou (só leitura) fila.
 # ============================================================
+def _apelidos_contatos():
+    """Apelidos privados de contato do usuário logado. Carregado uma vez
+    por requisição — uma lista de 300 conversas usa o mesmo mapa, não
+    adianta consultar o banco pra cada linha."""
+    if not hasattr(g, "_cache_apelidos_contatos"):
+        g._cache_apelidos_contatos = whatsapp_service.obter_apelidos_contatos(get_db(), g.usuario_atual["id"])
+    return g._cache_apelidos_contatos
+
+
 def _conversa_para_json(row, tags=None):
     d = dict(row)
     d["nao_lidas"] = int(d.get("nao_lidas") or 0)
     d["tags"] = tags or []
+    # Nome que ESTE usuário deu pro contato ganha da versão compartilhada
+    # (o nome de cadastro segue guardado, só não é o que ele vê).
+    apelido = _apelidos_contatos().get(d.get("contato_id"))
+    if apelido:
+        d["contato_nome_real"] = d.get("contato_nome")
+        d["contato_nome"] = apelido
     if d.get("atribuida_usuario_id"):
         d["atribuida_usuario_online"] = whatsapp_service.usuario_esta_online(
             d.pop("_u_ultimo_acesso", None), d.pop("_u_offline_forcado", 0)
@@ -351,7 +366,30 @@ def listar_contatos():
         ).fetchall()
     else:
         rows = conn.execute("SELECT id, nome, telefone, foto_url FROM whatsapp_contatos WHERE empresa_id = ? ORDER BY nome LIMIT 500", (g.empresa_id,)).fetchall()
-    return jsonify([dict(r) for r in rows])
+    apelidos = _apelidos_contatos()
+    contatos = []
+    for r in rows:
+        d = dict(r)
+        if apelidos.get(d["id"]):
+            d["nome"] = apelidos[d["id"]]
+        contatos.append(d)
+    return jsonify(contatos)
+
+
+@bp.put("/contatos/<int:contato_id>/apelido")
+@requires_auth
+def definir_apelido_contato(contato_id):
+    """Nome que só este usuário vê pra esse contato. Em branco, volta pro
+    nome de cadastro."""
+    conn = get_db()
+    existe = conn.execute(
+        "SELECT 1 FROM whatsapp_contatos WHERE id = ? AND empresa_id = ?", (contato_id, g.empresa_id)
+    ).fetchone()
+    if existe is None:
+        raise ApiError("Contato não encontrado.", status=404, codigo="nao_encontrado")
+    dados = request.get_json(silent=True) or {}
+    whatsapp_service.definir_apelido_contato(conn, g.usuario_atual["id"], contato_id, dados.get("apelido"))
+    return jsonify({"ok": True})
 
 
 @bp.post("/contatos")

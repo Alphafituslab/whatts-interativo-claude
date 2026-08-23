@@ -841,7 +841,7 @@
           <button type="button" class="wpp-avatar-atualizar" data-acao="atualizar-foto-contato" data-id="${conversa.id}" title="Atualizar foto do contato">🔄</button>
         </span>
         <div style="flex:1; min-width:0;">
-          <div class="wpp-chat-nome">${escapeHtml(nome)} <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-telefone="${escapeHtml(conversa.telefone)}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Renomear contato">✏️</button></div>
+          <div class="wpp-chat-nome">${escapeHtml(nome)} <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Trocar o nome deste contato (só você vê)">✏️</button></div>
           <div class="texto-suave wpp-chat-telefone">${escapeHtml(conversa.telefone)}${conversa.menu_setor ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
         </div>
         <div class="wpp-chat-acoes">
@@ -1430,12 +1430,12 @@
       </form>`);
   }
 
-  function modalRenomearContato(telefone, nomeAtual) {
+  function modalRenomearContato(contatoId, nomeAtual) {
     abrirModal(`
-      <h3 style="margin-top:0;">Renomear contato</h3>
-      <form data-form="renomear-contato">
-        <input type="hidden" name="telefone" value="${escapeHtml(telefone)}">
-        <div class="campo"><label>Nome</label><input name="nome" value="${escapeHtml(nomeAtual)}" autofocus required></div>
+      <h3 style="margin-top:0;">Nome do contato</h3>
+      <p class="dica">Esse nome é <strong>só seu</strong> — os outros atendentes continuam vendo o nome original. Deixe em branco pra voltar ao nome de cadastro.</p>
+      <form data-form="renomear-contato" data-contato-id="${contatoId}">
+        <div class="campo"><label>Nome</label><input name="nome" value="${escapeHtml(nomeAtual)}" autofocus></div>
         <div class="rodape-modal">
           <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
           <button type="submit" class="botao">Salvar</button>
@@ -2583,7 +2583,7 @@
         return renderWhatsappConfiguracao();
       }
       case "renomear-contato": {
-        modalRenomearContato(alvo.dataset.telefone, alvo.dataset.nome);
+        modalRenomearContato(Number(alvo.dataset.contatoId), alvo.dataset.nome);
         return;
       }
       case "resetar-dashboard": {
@@ -2977,9 +2977,10 @@
         return renderWhatsappConfiguracao();
       }
       case "renomear-contato": {
-        await chamarApi("/whatsapp/contatos", { method: "POST", body: { telefone: dados.get("telefone"), nome: dados.get("nome") || "" } });
+        const contatoId = Number(form.dataset.contatoId);
+        await chamarApi(`/whatsapp/contatos/${contatoId}/apelido`, { method: "PUT", body: { apelido: dados.get("nome") || "" } });
         fecharModais();
-        definirFlash("ok", "Contato renomeado.");
+        definirFlash("ok", dados.get("nome") ? "Nome salvo (só você vê)." : "Voltou ao nome de cadastro.");
         return renderWhatsapp(Number(location.hash.split("/")[2]) || null);
       }
       case "definir-apelido-interno": {

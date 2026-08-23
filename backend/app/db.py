@@ -32,6 +32,7 @@ SCHEMA_FILES = [
     "schema_017_setores_configuraveis.sql",
     "schema_018_apelidos.sql",
     "schema_019_dashboard_reset.sql",
+    "schema_020_apelidos_contatos.sql",
 ]
 
 

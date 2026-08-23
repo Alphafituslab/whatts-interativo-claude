@@ -1129,6 +1129,41 @@ def obter_ou_criar_contato(conn, empresa_id: int, telefone: str, nome: str = Non
     return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
+def obter_apelidos_contatos(conn, usuario_id: int):
+    """Apelidos privados que ESTE usuário deu pros contatos — {contato_id:
+    apelido}. Ninguém mais vê esses nomes."""
+    rows = conn.execute(
+        "SELECT contato_id, apelido FROM whatsapp_contatos_apelidos WHERE usuario_id = ?", (usuario_id,)
+    ).fetchall()
+    return {r["contato_id"]: r["apelido"] for r in rows}
+
+
+def definir_apelido_contato(conn, usuario_id: int, contato_id: int, apelido: str):
+    """Apelido em branco remove o personalizado e volta a mostrar o nome
+    de cadastro do contato."""
+    apelido = (apelido or "").strip() or None
+    if apelido is None:
+        conn.execute(
+            "DELETE FROM whatsapp_contatos_apelidos WHERE usuario_id = ? AND contato_id = ?",
+            (usuario_id, contato_id),
+        )
+        return
+    existe = conn.execute(
+        "SELECT 1 FROM whatsapp_contatos_apelidos WHERE usuario_id = ? AND contato_id = ?",
+        (usuario_id, contato_id),
+    ).fetchone()
+    if existe:
+        conn.execute(
+            "UPDATE whatsapp_contatos_apelidos SET apelido = ?, atualizado_em = ? WHERE usuario_id = ? AND contato_id = ?",
+            (apelido, _now_iso(), usuario_id, contato_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO whatsapp_contatos_apelidos (usuario_id, contato_id, apelido, atualizado_em) VALUES (?, ?, ?, ?)",
+            (usuario_id, contato_id, apelido, _now_iso()),
+        )
+
+
 def salvar_contato_manual(conn, empresa_id: int, telefone_bruto: str, nome: str = None):
     """Diferente de obter_ou_criar_contato (que só preenche o nome se
     ainda estiver vazio, pra não sobrescrever à toa durante o fluxo
