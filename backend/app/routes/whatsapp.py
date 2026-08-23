@@ -1159,6 +1159,74 @@ def enviar_anexo(conversa_id):
     return jsonify(mensagem), 201
 
 
+PASTA_MARCA = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "marca")
+EXTENSOES_LOGO = {"jpg", "jpeg", "png", "gif", "webp", "svg"}
+MAX_LOGO_MB = 3
+
+
+@bp.post("/configuracao/logo")
+@requires_admin
+def enviar_logo():
+    """Troca a logo que aparece na tela de login. Guardada em data/ (não
+    junto do código) pra não ser apagada nas atualizações do sistema."""
+    arquivo = request.files.get("logo")
+    if not arquivo or not arquivo.filename:
+        raise ApiError("Nenhuma imagem enviada.", status=400)
+    ext = arquivo.filename.rsplit(".", 1)[-1].lower() if "." in arquivo.filename else ""
+    if ext not in EXTENSOES_LOGO:
+        raise ApiError("Formato não suportado. Use png, jpg, gif, webp ou svg.", status=400)
+    dados_bytes = arquivo.read()
+    if len(dados_bytes) > MAX_LOGO_MB * 1024 * 1024:
+        raise ApiError(f"Imagem maior que o limite de {MAX_LOGO_MB}MB.", status=400)
+
+    conn = get_db()
+    anterior = whatsapp_service.obter_configuracao(conn, g.empresa_id).get("logo_url")
+
+    os.makedirs(PASTA_MARCA, exist_ok=True)
+    nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
+    with open(os.path.join(PASTA_MARCA, nome_seguro), "wb") as f:
+        f.write(dados_bytes)
+    url = f"/api/v1/whatsapp/marca/{nome_seguro}"
+    conn.execute("UPDATE configuracoes_whatsapp SET logo_url = ? WHERE empresa_id = ?", (url, g.empresa_id))
+
+    if anterior:  # não deixa lixo acumulando a cada troca
+        antigo = os.path.join(PASTA_MARCA, os.path.basename(anterior))
+        if os.path.isfile(antigo):
+            try:
+                os.remove(antigo)
+            except OSError:
+                pass
+    return jsonify({"logo_url": url})
+
+
+@bp.delete("/configuracao/logo")
+@requires_admin
+def remover_logo():
+    """Volta pra logo padrão do sistema."""
+    conn = get_db()
+    atual = whatsapp_service.obter_configuracao(conn, g.empresa_id).get("logo_url")
+    conn.execute("UPDATE configuracoes_whatsapp SET logo_url = NULL WHERE empresa_id = ?", (g.empresa_id,))
+    if atual:
+        caminho = os.path.join(PASTA_MARCA, os.path.basename(atual))
+        if os.path.isfile(caminho):
+            try:
+                os.remove(caminho)
+            except OSError:
+                pass
+    return jsonify({"ok": True})
+
+
+@bp.get("/marca/<path:nome_arquivo>")
+def baixar_logo(nome_arquivo):
+    """Sem @requires_auth de propósito: a logo aparece na tela de login,
+    ou seja, antes de existir sessão. É a identidade visual da empresa,
+    não é dado sigiloso."""
+    resp = send_from_directory(PASTA_MARCA, nome_arquivo)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    return resp
+
+
 @bp.get("/uploads/<path:nome_arquivo>")
 def baixar_anexo(nome_arquivo):
     """Deliberadamente SEM @requires_auth: isto é servido por <img src>

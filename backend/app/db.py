@@ -33,6 +33,7 @@ SCHEMA_FILES = [
     "schema_018_apelidos.sql",
     "schema_019_dashboard_reset.sql",
     "schema_020_apelidos_contatos.sql",
+    "schema_021_logo_empresa.sql",
 ]
 
 

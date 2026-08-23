@@ -244,11 +244,16 @@ def editar_perfil():
 
 
 @bp.post("/foto")
+@bp.post("/<int:alvo_id>/foto")
 @requires_auth
-def enviar_foto():
-    """Cada usuário troca a própria foto de perfil (admin não define pra
-    outro usuário — decisão pessoal de cada um, como no WhatsApp)."""
+def enviar_foto(alvo_id=None):
+    """Sem id na URL: a pessoa troca a PRÓPRIA foto. Com id: um admin
+    troca a de outra pessoa (ex.: padronizar as fotos da equipe, ou
+    ajudar quem não sabe fazer). Usuário comum só mexe na própria."""
     usuario = g.usuario_atual
+    if alvo_id is not None and alvo_id != usuario["id"] and not usuario["admin"]:
+        raise ApiError("Só um administrador pode trocar a foto de outra pessoa.", status=403, codigo="sem_permissao")
+    destino_id = alvo_id or usuario["id"]
     arquivo = request.files.get("foto")
     if not arquivo or not arquivo.filename:
         raise ApiError("Nenhuma imagem enviada.", status=400)
@@ -261,14 +266,18 @@ def enviar_foto():
         raise ApiError(f"Imagem maior que o limite de {MAX_FOTO_MB}MB.", status=400)
 
     conn = get_db()
-    anterior = conn.execute("SELECT foto_perfil FROM usuarios WHERE id = ?", (usuario["id"],)).fetchone()
+    anterior = conn.execute(
+        "SELECT foto_perfil FROM usuarios WHERE id = ? AND empresa_id = ?", (destino_id, g.empresa_id)
+    ).fetchone()
+    if anterior is None:
+        raise ApiError("Usuário não encontrado.", status=404, codigo="nao_encontrado")
 
     os.makedirs(PASTA_FOTOS, exist_ok=True)
     nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
     with open(os.path.join(PASTA_FOTOS, nome_seguro), "wb") as f:
         f.write(dados_bytes)
     url_foto = f"/api/v1/usuarios/fotos/{nome_seguro}"
-    conn.execute("UPDATE usuarios SET foto_perfil = ? WHERE id = ?", (url_foto, usuario["id"]))
+    conn.execute("UPDATE usuarios SET foto_perfil = ? WHERE id = ?", (url_foto, destino_id))
 
     if anterior and anterior["foto_perfil"]:
         caminho_antigo = os.path.join(PASTA_FOTOS, os.path.basename(anterior["foto_perfil"]))

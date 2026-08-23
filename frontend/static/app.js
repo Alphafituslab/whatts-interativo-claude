@@ -278,6 +278,18 @@
 
   function definirFlash(tipo, texto) { state.flash = { tipo, texto }; }
 
+  // A logo da empresa e trocavel em Configuracao. Buscada sem token
+  // porque a tela de login aparece antes de existir sessao; se falhar,
+  // fica a logo padrao que ja esta no HTML.
+  async function carregarLogo() {
+    try {
+      const r = await fetch(`${API}/marca`).then((x) => x.json());
+      if (!r.logo_url) return;
+      state.logoUrl = r.logo_url;
+      document.querySelectorAll("[data-wpp-logo]").forEach((img) => { img.src = r.logo_url; });
+    } catch (e) { /* fica a padrao */ }
+  }
+
   document.addEventListener("click", async (e) => {
     const alvo = e.target.closest("[data-acao]");
     if (!alvo) return;
@@ -413,7 +425,7 @@
     app.innerHTML = `
       <div class="tela-login">
         <div class="cartao-login">
-          <div class="logo-3d-wrap"><img class="logo-3d" src="/static/img/logo_alphafitus.png" alt="Alphafitus"></div>
+          <div class="logo-3d-wrap"><img class="logo-3d" src="${state.logoUrl || "/static/img/logo_alphafitus.png"}" alt="" data-wpp-logo></div>
           <h1>Whatts Inbox</h1>
           <p class="subtitulo">Caixa de entrada compartilhada de WhatsApp</p>
           ${flashHtml}
@@ -1526,6 +1538,19 @@
        <div class="cartao" data-wpp-secao-conexao>${htmlSecaoConexao(config, webhookUrl)}</div>
 
        <div class="cartao">
+         <h3 style="margin-top:0;">Logo da empresa</h3>
+         <p class="dica">Aparece na tela de login. Use png, jpg, gif, webp ou svg (até 3MB). Fundo transparente costuma ficar melhor.</p>
+         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+           <img src="${config.logo_url || "/static/img/logo_alphafitus.png"}" alt="" style="max-width:150px; max-height:80px; object-fit:contain; background:var(--superficie-2); border-radius:10px; padding:8px;">
+           <form data-form="enviar-logo" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+             <input type="file" name="logo" accept="image/*" required>
+             <button type="submit" class="botao secundario">Enviar</button>
+             ${config.logo_url ? '<button type="button" class="botao-icone" data-acao="remover-logo" title="Voltar pra logo padrão">🗑️</button>' : ""}
+           </form>
+         </div>
+       </div>
+
+       <div class="cartao">
          <h3 style="margin-top:0;">Setores</h3>
          <p class="dica">Pra onde o cliente é direcionado no menu automático do WhatsApp, e o que cada atendente escolhe como área dele. Crie, renomeie ou exclua livremente — a ordem abaixo é a mesma ordem dos números que o cliente digita no menu.</p>
          <ul style="list-style:none; padding:0; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
@@ -2069,7 +2094,7 @@
     const [usuarios, setores] = await Promise.all([chamarApi("/usuarios"), chamarApi("/usuarios/setores")]);
     const linhas = usuarios.map((u) => `
       <tr>
-        <td style="position:relative;">${htmlAvatar(u, 28)}<span class="wpp-online-bolinha ${u.online ? "wpp-online-sim" : "wpp-online-nao"}" title="${u.online ? "Online agora" : "Offline"}"></span></td>
+        <td style="position:relative;"><button type="button" class="wpp-avatar-botao" data-acao="abrir-seletor-foto-usuario" data-id="${u.id}" title="Trocar a foto de ${escapeHtml(u.nome)}">${htmlAvatar(u, 28)}</button><span class="wpp-online-bolinha ${u.online ? "wpp-online-sim" : "wpp-online-nao"}" title="${u.online ? "Online agora" : "Offline"}"></span></td>
         <td>${escapeHtml(u.nome)}</td>
         <td class="texto-suave">${escapeHtml(u.email)}</td>
         <td class="texto-suave">${escapeHtml(u.setor || "—")}</td>
@@ -2090,6 +2115,7 @@
        <div class="cartao">
          <div class="barra-acoes" style="margin-top:0; margin-bottom:14px;">
            <button class="botao" data-acao="novo-usuario">+ Novo usuário</button>
+           <input type="file" data-wpp-foto-usuario data-acao-change="enviar-foto-usuario" accept="image/*" hidden>
          </div>
          <table>
            <thead><tr><th></th><th>Nome</th><th>Email</th><th>Setor</th><th>Perfil</th><th>Status</th><th>Horário permitido</th><th></th></tr></thead>
@@ -2603,6 +2629,36 @@
         definirFlash("ok", "Dashboard resetado.");
         return renderDashboard();
       }
+      case "abrir-seletor-foto-usuario": {
+        const entrada = document.querySelector("[data-wpp-foto-usuario]");
+        entrada.dataset.alvoId = alvo.dataset.id; // guarda de quem e a foto ate o arquivo ser escolhido
+        entrada.click();
+        return;
+      }
+      case "enviar-foto-usuario": {
+        const arquivo = alvo.files[0];
+        if (!arquivo) return;
+        const alvoId = alvo.dataset.alvoId;
+        const fd = new FormData();
+        fd.append("foto", arquivo);
+        await fetch(`${API}/usuarios/${alvoId}/foto`, {
+          method: "POST",
+          headers: { Authorization: "Bearer " + state.accessToken },
+          body: fd,
+        }).then(async (x) => {
+          if (!x.ok) { const c = await x.json().catch(() => ({})); throw new Error(c.mensagem || `Erro ${x.status}`); }
+        });
+        alvo.value = "";
+        definirFlash("ok", "Foto atualizada.");
+        return renderUsuarios();
+      }
+      case "remover-logo": {
+        if (!confirm("Voltar pra logo padrão do sistema?")) return;
+        await chamarApi("/whatsapp/configuracao/logo", { method: "DELETE" });
+        state.logoUrl = null;
+        definirFlash("ok", "Logo removida.");
+        return renderWhatsappConfiguracao();
+      }
       case "fazer-backup-agora": {
         await chamarApi("/sistema/backups", { method: "POST" });
         definirFlash("ok", "Backup criado.");
@@ -2782,6 +2838,27 @@
         definirFlash("ok", "Contato salvo.");
         fecharModais();
         return modalContatos();
+      }
+      case "enviar-logo": {
+        const arquivo = form.querySelector('[name="logo"]').files[0];
+        if (!arquivo) return;
+        const fd = new FormData();
+        fd.append("logo", arquivo);
+        const botao = form.querySelector('button[type="submit"]');
+        botao.disabled = true;
+        try {
+          const r = await fetch(`${API}/whatsapp/configuracao/logo`, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + state.accessToken },
+            body: fd,
+          }).then(async (x) => {
+            if (!x.ok) { const c = await x.json().catch(() => ({})); throw new Error(c.mensagem || `Erro ${x.status}`); }
+            return x.json();
+          });
+          state.logoUrl = r.logo_url;
+          definirFlash("ok", "Logo atualizada.");
+          return renderWhatsappConfiguracao();
+        } finally { botao.disabled = false; }
       }
       case "importar-backup": {
         const arquivo = form.querySelector('[name="arquivo"]').files[0];
@@ -3082,5 +3159,6 @@
     state.flash = { tipo: "ok", texto: flashPosReload };
     localStorage.removeItem("whatts_flash_pos_reload");
   }
+  carregarLogo();
   montarRota();
 })();

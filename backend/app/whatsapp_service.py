@@ -141,6 +141,7 @@ def obter_configuracao(conn, empresa_id: int):
             "saudacao_mensagem": None,
             "sla_minutos_alerta": 15,
             "dashboard_reset_em": None,
+            "logo_url": None,
         }
     return dict(row)
 

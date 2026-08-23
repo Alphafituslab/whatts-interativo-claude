@@ -73,6 +73,22 @@ def create_app(test_config: dict = None) -> Flask:
     def versao():
         return jsonify({"versao": VERSAO_SERVIDOR})
 
+    @app.get("/api/v1/marca")
+    def marca():
+        """Qual logo mostrar na tela de login. Sem autenticação porque a
+        tela de login vem ANTES de existir sessão — e logo de empresa não
+        é informação sigilosa. Usa a primeira empresa configurada: hoje
+        cada instalação atende uma empresa; quando houver mais de uma no
+        mesmo servidor, isso precisa passar a olhar o domínio de acesso."""
+        from .context import get_db
+        try:
+            row = get_db().execute(
+                "SELECT logo_url FROM configuracoes_whatsapp WHERE logo_url IS NOT NULL ORDER BY empresa_id LIMIT 1"
+            ).fetchone()
+            return jsonify({"logo_url": row["logo_url"] if row else None})
+        except Exception:
+            return jsonify({"logo_url": None})
+
     @app.get("/")
     def frontend_index():
         return send_from_directory(FRONTEND_DIR, "index.html")
