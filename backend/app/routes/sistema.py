@@ -1,17 +1,22 @@
-"""Rotas administrativas de sistema: backup manual, listagem, download,
-restauração e importação de backups."""
+"""Backup e restauração do sistema.
+
+TODAS as rotas aqui são restritas ao dono da plataforma
+(requires_super_admin), não ao admin de cada empresa: o backup é do
+banco inteiro, com os dados de todas as empresas juntos. Um admin de
+empresa com acesso a isto conseguiria baixar os dados das outras
+empresas, ou restaurar um backup antigo por cima do trabalho delas."""
 import os
 
 from flask import Blueprint, jsonify, request, send_file
 
 from .. import backup
-from ..context import ApiError, requires_admin
+from ..context import ApiError, requires_super_admin
 
 bp = Blueprint("sistema", __name__, url_prefix="/api/v1/sistema")
 
 
 @bp.get("/backups")
-@requires_admin
+@requires_super_admin
 def listar_backups():
     pasta = backup._pasta_backups()
     entradas = sorted(
@@ -22,14 +27,14 @@ def listar_backups():
 
 
 @bp.post("/backups")
-@requires_admin
+@requires_super_admin
 def fazer_backup_agora():
     caminho = backup.executar_backup()
     return jsonify({"ok": True, "pasta": os.path.basename(caminho)}), 201
 
 
 @bp.get("/backups/<nome>/download")
-@requires_admin
+@requires_super_admin
 def baixar_backup(nome):
     try:
         buffer = backup.zipar_backup(nome)
@@ -41,7 +46,7 @@ def baixar_backup(nome):
 
 
 @bp.post("/backups/<nome>/restaurar")
-@requires_admin
+@requires_super_admin
 def restaurar_backup(nome):
     """Sobrescreve o banco e os arquivos ATUAIS pelo conteúdo desse
     backup — ação destrutiva (ver backup.restaurar_backup: faz um backup
@@ -55,7 +60,7 @@ def restaurar_backup(nome):
 
 
 @bp.post("/backups/importar")
-@requires_admin
+@requires_super_admin
 def importar_backup():
     """Restaura a partir de um .zip enviado (baixado daqui antes, ou
     trazido de outra instalação) — mesmo aviso de ação destrutiva da

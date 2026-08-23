@@ -116,3 +116,22 @@ def requires_admin(view_func):
         return view_func(*args, **kwargs)
 
     return wrapper
+
+
+def requires_super_admin(view_func):
+    """Ações que atingem o sistema INTEIRO, não só uma empresa — hoje,
+    backup e restauração (o backup é do banco todo, com os dados de
+    todas as empresas juntos). Um admin comum é dono da SUA empresa; se
+    ele pudesse baixar/restaurar o backup, alcançaria os dados das
+    outras empresas e poderia desfazer o trabalho delas."""
+    import functools
+
+    @functools.wraps(view_func)
+    def wrapper(*args, **kwargs):
+        usuario = get_current_user()
+        eh_super = "super_admin" in usuario.keys() and usuario["super_admin"]
+        if not eh_super:
+            raise ForbiddenError("Esta ação é restrita a quem administra a plataforma.")
+        return view_func(*args, **kwargs)
+
+    return wrapper

@@ -74,6 +74,10 @@ def _usuario_publico(u):
         "id": u["id"], "nome": u["nome"], "email": u["email"], "admin": bool(u["admin"]),
         "foto_perfil": u["foto_perfil"] if "foto_perfil" in u.keys() else None,
         "totp_ativado": bool(u["totp_ativado"]) if "totp_ativado" in u.keys() else False,
+        # Só quem opera a plataforma vê a seção de backup (ver
+        # requires_super_admin) — é informativo pro frontend esconder a
+        # tela; quem barra de verdade é o servidor.
+        "super_admin": bool(u["super_admin"]) if "super_admin" in u.keys() else False,
     }
 
 

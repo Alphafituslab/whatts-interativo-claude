@@ -1500,10 +1500,14 @@
 
   async function renderWhatsappConfiguracao() {
     app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    // Backup é do banco inteiro (todas as empresas), então só quem opera
+    // a plataforma tem acesso — o servidor barra de qualquer jeito, aqui
+    // é só pra não mostrar uma seção que daria erro ao usar.
+    const ehSuperAdmin = !!state.usuarioAtual.super_admin;
     const [{ config, webhookUrl }, setoresDetalhado, backups] = await Promise.all([
       buscarConfigECriarWebhookUrl(),
       chamarApi("/usuarios/setores/detalhado"),
-      chamarApi("/sistema/backups"),
+      ehSuperAdmin ? chamarApi("/sistema/backups") : Promise.resolve([]),
     ]);
     const setoresAtuais = setoresDetalhado.map((s) => s.nome);
 
@@ -1602,6 +1606,7 @@
          </form>
        </div>
 
+       ${!ehSuperAdmin ? "" : `
        <div class="cartao">
          <h3 style="margin-top:0;">Backup</h3>
          <p class="dica">Backup automático todo dia, guardando os últimos 14 dias. Baixe uma cópia de vez em quando pra guardar fora deste computador — se algo acontecer, é só importar de volta.</p>
@@ -1621,7 +1626,7 @@
            <button type="submit" class="botao secundario">Importar e restaurar</button>
          </form>
          <p class="dica" style="margin-top:8px;">Restaurar (de qualquer uma das duas formas) substitui todos os dados atuais pelo estado salvo — um backup de segurança do momento atual é feito automaticamente antes, então dá pra desfazer se for engano.</p>
-       </div>`,
+       </div>`}`,
       "configuracao"
     );
 
