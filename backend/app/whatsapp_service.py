@@ -1798,19 +1798,54 @@ def excluir_setor(conn, empresa_id: int, setor_id: int) -> bool:
     return cur.rowcount > 0
 
 
-def _texto_menu_setores(config=None, setores=None):
+def setores_com_alguem_online(conn, empresa_id: int):
+    """Quais setores têm pelo menos uma pessoa disponível agora. Uma
+    consulta só (em vez de uma por setor) porque isso roda a cada menu
+    enviado."""
+    limite = (datetime.datetime.utcnow() - datetime.timedelta(minutes=MINUTOS_ONLINE)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    rows = conn.execute(
+        """
+        SELECT DISTINCT setor FROM usuarios
+        WHERE empresa_id = ? AND setor IS NOT NULL AND setor != ''
+          AND ativo = 1 AND ultimo_acesso >= ? AND offline_forcado = 0
+        """,
+        (empresa_id, limite),
+    ).fetchall()
+    return {r["setor"] for r in rows}
+
+
+def _rodape_disponibilidade(setores, setores_online):
+    """Avisa, junto do menu, quem está atendendo neste instante — assim o
+    cliente não escolhe um setor vazio pra só depois descobrir que
+    ninguém vai responder. Se não há ninguém em lugar nenhum, avisa de
+    uma vez em vez de deixar ele escolher à toa."""
+    if not setores:
+        return ""
+    disponiveis = [s for s in setores if s in (setores_online or set())]
+    if not disponiveis:
+        return "\n\n🌙 _No momento não há atendentes online. Pode deixar sua mensagem que retornamos assim que possível._"
+    if len(disponiveis) == len(setores):
+        return "\n\n🟢 _Todos os setores estão atendendo agora._"
+    return "\n\n🟢 *Atendendo agora:* " + ", ".join(disponiveis)
+
+
+def _texto_menu_setores(config=None, setores=None, setores_online=None):
     """Se o admin escreveu uma saudação personalizada em Configuração, ela
     é usada INTEIRA (inclusive a listagem de setores, do jeito que ele
     escreveu — números, nomes, tudo) — não gruda mais nenhuma lista
     automática depois. Sem isso não teria como deixar o texto do jeito
     que o admin realmente quer (pontuação, nomes por extenso etc.). Sem
     personalização nenhuma, usa o padrão com a lista gerada automática a
-    partir dos setores cadastrados."""
+    partir dos setores cadastrados.
+
+    O aviso de disponibilidade vai no fim nos dois casos — é informação
+    que muda a cada minuto, então não dá pra deixar escrita à mão."""
     saudacao = (config or {}).get("saudacao_mensagem")
+    rodape = _rodape_disponibilidade(setores, setores_online)
     if saudacao:
-        return saudacao
+        return saudacao + rodape
     linhas = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(setores or []))
-    return f"{SAUDACAO_PADRAO}\n\n{linhas}"
+    return f"{SAUDACAO_PADRAO}\n\n{linhas}{rodape}"
 
 
 def usuario_esta_online(ultimo_acesso, offline_forcado=0) -> bool:
@@ -1850,7 +1885,8 @@ def _iniciar_menu_setor(conn, empresa_id: int, conversa_id: int, telefone: str):
     )
     try:
         config = obter_configuracao(conn, empresa_id)
-        enviar_texto(config, telefone, _texto_menu_setores(config, setores))
+        online = setores_com_alguem_online(conn, empresa_id)
+        enviar_texto(config, telefone, _texto_menu_setores(config, setores, online))
     except ApiError:
         pass
 
@@ -1871,7 +1907,20 @@ def _rotear_para_setor(conn, empresa_id, conversa, setor, _responder):
             "UPDATE whatsapp_conversas SET menu_estado = 'setor', menu_opcoes = ?, menu_tentativas_invalidas = 0, menu_setor = ? WHERE id = ?",
             (json.dumps(setores), setor, conversa["id"]),
         )
-        _responder(f"No momento não há ninguém disponível em {setor}. Deixe sua mensagem que retornaremos assim que possível, ou digite outro número pra tentar outro setor. 🙏")
+        # Em vez de só mandar "tente outro", diz QUAIS estão atendendo —
+        # senão o cliente fica chutando número até achar um com gente.
+        disponiveis = [s for s in setores if s in setores_com_alguem_online(conn, empresa_id)]
+        if disponiveis:
+            sugestao = (
+                f"\n\nSe preferir falar com alguém agora, estes setores estão atendendo: "
+                f"*{', '.join(disponiveis)}* — é só digitar o número correspondente."
+            )
+        else:
+            sugestao = ""
+        _responder(
+            f"No momento não há ninguém disponível em *{setor}*. "
+            f"Sua mensagem já foi registrada e assim que um consultor estiver disponível você será atendido. 🙏{sugestao}"
+        )
         return {"processado": True, "tipo": "menu_setor_sem_online", "conversa_id": conversa["id"]}
 
     if len(online) == 1:
