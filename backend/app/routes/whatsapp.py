@@ -1169,8 +1169,19 @@ def baixar_anexo(nome_arquivo):
     arquivo: cada upload ganha um prefixo aleatório de 16 hex (64 bits,
     ver secrets.token_hex(8) em enviar_anexo) — impossível de adivinhar
     e nunca listado em lugar nenhum, só aparece dentro de uma mensagem
-    que a pessoa já tinha permissão de ver."""
-    return send_from_directory(PASTA_UPLOADS, nome_arquivo)
+    que a pessoa já tinha permissão de ver.
+
+    IMPORTANTE (segurança): só imagem/vídeo/áudio pode abrir dentro da
+    página. Qualquer outro arquivo sai como download forçado. Sem isso,
+    um cliente podia mandar um .html com script dentro pelo WhatsApp; ao
+    clicar no anexo, o navegador executaria esse script NO NOSSO
+    endereço, com acesso à sessão do atendente (roubo de conta). O
+    cabeçalho de sandbox e o nosniff cobrem o resto."""
+    inline = _classificar_tipo(nome_arquivo) in ("imagem", "video", "audio")
+    resp = send_from_directory(PASTA_UPLOADS, nome_arquivo, as_attachment=not inline)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    return resp
 
 
 # ============================================================

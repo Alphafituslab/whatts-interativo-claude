@@ -287,4 +287,11 @@ def baixar_foto(nome_arquivo):
     # que não manda cabeçalho Authorization (mesmo raciocínio do
     # /whatsapp/uploads/<file>: o nome de arquivo com prefixo aleatório
     # de 16 hex já é a proteção contra acesso por adivinhação).
-    return send_from_directory(PASTA_FOTOS, nome_arquivo)
+    # Sandbox + nosniff pelo mesmo motivo do /whatsapp/uploads: mesmo só
+    # aceitando imagem no upload, servir do nosso endereço sem trava
+    # deixaria qualquer arquivo aqui virar script rodando como se fosse
+    # nosso.
+    resp = send_from_directory(PASTA_FOTOS, nome_arquivo)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    return resp

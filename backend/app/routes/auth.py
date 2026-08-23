@@ -3,10 +3,29 @@ import json
 
 from flask import Blueprint, g, jsonify, request
 
-from .. import security, whatsapp_service
+from .. import limite_tentativas, security, whatsapp_service
 from ..context import ApiError, AuthError, get_db, requires_auth
 
 bp = Blueprint("auth", __name__, url_prefix="/api/v1/auth")
+
+
+def _chaves_limite(email):
+    """Conta as tentativas por IP e por conta ao mesmo tempo (ver
+    limite_tentativas). O IP real vem do X-Forwarded-For posto pelo
+    proxy (Caddy) — confiável aqui porque a porta do app não é
+    alcançável de fora, só o proxy fala com ele."""
+    encaminhado = request.headers.get("X-Forwarded-For", "")
+    ip = encaminhado.split(",")[0].strip() if encaminhado else (request.remote_addr or "?")
+    return [f"ip:{ip}", f"conta:{email}"]
+
+
+def _exigir_sem_bloqueio(chaves):
+    espera = limite_tentativas.segundos_restantes(chaves)
+    if espera > 0:
+        raise ApiError(
+            f"Muitas tentativas seguidas. Tente de novo em {max(1, espera // 60)} minuto(s).",
+            status=429, codigo="muitas_tentativas",
+        )
 
 
 def _now_iso():
@@ -34,6 +53,22 @@ def _dentro_do_horario_permitido(horario_permitido_json) -> bool:
     return False
 
 
+# Quanto tempo uma sessão vale sem precisar digitar a senha de novo. 30
+# dias é o equilíbrio comum: ninguém fica relogando toda hora, mas um
+# token que vaze não serve pra sempre.
+SESSAO_VALIDA_DIAS = 30
+
+
+def _sessao_expirada(criado_em) -> bool:
+    if not criado_em:
+        return False
+    try:
+        criada = datetime.datetime.strptime(criado_em, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except (ValueError, TypeError):
+        return False  # formato estranho: não derruba a pessoa por isso
+    return (datetime.datetime.utcnow() - criada).days >= SESSAO_VALIDA_DIAS
+
+
 def _usuario_publico(u):
     return {
         "id": u["id"], "nome": u["nome"], "email": u["email"], "admin": bool(u["admin"]),
@@ -55,12 +90,16 @@ def _verificar_codigo_2fa(conn, usuario, codigo: str) -> bool:
     return False
 
 
-def _emitir_sessao(conn, usuario_id, dispositivo=None):
+def _emitir_sessao(conn, usuario_id, dispositivo=None, criado_em=None):
+    """criado_em preserva a data do login ORIGINAL quando a sessão é
+    renovada. Sem isso o prazo de validade se renovaria junto com o
+    token a cada renovação e a sessão nunca expiraria de verdade — que é
+    justamente o que se quer evitar caso um token vaze."""
     access_token = security.emitir_access_token(usuario_id)
     refresh_token = security.gerar_refresh_token()
     conn.execute(
         "INSERT INTO sessoes (usuario_id, refresh_token_hash, criado_em, dispositivo) VALUES (?, ?, ?, ?)",
-        (usuario_id, security.hash_refresh_token(refresh_token), _now_iso(), dispositivo),
+        (usuario_id, security.hash_refresh_token(refresh_token), criado_em or _now_iso(), dispositivo),
     )
     return access_token, refresh_token
 
@@ -73,9 +112,13 @@ def login():
     if not email or not senha:
         raise ApiError("Informe email e senha.", status=400)
 
+    chaves = _chaves_limite(email)
+    _exigir_sem_bloqueio(chaves)
+
     conn = get_db()
     usuario = conn.execute("SELECT * FROM usuarios WHERE email = ?", (email,)).fetchone()
     if usuario is None or not security.verify_password(senha, usuario["senha_hash"]):
+        limite_tentativas.registrar_falha(chaves)
         raise AuthError("Email ou senha incorretos.")
     if not usuario["ativo"]:
         raise AuthError("Usuário inativo.")
@@ -92,8 +135,12 @@ def login():
             # em vez de um erro genérico.
             return jsonify({"requer_2fa": True})
         if not _verificar_codigo_2fa(conn, usuario, codigo_2fa):
+            # Conta junto com a senha: são só 6 dígitos, sem freio dava
+            # pra varrer todos rapidinho depois de descobrir a senha.
+            limite_tentativas.registrar_falha(chaves)
             raise AuthError("Código de verificação incorreto.")
 
+    limite_tentativas.registrar_sucesso(chaves)
     dispositivo = request.headers.get("User-Agent", "")[:255]
     access_token, refresh_token = _emitir_sessao(conn, usuario["id"], dispositivo)
     whatsapp_service.registrar_atividade(conn, usuario["id"], "login")
@@ -120,6 +167,13 @@ def refresh():
     if sessao is None:
         raise AuthError("Sessão inválida ou encerrada — faça login novamente.")
 
+    # Sessão tem prazo de validade: sem isso, um refresh token que vazasse
+    # daria acesso pra sempre, porque ele só morria se alguém lembrasse de
+    # revogar. Passou do prazo, tem que logar de novo.
+    if _sessao_expirada(sessao["criado_em"]):
+        conn.execute("UPDATE sessoes SET revogado = 1 WHERE id = ?", (sessao["id"],))
+        raise AuthError("Sessão expirada — faça login novamente.")
+
     usuario = conn.execute("SELECT * FROM usuarios WHERE id = ?", (sessao["usuario_id"],)).fetchone()
     if usuario is None or not usuario["ativo"]:
         raise AuthError("Usuário não encontrado ou inativo.")
@@ -127,7 +181,9 @@ def refresh():
     # Rotaciona o refresh token (revoga o antigo, emite um novo) — reduz
     # a janela de uso caso um refresh token antigo tenha vazado.
     conn.execute("UPDATE sessoes SET revogado = 1 WHERE id = ?", (sessao["id"],))
-    access_token, novo_refresh = _emitir_sessao(conn, usuario["id"], sessao["dispositivo"])
+    access_token, novo_refresh = _emitir_sessao(
+        conn, usuario["id"], sessao["dispositivo"], criado_em=sessao["criado_em"]
+    )
     return jsonify({"access_token": access_token, "refresh_token": novo_refresh, "token_type": "Bearer"})
 
 

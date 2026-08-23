@@ -72,9 +72,20 @@
     return CORES_AVATAR[hash % CORES_AVATAR.length];
   }
 
+  // A foto do contato vem de fora (URL devolvida pela Evolution API, que
+  // por sua vez pega no WhatsApp) — ou seja, é dado que não controlamos.
+  // Aceita só http(s) e escapa antes de virar atributo: sem isso, um
+  // valor com aspas conseguiria fechar o src e injetar script na tela do
+  // atendente.
+  function urlImagemSegura(url) {
+    const s = String(url || "").trim();
+    return /^https?:\/\//i.test(s) || s.startsWith("/api/") ? escapeHtml(s) : "";
+  }
+
   function htmlAvatarContato(fotoUrl, nome, telefone, tamanho = 40) {
     const estilo = `width:${tamanho}px;height:${tamanho}px;font-size:${Math.round(tamanho * 0.35)}px;`;
-    if (fotoUrl) return `<img class="wpp-avatar wpp-avatar-foto" style="${estilo}" src="${fotoUrl}" alt="" referrerpolicy="no-referrer">`;
+    const src = urlImagemSegura(fotoUrl);
+    if (src) return `<img class="wpp-avatar wpp-avatar-foto" style="${estilo}" src="${src}" alt="" referrerpolicy="no-referrer">`;
     return `<div class="wpp-avatar" style="${estilo}background:${corAvatar(telefone)};">${escapeHtml(iniciaisContato(nome, telefone))}</div>`;
   }
 
@@ -743,19 +754,19 @@
     if (!m.midia_url) return "";
     if (m.tipo === "imagem") return `
       <div class="wpp-bolha-midia-envolucro">
-        <a href="${m.midia_url}" target="_blank" rel="noopener" title="Ver em tamanho grande"><img class="wpp-bolha-imagem" src="${m.midia_url}" alt="Imagem anexada"></a>
-        <a class="wpp-bolha-baixar" href="${m.midia_url}" download title="Baixar imagem">⬇</a>
+        <a href="${urlImagemSegura(m.midia_url)}" target="_blank" rel="noopener" title="Ver em tamanho grande"><img class="wpp-bolha-imagem" src="${urlImagemSegura(m.midia_url)}" alt="Imagem anexada"></a>
+        <a class="wpp-bolha-baixar" href="${urlImagemSegura(m.midia_url)}" download title="Baixar imagem">⬇</a>
       </div>`;
     if (m.tipo === "video") return `
       <div class="wpp-bolha-midia-envolucro">
-        <video class="wpp-bolha-video" src="${m.midia_url}" controls></video>
-        <a class="wpp-bolha-baixar" href="${m.midia_url}" download title="Baixar vídeo">⬇</a>
+        <video class="wpp-bolha-video" src="${urlImagemSegura(m.midia_url)}" controls></video>
+        <a class="wpp-bolha-baixar" href="${urlImagemSegura(m.midia_url)}" download title="Baixar vídeo">⬇</a>
       </div>`;
     const rotulo = { documento: "📄 Documento", audio: "🎵 Áudio" }[m.tipo] || "📎 Anexo";
     return `
       <div class="wpp-bolha-anexo-linha">
-        <a class="wpp-bolha-anexo" href="${m.midia_url}" target="_blank" rel="noopener" title="Abrir (PDFs abrem direto no navegador)">${rotulo} — visualizar</a>
-        <a class="wpp-bolha-baixar" href="${m.midia_url}" download title="Baixar">⬇</a>
+        <a class="wpp-bolha-anexo" href="${urlImagemSegura(m.midia_url)}" target="_blank" rel="noopener" title="Abrir (PDFs abrem direto no navegador)">${rotulo} — visualizar</a>
+        <a class="wpp-bolha-baixar" href="${urlImagemSegura(m.midia_url)}" download title="Baixar">⬇</a>
       </div>`;
   }
 
