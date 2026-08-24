@@ -487,8 +487,9 @@ def iniciar_conversa():
         (conversa["id"], texto, externo_id, usuario["id"], status_msg, erro, agora),
     )
     conn.execute(
-        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
-        (agora, texto[:120], conversa["id"]),
+        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "
+        "ultima_msg_operador_em = ?, proximo_contato_em = NULL, followup_adiado_ate = NULL WHERE id = ?",
+        (agora, texto[:120], agora, conversa["id"]),
     )
     whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_iniciada", telefone, conversa["id"])
     # Mesmo se o ENVIO real falhar, a conversa já existe e a mensagem já
@@ -562,8 +563,9 @@ def enviar_mensagem(conversa_id):
         (conversa_id, texto, externo_id, usuario["id"], status_msg, erro, agora),
     )
     conn.execute(
-        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
-        (agora, texto[:120], conversa_id),
+        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "
+        "ultima_msg_operador_em = ?, proximo_contato_em = NULL, followup_adiado_ate = NULL WHERE id = ?",
+        (agora, texto[:120], agora, conversa_id),
     )
     mensagem = dict(conn.execute("SELECT * FROM whatsapp_mensagens WHERE id = ?", (cur.lastrowid,)).fetchone())
     whatsapp_service.registrar_atividade(conn, usuario["id"], "mensagem_enviada", texto[:120], conversa_id)
@@ -998,8 +1000,9 @@ def enviar_figurinha_conversa(conversa_id):
         (conversa_id, usuario["id"], figurinha["midia_url"], externo_id, status_msg, erro, agora),
     )
     conn.execute(
-        "UPDATE whatsapp_conversas SET ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
-        (agora, "🧩 Figurinha", conversa_id),
+        "UPDATE whatsapp_conversas SET ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "
+        "ultima_msg_operador_em = ?, proximo_contato_em = NULL, followup_adiado_ate = NULL WHERE id = ?",
+        (agora, "🧩 Figurinha", agora, conversa_id),
     )
     return jsonify({"ok": status_msg == "enviada", "aviso": erro}), 201
 
@@ -1287,8 +1290,9 @@ def enviar_anexo(conversa_id):
         (conversa_id, tipo, legenda, midia_url, externo_id, usuario["id"], status_msg, erro, agora),
     )
     conn.execute(
-        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
-        (agora, f"📎 {legenda or arquivo.filename}"[:120], conversa_id),
+        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "
+        "ultima_msg_operador_em = ?, proximo_contato_em = NULL, followup_adiado_ate = NULL WHERE id = ?",
+        (agora, f"📎 {legenda or arquivo.filename}"[:120], agora, conversa_id),
     )
     mensagem = dict(conn.execute("SELECT * FROM whatsapp_mensagens WHERE id = ?", (cur.lastrowid,)).fetchone())
     whatsapp_service.registrar_atividade(conn, usuario["id"], "anexo_enviado", arquivo.filename, conversa_id)

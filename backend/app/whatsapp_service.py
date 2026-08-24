@@ -1733,10 +1733,11 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     conn.execute(
         """
         UPDATE whatsapp_conversas
-        SET status = 'aberta', nao_lidas = nao_lidas + 1, ultima_mensagem_em = ?, ultima_mensagem_preview = ?
+        SET status = 'aberta', nao_lidas = nao_lidas + 1, ultima_mensagem_em = ?, ultima_mensagem_preview = ?,
+            ultima_msg_cliente_em = ?, followup_adiado_ate = NULL
         WHERE id = ?
         """,
-        (agora, preview[:120], conversa["id"]),
+        (agora, preview[:120], agora, conversa["id"]),
     )
 
     if estava_fechada:

@@ -525,6 +525,11 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-figurinha-item:hover .wpp-figurinha-excluir { opacity: 1; }
 /* Figurinha na conversa: sem fundo nem moldura, como no WhatsApp. */
 .wpp-bolha-figurinha { max-width: 160px; max-height: 160px; display: block; }
+/* Player de audio dentro da bolha — largura confortavel pra arrastar a
+   barra de progresso sem estourar a bolha. */
+.wpp-bolha-audio { display: flex; align-items: center; gap: 6px; }
+.wpp-bolha-audio audio { height: 34px; max-width: 232px; }
+.wpp-bolha-baixar-audio { position: static; flex-shrink: 0; }
 
 .wpp-respostas-painel {
   position: absolute; bottom: 46px; left: 0; width: 260px; max-height: 260px; overflow-y: auto;

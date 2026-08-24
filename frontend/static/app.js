@@ -961,7 +961,14 @@
         <video class="wpp-bolha-video" src="${urlImagemSegura(m.midia_url)}" controls></video>
         <a class="wpp-bolha-baixar" href="${urlImagemSegura(m.midia_url)}" download title="Baixar vídeo">⬇</a>
       </div>`;
-    const rotulo = { documento: "📄 Documento", audio: "🎵 Áudio" }[m.tipo] || "📎 Anexo";
+    // Áudio toca ali mesmo na conversa: antes virava só um link, e pra
+    // reouvir um áudio (enviado ou recebido) tinha que abrir noutra aba.
+    if (m.tipo === "audio") return `
+      <div class="wpp-bolha-audio">
+        <audio controls preload="metadata" src="${urlImagemSegura(m.midia_url)}"></audio>
+        <a class="wpp-bolha-baixar wpp-bolha-baixar-audio" href="${urlImagemSegura(m.midia_url)}" download title="Baixar áudio">⬇</a>
+      </div>`;
+    const rotulo = { documento: "📄 Documento" }[m.tipo] || "📎 Anexo";
     return `
       <div class="wpp-bolha-anexo-linha">
         <a class="wpp-bolha-anexo" href="${urlImagemSegura(m.midia_url)}" target="_blank" rel="noopener" title="Abrir (PDFs abrem direto no navegador)">${rotulo} — visualizar</a>
