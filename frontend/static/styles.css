@@ -204,6 +204,11 @@ h1, h2, h3 { letter-spacing: -0.02em; font-weight: 800; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--borda); }
+/* Tabela larga (ex.: o desempenho por atendente no Dashboard, que tem
+   10 colunas) rola dentro do próprio cartão em telas menores, em vez de
+   empurrar a página inteira pro lado. */
+.cartao { overflow-x: auto; }
+th { white-space: nowrap; }
 th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.04em; }
 
 /* ---------------------------------------------------------------------
