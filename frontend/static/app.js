@@ -397,41 +397,99 @@
     const menu = document.querySelector(".wpp-menu-contexto");
     if (menu) menu.remove();
   }
+  // As etiquetas mudam pouco e o menu de contexto precisa abrir na hora
+  // do clique (não dá pra esperar a rede), então ficam em cache. Quem
+  // cria/renomeia/exclui limpa o cache.
+  async function obterEtiquetas(forcar) {
+    if (forcar) state._tagsCache = null;
+    if (!state._tagsCache) {
+      try { state._tagsCache = await chamarApi("/whatsapp/tags"); }
+      catch (e) { state._tagsCache = []; }
+    }
+    return state._tagsCache;
+  }
+
+  // Monta as linhas de etiqueta do menu: cada uma liga/desliga na hora,
+  // com ✓ nas que a conversa já tem. A lista resultante vai junto no
+  // próprio item (data-tags), pra ação não precisar consultar de novo.
+  function _itensEtiquetaMenu(conversaId, marcadasAtuais, etiquetas) {
+    const marcadas = marcadasAtuais.map(Number);
+    const linhas = etiquetas.map((t) => {
+      const tem = marcadas.includes(Number(t.id));
+      const depois = tem ? marcadas.filter((x) => x !== Number(t.id)) : [...marcadas, Number(t.id)];
+      return {
+        acao: "alternar-etiqueta-conversa",
+        id: conversaId,
+        rotulo: escapeHtml(t.nome),
+        cor: t.cor || "#6b7280",
+        marcado: tem,
+        dados: { tags: JSON.stringify(depois) },
+      };
+    });
+    return [
+      { separador: true, rotulo: "Etiquetas" },
+      ...linhas,
+      { acao: "nova-etiqueta-conversa", id: conversaId, rotulo: "➕ Nova etiqueta…", dados: { tags: JSON.stringify(marcadas) } },
+    ];
+  }
+
   function abrirMenuContexto(x, y, itens) {
     fecharMenuContexto();
     const menu = document.createElement("div");
     menu.className = "wpp-menu-contexto";
-    menu.innerHTML = itens.map((it) => `<button type="button" class="wpp-menu-contexto-item" data-acao="${it.acao}" data-id="${it.id}">${it.rotulo}</button>`).join("");
+    menu.innerHTML = itens.map((it) => {
+      if (it.separador) return `<div class="wpp-menu-contexto-titulo">${escapeHtml(it.rotulo)}</div>`;
+      // data-* extras deixam o item carregar o que a ação precisa (ex.:
+      // a lista de etiquetas que a conversa fica tendo depois do clique).
+      const extras = Object.entries(it.dados || {})
+        .map(([k, v]) => ` data-${k}="${escapeHtml(String(v))}"`).join("");
+      const bolinha = it.cor ? `<span class="wpp-menu-contexto-cor" style="background:${escapeHtml(it.cor)};"></span>` : "";
+      const marca = it.marcado === undefined ? "" : `<span class="wpp-menu-contexto-marca">${it.marcado ? "✓" : ""}</span>`;
+      return `<button type="button" class="wpp-menu-contexto-item" data-acao="${it.acao}" data-id="${it.id}"${extras}>${marca}${bolinha}${it.rotulo}</button>`;
+    }).join("");
     document.body.appendChild(menu);
     const largura = menu.offsetWidth, altura = menu.offsetHeight;
     menu.style.left = Math.min(x, window.innerWidth - largura - 8) + "px";
     menu.style.top = Math.min(y, window.innerHeight - altura - 8) + "px";
     setTimeout(() => document.addEventListener("click", fecharMenuContexto, { once: true }), 0);
   }
-  document.addEventListener("contextmenu", (e) => {
+  document.addEventListener("contextmenu", async (e) => {
     const item = e.target.closest("[data-wpp-conversa-id]");
     if (!item) return;
     e.preventDefault();
     const id = item.dataset.wppConversaId;
     const arquivada = item.dataset.wppArquivada === "1";
+    const marcadas = JSON.parse(item.dataset.wppTags || "[]");
+    const etiquetas = await obterEtiquetas();
     abrirMenuContexto(e.clientX, e.clientY, [
       { acao: "contexto-agendar", id, rotulo: "🕒 Agendar mensagem" },
       { acao: "contexto-lembrete", id, rotulo: "🔔 Abrir lembrete" },
       { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id, rotulo: arquivada ? "📤 Desarquivar" : "🗄️ Arquivar" },
       { acao: "excluir-conversa", id, rotulo: "🗑️ Excluir conversa" },
+      ..._itensEtiquetaMenu(id, marcadas, etiquetas),
     ]);
   });
 
   // Clique direito em cima do nome no topo da conversa (WhatsApp ou chat
   // interno) já abre direto a tela de editar nome/apelido — mesmo botão
   // ✏️ que já existe ali, só um atalho mais rápido pra chegar nele.
-  document.addEventListener("contextmenu", (e) => {
+  document.addEventListener("contextmenu", async (e) => {
     const nomeEl = e.target.closest(".wpp-chat-nome");
     if (!nomeEl) return;
     const botaoEditar = nomeEl.querySelector('[data-acao="renomear-contato"], [data-acao="abrir-apelido-interno"]');
     if (!botaoEditar) return;
     e.preventDefault();
-    botaoEditar.click();
+    // No chat interno não existe etiqueta de cliente — ali o clique
+    // direito segue direto pra editar o apelido, como antes.
+    const botaoTags = document.querySelector('[data-acao="abrir-tags-conversa"]');
+    if (!botaoTags) { botaoEditar.click(); return; }
+    const id = botaoTags.dataset.id;
+    const marcadas = JSON.parse(botaoTags.dataset.tags || "[]");
+    const etiquetas = await obterEtiquetas();
+    abrirMenuContexto(e.clientX, e.clientY, [
+      { acao: "renomear-contato-menu", id, rotulo: "✏️ Editar nome do contato" },
+      ..._itensEtiquetaMenu(id, marcadas, etiquetas),
+    ]);
   });
 
   // =======================================================================
@@ -1520,7 +1578,7 @@
       const nome = c.contato_nome || c.telefone;
       const naFila = !c.atribuida_usuario_id;
       const slaEstourado = state.slaAlertasIds.has(c.id);
-      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" ${slaEstourado ? 'title="Sem resposta há tempo demais"' : ""}>
+      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : ""}>
         ${htmlAvatarContato(c.contato_foto, c.contato_nome, c.telefone, 42)}
         <div class="wpp-conversa-info">
           <div class="wpp-conversa-linha1">
@@ -1958,6 +2016,30 @@
       const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
       return local.toISOString().slice(0, 16);
     } catch (e) { return _valorDataHoraPadrao(1); }
+  }
+
+  // Nome é obrigatório de propósito: etiqueta sem nome vira uma bolinha
+  // colorida que ninguém lembra o que significa.
+  function modalNovaEtiqueta(aoCriar) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🏷️ Nova etiqueta</h3>
+      <p class="dica">Ela fica disponível para todas as conversas, e a lista de Conversas pode ser filtrada por ela.</p>
+      <div class="campo"><label>Nome</label><input name="nome" placeholder="Ex.: Orçamento enviado" required maxlength="40"></div>
+      <div class="campo"><label>Cor</label><input type="color" name="cor" value="#0a7d67" style="width:64px; padding:2px;"></div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-wpp-criar-etiqueta>Criar e aplicar</button>
+      </div>`);
+    const campoNome = wrap.querySelector('input[name="nome"]');
+    const campoCor = wrap.querySelector('input[name="cor"]');
+    campoNome.focus();
+    const criar = async () => {
+      const nome = campoNome.value.trim();
+      if (!nome) { campoNome.focus(); return; }
+      await aoCriar(nome, campoCor.value);
+    };
+    wrap.querySelector("[data-wpp-criar-etiqueta]").addEventListener("click", criar);
+    campoNome.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); criar(); } });
   }
 
   function modalEditarAgendada(id, textoAtual, quandoAtual) {
@@ -3440,6 +3522,28 @@
         definirFlash("ok", "Conversa reaberta.");
         return renderChatInterno(id);
       }
+      case "alternar-etiqueta-conversa": {
+        const tags = JSON.parse(alvo.dataset.tags || "[]");
+        await chamarApi(`/whatsapp/conversas/${alvo.dataset.id}/tags`, { method: "PUT", body: { tag_ids: tags } });
+        return renderWhatsapp(Number(location.hash.split("/")[2]) || null);
+      }
+      case "nova-etiqueta-conversa": {
+        const conversaId = alvo.dataset.id;
+        const jaTem = JSON.parse(alvo.dataset.tags || "[]");
+        return modalNovaEtiqueta(async (nome, cor) => {
+          const nova = await chamarApi("/whatsapp/tags", { method: "POST", body: { nome, cor } });
+          await chamarApi(`/whatsapp/conversas/${conversaId}/tags`, { method: "PUT", body: { tag_ids: [...jaTem, nova.id] } });
+          await obterEtiquetas(true); // o menu precisa enxergar a etiqueta nova
+          fecharModais();
+          definirFlash("ok", `Etiqueta "${nome}" criada e aplicada.`);
+          renderWhatsapp(Number(location.hash.split("/")[2]) || null);
+        });
+      }
+      case "renomear-contato-menu": {
+        const botao = document.querySelector('[data-acao="renomear-contato"]');
+        if (botao) botao.click();
+        return;
+      }
       case "filtrar-por-etiqueta": {
         const id = alvo.dataset.id || null;
         state.tagFiltro = String(state.tagFiltro) === String(id) ? null : id;
@@ -3646,6 +3750,7 @@
         const nome = alvo.value.trim();
         if (!nome) { definirFlash("erro", "A etiqueta precisa de um nome."); return renderWhatsappConfiguracao(); }
         await chamarApi(`/whatsapp/tags/${alvo.dataset.tagId}`, { method: "PUT", body: { nome } });
+        state._tagsCache = null;
         definirFlash("ok", "Etiqueta renomeada em todas as conversas.");
         return renderWhatsappConfiguracao();
       }
@@ -3653,11 +3758,13 @@
         const linha = alvo.closest("li");
         const nome = linha.querySelector('input[data-acao-change="renomear-etiqueta"]').value.trim();
         await chamarApi(`/whatsapp/tags/${alvo.dataset.tagId}`, { method: "PUT", body: { nome, cor: alvo.value } });
+        state._tagsCache = null;
         return renderWhatsappConfiguracao();
       }
       case "excluir-etiqueta": {
         if (!confirm(`Excluir a etiqueta "${alvo.dataset.nome}"? Ela sai de todas as conversas que a usam. As conversas em si não são apagadas.`)) return;
         await chamarApi(`/whatsapp/tags/${alvo.dataset.id}`, { method: "DELETE" });
+        state._tagsCache = null;
         if (String(state.tagFiltro) === String(alvo.dataset.id)) state.tagFiltro = null;
         definirFlash("ok", "Etiqueta excluída.");
         return renderWhatsappConfiguracao();
@@ -3925,6 +4032,7 @@
         if (!nome) return;
         const cor = form.querySelector('[name="nova_tag_cor"]').value;
         const nova = await chamarApi("/whatsapp/tags", { method: "POST", body: { nome, cor } });
+        state._tagsCache = null;
         const marcadas = [...form.querySelectorAll('input[name="tag_ids"]:checked')].map((i) => Number(i.value));
         marcadas.push(nova.id);
         const conversaId = Number(form.dataset.conversaId);
@@ -4452,6 +4560,7 @@
         const nome = (dados.get("nome") || "").trim();
         if (!nome) return;
         await chamarApi("/whatsapp/tags", { method: "POST", body: { nome, cor: dados.get("cor") } });
+        state._tagsCache = null;
         definirFlash("ok", `Etiqueta "${nome}" criada.`);
         return renderWhatsappConfiguracao();
       }

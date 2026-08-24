@@ -1002,3 +1002,19 @@ nav { perspective: 800px; }
   background: color-mix(in srgb, var(--primaria) 12%, transparent);
   color: var(--primaria); border-color: var(--primaria);
 }
+
+/* Menu de contexto: seção de etiquetas
+   Cada linha liga/desliga a etiqueta na hora, com ✓ nas que a conversa
+   já tem e a bolinha na cor da própria etiqueta. */
+.wpp-menu-contexto-titulo {
+  padding: 8px 12px 4px; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--texto-suave);
+  border-top: 1px solid var(--borda); margin-top: 4px;
+}
+.wpp-menu-contexto-marca {
+  display: inline-block; width: 14px; color: var(--primaria); font-weight: 700;
+}
+.wpp-menu-contexto-cor {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 7px; vertical-align: middle; flex-shrink: 0;
+}
