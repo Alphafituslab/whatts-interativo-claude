@@ -240,7 +240,14 @@
         }
         return `<a class="link-nav ${it.chave === paginaAtiva ? "ativo" : ""}" href="${it.rota}"><span>${it.icone}</span> ${escapeHtml(it.label)}${extra}</a>`;
       })
-      .join("");
+      .join("")
+      // Follow-up é botão, não link de página: abre o painel lateral sem
+      // sair de onde a pessoa está. Fica no menu (e não flutuando sobre a
+      // conversa) porque ali nunca disputa espaço com botão nenhum.
+      + `<button type="button" class="link-nav link-nav-botao" data-acao="alternar-followup" title="Clientes que precisam de contato">
+           <span>🔔</span> Follow-up
+           <span class="wpp-badge-nao-lidas wpp-badge-nav" data-followup-contador hidden>0</span>
+         </button>`;
 
     const flashHtml = state.flash
       ? `<p class="${state.flash.tipo === "erro" ? "mensagem-erro" : "mensagem-ok"}">${escapeHtml(state.flash.texto)}</p>`
@@ -279,12 +286,6 @@
           </div>
           <div class="pagina">${flashHtml}${conteudoHtml}</div>
         </div>
-        <!-- Aba de follow-up: fica encostada na borda direita, discreta,
-             e só abre o painel quando clicada. -->
-        <button type="button" class="followup-aba" data-acao="alternar-followup" title="Follow-up — clientes que precisam de contato">
-          <span class="followup-aba-icone">🔔</span>
-          <span class="followup-aba-contador" data-followup-contador hidden>0</span>
-        </button>
         <aside class="followup-painel" data-followup-painel hidden>
           <div class="followup-cabecalho">
             <strong>Follow-up</strong>

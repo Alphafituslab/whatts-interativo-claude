@@ -773,23 +773,13 @@ nav { perspective: 800px; }
    Follow-up — aba encostada na borda direita + painel deslizante.
    Discreto de propósito: fica fora do caminho até ser chamado.
    ===================================================================== */
-.followup-aba {
-  /* Embaixo, não no meio: em janela pequena (modo aplicativo) o meio da
-     tela cai na altura dos botões do topo e a aba ficava por cima do
-     "+ Nova conversa". No rodapé ela nunca disputa espaço com nada. */
-  position: fixed; right: 0; bottom: 24px;
-  background: var(--superficie); border: 1px solid var(--borda); border-right: none;
-  border-radius: var(--raio-peq) 0 0 var(--raio-peq); padding: 12px 8px; cursor: pointer;
-  box-shadow: var(--sombra); z-index: 30; display: flex; flex-direction: column;
-  align-items: center; gap: 4px; transition: padding-right 0.15s;
+/* O gatilho do follow-up é um item do menu lateral (ver renderShell):
+   flutuando sobre a conversa ele acabava por cima do botão de enviar ou
+   do "+ Nova conversa", dependendo do tamanho da janela. */
+.link-nav-botao {
+  width: 100%; text-align: left; font-family: inherit; cursor: pointer;
+  background: none; border: none;
 }
-.followup-aba:hover { padding-right: 12px; }
-.followup-aba-icone { font-size: 18px; line-height: 1; }
-.followup-aba-contador {
-  background: var(--vermelho); color: #fff; font-size: 10.5px; font-weight: 800;
-  min-width: 18px; padding: 1px 5px; border-radius: 999px; line-height: 1.5;
-}
-.followup-aba-contador[hidden] { display: none; }
 
 .followup-painel {
   position: fixed; right: 0; top: 0; bottom: 0; width: 330px; max-width: 92vw;
