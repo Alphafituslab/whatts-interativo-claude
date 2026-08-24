@@ -1162,6 +1162,23 @@
     return !!ateIso && new Date(ateIso).getTime() > Date.now();
   }
 
+  function htmlContatosDaBusca(contatos) {
+    if (!contatos || !contatos.length) return "";
+    return `
+      <div class="wpp-busca-contatos">
+        <div class="wpp-busca-contatos-titulo">Na agenda (ainda sem conversa)</div>
+        ${contatos.map((c) => `
+          <div class="wpp-contato-linha">
+            ${htmlAvatarContato(c.foto_url, c.nome, c.telefone, 32)}
+            <div style="flex:1; min-width:0;">
+              <strong>${escapeHtml(c.nome || c.telefone)}</strong>
+              ${c.nome ? `<div class="texto-suave">${escapeHtml(c.telefone)}</div>` : ""}
+            </div>
+            <button type="button" class="botao secundario pequeno" data-acao="iniciar-conversa-contato" data-telefone="${escapeHtml(c.telefone)}" data-nome="${escapeHtml(c.nome || "")}">Conversar</button>
+          </div>`).join("")}
+      </div>`;
+  }
+
   function htmlListaConversas(conversas, conversaAtivaId) {
     if (!conversas.length) {
       const msgs = {
@@ -1427,8 +1444,18 @@
   async function renderWhatsapp(conversaId) {
     app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
     let conversas;
+    let contatosSemConversa = [];
     if (state.buscaConversas) {
-      conversas = await chamarApi(`/whatsapp/conversas/buscar?q=${encodeURIComponent(state.buscaConversas)}`);
+      // A busca de conversas parte das CONVERSAS, então um contato salvo
+      // que nunca escreveu não apareceria nunca. Procura na agenda
+      // também e mostra à parte, com botão pra iniciar a conversa.
+      const [achadas, contatos] = await Promise.all([
+        chamarApi(`/whatsapp/conversas/buscar?q=${encodeURIComponent(state.buscaConversas)}`),
+        chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(state.buscaConversas)}`).catch(() => []),
+      ]);
+      conversas = achadas;
+      const telefonesComConversa = new Set(achadas.map((c) => c.telefone));
+      contatosSemConversa = contatos.filter((c) => !telefonesComConversa.has(c.telefone));
     } else {
       conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
     }
@@ -1469,10 +1496,11 @@
            <form class="wpp-busca-form" data-form="buscar-conversas">
              <input type="search" name="q" class="wpp-busca-input" placeholder="Buscar por nome, telefone ou mensagem…" value="${escapeHtml(state.buscaConversas || "")}">
              <button type="submit" class="botao-icone" title="Buscar">🔍</button>
+             <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${state.buscaConversas ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
            ${state.buscaConversas ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados para "${escapeHtml(state.buscaConversas)}"</p>` : htmlAbasConversas()}
-           <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}</div>
+           <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas)}</div>
        </div>`,
