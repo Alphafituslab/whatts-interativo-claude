@@ -134,7 +134,37 @@ def _aplicar_apelidos(conversas, apelidos):
     return conversas
 
 
-def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, empresa_id_admin: int = None):
+def tags_por_conversa(conn, conversa_ids: list):
+    """Etiquetas de várias conversas internas de uma vez — evita uma
+    consulta por linha da lista. Mesma tabela de etiquetas das conversas
+    de cliente: a etiqueta é da empresa, não do canal."""
+    if not conversa_ids:
+        return {}
+    marcadores = ",".join("?" * len(conversa_ids))
+    rows = conn.execute(
+        f"SELECT ct.conversa_id, t.id, t.nome, t.cor FROM chat_interno_conversa_tags ct "
+        f"JOIN whatsapp_tags t ON t.id = ct.tag_id WHERE ct.conversa_id IN ({marcadores}) ORDER BY t.nome",
+        conversa_ids,
+    ).fetchall()
+    resultado = {}
+    for r in rows:
+        resultado.setdefault(r["conversa_id"], []).append({"id": r["id"], "nome": r["nome"], "cor": r["cor"]})
+    return resultado
+
+
+def definir_tags_da_conversa(conn, empresa_id: int, conversa_id: int, tag_ids: list):
+    """O SELECT ... WHERE empresa_id garante que só entra etiqueta da
+    própria empresa, mesmo se vier um id de fora no pedido."""
+    conn.execute("DELETE FROM chat_interno_conversa_tags WHERE conversa_id = ?", (conversa_id,))
+    for tid in tag_ids:
+        conn.execute(
+            "INSERT INTO chat_interno_conversa_tags (conversa_id, tag_id) "
+            "SELECT ?, id FROM whatsapp_tags WHERE id = ? AND empresa_id = ?",
+            (conversa_id, tid, empresa_id),
+        )
+
+
+def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, empresa_id_admin: int = None, tag_id=None):
     """Por padrão só mostra as em aberto — encerrar uma conversa faz ela
     sumir da lista (sem apagar nada, ver fechar_conversa), pra tela não
     ficar poluída de conversas antigas. incluir_encerradas=True mostra só
@@ -150,6 +180,11 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
     else:
         condicao_dono = "(c.criado_por_id = ? OR c.participante_id = ?)"
         params = (usuario_id, usuario_id)
+    # Filtro por etiqueta, opcional — vale junto com a aba escolhida.
+    condicao_tag = ""
+    if tag_id:
+        condicao_tag = " AND EXISTS (SELECT 1 FROM chat_interno_conversa_tags ct WHERE ct.conversa_id = c.id AND ct.tag_id = ?)"
+        params = tuple(params) + (tag_id,)
     rows = conn.execute(
         f"""
         SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
@@ -159,12 +194,15 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
         FROM chat_interno_conversas c
         JOIN usuarios uc ON uc.id = c.criado_por_id
         LEFT JOIN usuarios up ON up.id = c.participante_id
-        WHERE {condicao_dono} AND {condicao_status}
+        WHERE {condicao_dono} AND {condicao_status}{condicao_tag}
         ORDER BY COALESCE(c.ultima_mensagem_em, c.criado_em) DESC
         """,
         params,
     ).fetchall()
     conversas = _marcar_online([dict(r) for r in rows])
+    mapa_tags = tags_por_conversa(conn, [c["id"] for c in conversas])
+    for c in conversas:
+        c["tags"] = mapa_tags.get(c["id"], [])
     return _aplicar_apelidos(conversas, obter_apelidos(conn, usuario_id))
 
 

@@ -45,7 +45,9 @@ def listar_conversas():
         raise ApiError("Só um administrador pode ver todas as conversas internas.", status=403, codigo="sem_permissao")
     conn = get_db()
     return jsonify(chat_interno_service.listar_conversas(
-        conn, usuario["id"], incluir_encerradas, empresa_id_admin=usuario["empresa_id"] if todas else None
+        conn, usuario["id"], incluir_encerradas,
+        empresa_id_admin=usuario["empresa_id"] if todas else None,
+        tag_id=request.args.get("tag_id"),
     ))
 
 
@@ -96,6 +98,21 @@ def listar_mensagens(conversa_id):
         lado = None  # admin espiando pela aba "Todas" — não conta como leitura
     mensagens = chat_interno_service.listar_mensagens(conn, conversa_id, lado, incluir_excluidas=usuario["admin"])
     return jsonify(mensagens)
+
+
+@bp.put("/conversas/<int:conversa_id>/tags")
+@requires_auth
+def definir_tags(conversa_id):
+    """Etiqueta uma conversa interna. Mesma régua de visibilidade do
+    resto: só quem participa (ou o admin, supervisionando) pode mexer."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if not _pode_ver(usuario, conversa):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    dados = request.get_json(silent=True) or {}
+    chat_interno_service.definir_tags_da_conversa(conn, usuario["empresa_id"], conversa_id, dados.get("tag_ids") or [])
+    return jsonify({"ok": True})
 
 
 @bp.put("/conversas/<int:conversa_id>/apelido")

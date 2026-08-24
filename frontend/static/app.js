@@ -412,7 +412,7 @@
   // Monta as linhas de etiqueta do menu: cada uma liga/desliga na hora,
   // com ✓ nas que a conversa já tem. A lista resultante vai junto no
   // próprio item (data-tags), pra ação não precisar consultar de novo.
-  function _itensEtiquetaMenu(conversaId, marcadasAtuais, etiquetas) {
+  function _itensEtiquetaMenu(conversaId, marcadasAtuais, etiquetas, interna) {
     const marcadas = marcadasAtuais.map(Number);
     const linhas = etiquetas.map((t) => {
       const tem = marcadas.includes(Number(t.id));
@@ -423,14 +423,26 @@
         rotulo: escapeHtml(t.nome),
         cor: t.cor || "#6b7280",
         marcado: tem,
-        dados: { tags: JSON.stringify(depois) },
+        dados: { tags: JSON.stringify(depois), interna: interna ? "1" : "0" },
       };
     });
     return [
       { separador: true, rotulo: "Etiquetas" },
       ...linhas,
-      { acao: "nova-etiqueta-conversa", id: conversaId, rotulo: "➕ Nova etiqueta…", dados: { tags: JSON.stringify(marcadas) } },
+      { acao: "nova-etiqueta-conversa", id: conversaId, rotulo: "➕ Nova etiqueta…", dados: { tags: JSON.stringify(marcadas), interna: interna ? "1" : "0" } },
     ];
+  }
+
+  // Cliente e chat interno guardam etiqueta em tabelas diferentes (a
+  // conversa é de tipo diferente), mas a etiqueta em si é a mesma da
+  // empresa — daí só o endereço mudar.
+  function _redesenharCanal(interna) {
+    const id = Number(location.hash.split("/")[2]) || null;
+    return interna ? renderChatInterno(id) : renderWhatsapp(id);
+  }
+
+  function _urlTagsDaConversa(id, interna) {
+    return interna ? `/chat-interno/conversas/${id}/tags` : `/whatsapp/conversas/${id}/tags`;
   }
 
   function abrirMenuContexto(x, y, itens) {
@@ -474,21 +486,31 @@
   // interno) já abre direto a tela de editar nome/apelido — mesmo botão
   // ✏️ que já existe ali, só um atalho mais rápido pra chegar nele.
   document.addEventListener("contextmenu", async (e) => {
+    const item = e.target.closest("[data-wpp-interno-id]");
+    if (!item) return;
+    e.preventDefault();
+    const etiquetas = await obterEtiquetas();
+    abrirMenuContexto(e.clientX, e.clientY,
+      _itensEtiquetaMenu(item.dataset.wppInternoId, JSON.parse(item.dataset.wppTags || "[]"), etiquetas, true));
+  });
+
+  document.addEventListener("contextmenu", async (e) => {
     const nomeEl = e.target.closest(".wpp-chat-nome");
     if (!nomeEl) return;
     const botaoEditar = nomeEl.querySelector('[data-acao="renomear-contato"], [data-acao="abrir-apelido-interno"]');
     if (!botaoEditar) return;
     e.preventDefault();
-    // No chat interno não existe etiqueta de cliente — ali o clique
-    // direito segue direto pra editar o apelido, como antes.
-    const botaoTags = document.querySelector('[data-acao="abrir-tags-conversa"]');
+    const botaoTags = document.querySelector('[data-acao="abrir-tags-conversa"], [data-acao="abrir-tags-interna"]');
     if (!botaoTags) { botaoEditar.click(); return; }
+    const interna = botaoTags.dataset.acao === "abrir-tags-interna"
+      || botaoTags.getAttribute("data-acao") === "abrir-tags-interna";
     const id = botaoTags.dataset.id;
     const marcadas = JSON.parse(botaoTags.dataset.tags || "[]");
     const etiquetas = await obterEtiquetas();
     abrirMenuContexto(e.clientX, e.clientY, [
-      { acao: "renomear-contato-menu", id, rotulo: "✏️ Editar nome do contato" },
-      ..._itensEtiquetaMenu(id, marcadas, etiquetas),
+      { acao: interna ? "abrir-apelido-interno-menu" : "renomear-contato-menu", id,
+        rotulo: interna ? "✏️ Editar como você chama esta pessoa" : "✏️ Editar nome do contato" },
+      ..._itensEtiquetaMenu(id, marcadas, etiquetas, interna),
     ]);
   });
 
@@ -1496,10 +1518,29 @@
     return mudou;
   }
 
+  function htmlFiltroEtiquetasInterno(etiquetas) {
+    if (!etiquetas || !etiquetas.length) return "";
+    const chips = etiquetas.map((t) => {
+      const ativa = String(state.tagFiltroInterno) === String(t.id);
+      return `<button type="button" class="wpp-tag-filtro ${ativa ? "ativa" : ""}"
+                data-acao="filtrar-por-etiqueta-interno" data-id="${t.id}"
+                style="--cor-etiqueta:${escapeHtml(t.cor || "#6b7280")};"
+                title="${ativa ? "Clique de novo pra tirar o filtro" : `Ver só as conversas com a etiqueta ${escapeHtml(t.nome)}`}">
+        ${escapeHtml(t.nome)}
+      </button>`;
+    }).join("");
+    return `<div class="wpp-tags-filtro">
+      ${chips}
+      ${state.tagFiltroInterno ? `<button type="button" class="wpp-tag-filtro-limpar" data-acao="filtrar-por-etiqueta-interno" data-id="">✕ limpar</button>` : ""}
+    </div>`;
+  }
+
   function _queryChatInterno() {
-    if (state.chatInternoEscopo === "encerradas") return "?encerradas=1";
-    if (state.chatInternoEscopo === "todas") return "?todas=1";
-    return "";
+    const partes = [];
+    if (state.chatInternoEscopo === "encerradas") partes.push("encerradas=1");
+    if (state.chatInternoEscopo === "todas") partes.push("todas=1");
+    if (state.tagFiltroInterno) partes.push(`tag_id=${state.tagFiltroInterno}`);
+    return partes.length ? `?${partes.join("&")}` : "";
   }
 
   async function atualizarListaConversasInternasNoDom() {
@@ -2164,7 +2205,7 @@
       // que costuma ser quem deve a resposta.
       const outroOnline = souCriador ? c.participante_online : (souAlheio ? c.participante_online : c.criado_por_online);
       const outraFoto = souCriador ? c.participante_foto : (souAlheio ? c.participante_foto : c.criado_por_foto);
-      return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""}" href="#/chat-interno/${c.id}">
+      return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""}" href="#/chat-interno/${c.id}" data-wpp-interno-id="${c.id}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}'>
         <span style="position:relative; flex-shrink:0;">
           ${htmlAvatarContato(outraFoto, outroNome, outroNome, 36)}
           <span class="wpp-online-bolinha ${outroOnline ? "wpp-online-sim" : "wpp-online-nao"}" title="${outroOnline ? "Online agora" : "Offline"}"></span>
@@ -2181,6 +2222,7 @@
             ${naoLidas > 0 ? `<span class="wpp-badge-nao-lidas piscando">${naoLidas > 99 ? "99+" : naoLidas}</span>` : ""}
           </div>
           ${c.setor_destino || c.status === "fechada" ? `<div class="wpp-conversa-dono">${c.setor_destino ? `🏷️ ${escapeHtml(c.setor_destino)}` : ""}${c.status === "fechada" ? ' · <span class="selo inativo">Fechada</span>' : ""}</div>` : ""}
+          ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
         </div>
       </a>`;
     }
@@ -2253,6 +2295,10 @@
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-interno" data-id="${conversa.id}">Encerrar atendimento</button>`}
         </div>
       </div>
+      <div class="wpp-tags-linha">
+        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}
+        <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
+      </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens-interno>${mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("")}</div>
       <div data-wpp-citando></div>
@@ -2278,6 +2324,7 @@
   async function renderChatInterno(conversaId) {
     _limparCitacaoSeTrocou(`interno:${conversaId}`);
     _carregandoSeTrocouDeTela("chat-interno");
+    const etiquetas = await obterEtiquetas();
     const usuario = state.usuarioAtual;
     const escopo = state.chatInternoEscopo;
     const conversas = await chamarApi(`/chat-interno/conversas${_queryChatInterno()}`);
@@ -2323,6 +2370,7 @@
        </div>
        <div class="wpp-layout ${conversaId ? "wpp-conversa-aberta" : ""}">
          <div class="wpp-painel-lista">
+           ${htmlFiltroEtiquetasInterno(etiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista-interno>${htmlListaConversasInternas(conversas, conversaId)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChatInterno(conversaAtual, mensagens)}</div>
@@ -2486,10 +2534,10 @@
       </form>`);
   }
 
-  function modalTags(conversaId, todasTags, marcadas) {
+  function modalTags(conversaId, todasTags, marcadas, interna) {
     abrirModal(`
       <h3 style="margin-top:0;">Etiquetas</h3>
-      <form data-form="definir-tags-conversa" data-conversa-id="${conversaId}">
+      <form data-form="definir-tags-conversa" data-conversa-id="${conversaId}" data-interna="${interna ? "1" : "0"}">
         <div class="wpp-tags-checklist">
           ${todasTags.length ? todasTags.map((t) => `
             <label class="wpp-tag-check">
@@ -3554,25 +3602,37 @@
       }
       case "alternar-etiqueta-conversa": {
         const tags = JSON.parse(alvo.dataset.tags || "[]");
-        await chamarApi(`/whatsapp/conversas/${alvo.dataset.id}/tags`, { method: "PUT", body: { tag_ids: tags } });
-        return renderWhatsapp(Number(location.hash.split("/")[2]) || null);
+        const interna = alvo.dataset.interna === "1";
+        await chamarApi(_urlTagsDaConversa(alvo.dataset.id, interna), { method: "PUT", body: { tag_ids: tags } });
+        return _redesenharCanal(interna);
       }
       case "nova-etiqueta-conversa": {
         const conversaId = alvo.dataset.id;
+        const interna = alvo.dataset.interna === "1";
         const jaTem = JSON.parse(alvo.dataset.tags || "[]");
         return modalNovaEtiqueta(async (nome, cor) => {
           const nova = await chamarApi("/whatsapp/tags", { method: "POST", body: { nome, cor } });
-          await chamarApi(`/whatsapp/conversas/${conversaId}/tags`, { method: "PUT", body: { tag_ids: [...jaTem, nova.id] } });
+          await chamarApi(_urlTagsDaConversa(conversaId, interna), { method: "PUT", body: { tag_ids: [...jaTem, nova.id] } });
           await obterEtiquetas(true); // o menu precisa enxergar a etiqueta nova
           fecharModais();
           definirFlash("ok", `Etiqueta "${nome}" criada e aplicada.`);
-          renderWhatsapp(Number(location.hash.split("/")[2]) || null);
+          _redesenharCanal(interna);
         });
+      }
+      case "abrir-apelido-interno-menu": {
+        const botao = document.querySelector('[data-acao="abrir-apelido-interno"]');
+        if (botao) botao.click();
+        return;
       }
       case "renomear-contato-menu": {
         const botao = document.querySelector('[data-acao="renomear-contato"]');
         if (botao) botao.click();
         return;
+      }
+      case "filtrar-por-etiqueta-interno": {
+        const id = alvo.dataset.id || null;
+        state.tagFiltroInterno = String(state.tagFiltroInterno) === String(id) ? null : id;
+        return renderChatInterno(null);
       }
       case "filtrar-por-etiqueta": {
         const id = alvo.dataset.id || null;
@@ -4051,11 +4111,12 @@
         modalResumo(Number(alvo.dataset.id), alvo.dataset.resumo);
         return;
       }
-      case "abrir-tags-conversa": {
+      case "abrir-tags-conversa":
+      case "abrir-tags-interna": {
         const conversaId = Number(alvo.dataset.id);
         const marcadas = JSON.parse(alvo.dataset.tags || "[]");
-        const todasTags = await chamarApi("/whatsapp/tags");
-        modalTags(conversaId, todasTags, marcadas);
+        const todasTags = await obterEtiquetas(true);
+        modalTags(conversaId, todasTags, marcadas, acao === "abrir-tags-interna");
         return;
       }
       case "criar-tag-inline": {
@@ -4069,6 +4130,7 @@
         const marcadas = [...form.querySelectorAll('input[name="tag_ids"]:checked')].map((i) => Number(i.value));
         marcadas.push(nova.id);
         const conversaId = Number(form.dataset.conversaId);
+        const interna = form.dataset.interna === "1";
         const todasTags = await chamarApi("/whatsapp/tags");
         fecharModais();
         modalTags(conversaId, todasTags, marcadas);
@@ -4374,11 +4436,12 @@
       }
       case "definir-tags-conversa": {
         const conversaId = Number(form.dataset.conversaId);
+        const interna = form.dataset.interna === "1";
         const tagIds = dados.getAll("tag_ids").map(Number);
-        await chamarApi(`/whatsapp/conversas/${conversaId}/tags`, { method: "PUT", body: { tag_ids: tagIds } });
+        await chamarApi(_urlTagsDaConversa(conversaId, interna), { method: "PUT", body: { tag_ids: tagIds } });
         fecharModais();
         definirFlash("ok", "Etiquetas atualizadas.");
-        return renderWhatsapp(conversaId);
+        return interna ? renderChatInterno(conversaId) : renderWhatsapp(conversaId);
       }
       case "criar-nota": {
         const conversaId = Number(form.dataset.conversaId);
