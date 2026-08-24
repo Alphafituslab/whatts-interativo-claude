@@ -188,13 +188,18 @@ def carregar_conversa(conn, conversa_id: int):
     return _marcar_online([dict(row)])[0] if row else None
 
 
-def listar_mensagens(conn, conversa_id: int, lado: str = None):
+def listar_mensagens(conn, conversa_id: int, lado: str = None, incluir_excluidas: bool = False):
     """lado: 'criador' ou 'participante' quando quem está lendo é
     realmente uma das duas pontas da conversa — zera o contador de
     não-lida DELE. None quando é um admin só espiando (aba "Todas") —
     nesse caso não mexe em nada, ninguém pode saber que foi visto."""
+    # incluir_excluidas: só o admin, em supervisão — vê o que foi apagado
+    # e por quem, em vez de a mensagem sumir sem deixar rastro.
+    filtro = "" if incluir_excluidas else " AND m.excluida_em IS NULL"
     rows = conn.execute(
-        "SELECT * FROM chat_interno_mensagens WHERE conversa_id = ? AND excluida_em IS NULL ORDER BY criado_em, id",
+        f"SELECT m.*, ue.nome AS excluida_por_nome FROM chat_interno_mensagens m "
+        f"LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
+        f"WHERE m.conversa_id = ?{filtro} ORDER BY m.criado_em, m.id",
         (conversa_id,),
     ).fetchall()
     if lado in ("criador", "participante"):

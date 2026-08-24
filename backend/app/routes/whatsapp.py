@@ -508,10 +508,21 @@ def listar_mensagens(conversa_id):
     if not _pode_visualizar(usuario, conversa):
         raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
 
-    rows = conn.execute(
-        "SELECT * FROM whatsapp_mensagens WHERE conversa_id = ? AND excluida_em IS NULL ORDER BY criado_em, id",
-        (conversa_id,),
-    ).fetchall()
+    # Mensagem apagada some pro usuário comum, mas o ADMIN continua vendo
+    # (marcada, com quem apagou) — sem isso alguém podia apagar algo e não
+    # sobrar registro nenhum pra supervisão.
+    if usuario["admin"]:
+        rows = conn.execute(
+            "SELECT m.*, ue.nome AS excluida_por_nome FROM whatsapp_mensagens m "
+            "LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
+            "WHERE m.conversa_id = ? ORDER BY m.criado_em, m.id",
+            (conversa_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM whatsapp_mensagens WHERE conversa_id = ? AND excluida_em IS NULL ORDER BY criado_em, id",
+            (conversa_id,),
+        ).fetchall()
 
     # Só zera o contador de não lidas quando quem está olhando é o DONO
     # da conversa — se for o admin espiando a conversa de outro usuário
@@ -595,7 +606,7 @@ def excluir_mensagem(conversa_id, mensagem_id):
     if mensagem["direcao"] != "saida":
         raise ApiError("Só é possível excluir mensagens enviadas por nós.", status=400)
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
-    apagada_no_whatsapp = whatsapp_service.excluir_mensagem(conn, config, dict(mensagem))
+    apagada_no_whatsapp = whatsapp_service.excluir_mensagem(conn, config, dict(mensagem), usuario["id"])
     whatsapp_service.registrar_atividade(conn, usuario["id"], "mensagem_excluida", conversa["telefone"], conversa_id)
     return jsonify({"ok": True, "apagada_no_whatsapp": apagada_no_whatsapp})
 

@@ -94,7 +94,7 @@ def listar_mensagens(conversa_id):
         lado = "participante"
     else:
         lado = None  # admin espiando pela aba "Todas" — não conta como leitura
-    mensagens = chat_interno_service.listar_mensagens(conn, conversa_id, lado)
+    mensagens = chat_interno_service.listar_mensagens(conn, conversa_id, lado, incluir_excluidas=usuario["admin"])
     return jsonify(mensagens)
 
 
@@ -205,9 +205,13 @@ def excluir_mensagem(conversa_id, mensagem_id):
     if mensagem["usuario_id"] != usuario["id"]:
         raise ApiError("Só dá pra apagar as suas próprias mensagens.", status=403, codigo="sem_permissao")
     conn.execute(
-        "UPDATE chat_interno_mensagens SET excluida_em = ? WHERE id = ?",
-        (whatsapp_service._now_iso(), mensagem_id),
+        "UPDATE chat_interno_mensagens SET excluida_em = ?, excluida_por = ? WHERE id = ?",
+        (whatsapp_service._now_iso(), usuario["id"], mensagem_id),
     )
+    # Fica no registro de atividades pro administrador saber que algo foi
+    # apagado — a mensagem some da tela de quem apagou, mas não do
+    # histórico da empresa.
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "mensagem_interna_excluida", f"conversa interna #{conversa_id}")
     return jsonify({"ok": True})
 
 

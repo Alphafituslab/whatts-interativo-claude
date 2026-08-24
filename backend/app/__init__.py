@@ -94,6 +94,22 @@ def create_app(test_config: dict = None) -> Flask:
     def frontend_index():
         return send_from_directory(FRONTEND_DIR, "index.html")
 
+    @app.get("/manifest.webmanifest")
+    def manifesto_pwa():
+        """Ficha do app pro celular (nome, ícone, cor) — é o que faz o
+        Android/iOS oferecer "instalar" e abrir sem barra de navegador."""
+        return send_from_directory(FRONTEND_DIR, "manifest.webmanifest", mimetype="application/manifest+json")
+
+    @app.get("/sw.js")
+    def service_worker():
+        """Precisa ser servido da RAIZ: um service worker só controla o
+        que está na pasta dele ou abaixo. Em /static/sw.js ele não
+        controlaria "/", e o app não seria instalável."""
+        resposta = send_from_directory(FRONTEND_DIR, "sw.js", mimetype="application/javascript")
+        resposta.headers["Service-Worker-Allowed"] = "/"
+        resposta.headers["Cache-Control"] = "no-cache"
+        return resposta
+
     if not app.debug:
         logging.basicConfig(level=logging.INFO)
 

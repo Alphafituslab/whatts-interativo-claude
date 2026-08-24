@@ -828,7 +828,7 @@ def concluir_lembrete(conn, lembrete_id: int):
 # ============================================================
 # EXCLUIR MENSAGEM (ex.: mandada pro cliente errado por engano)
 # ============================================================
-def excluir_mensagem(conn, config, mensagem: dict) -> bool:
+def excluir_mensagem(conn, config, mensagem: dict, excluida_por: int = None) -> bool:
     """Some da nossa conversa sempre (exclusão local garantida). Também
     TENTA apagar do lado do WhatsApp ("apagar para todos" via a Evolution
     API) — mas isso só funciona mesmo se o WhatsApp ainda permitir (janela
@@ -857,7 +857,7 @@ def excluir_mensagem(conn, config, mensagem: dict) -> bool:
                 apagada_no_whatsapp = resp.status_code < 400
         except Exception:
             pass
-    conn.execute("UPDATE whatsapp_mensagens SET excluida_em = ? WHERE id = ?", (_now_iso(), mensagem["id"]))
+    conn.execute("UPDATE whatsapp_mensagens SET excluida_em = ?, excluida_por = ? WHERE id = ?", (_now_iso(), excluida_por, mensagem["id"]))
     return apagada_no_whatsapp
 
 

@@ -272,6 +272,7 @@
                 <div class="usuario-atual-email">${escapeHtml(usuario ? usuario.email : "")}</div>
               </div>
             </div>
+            ${state.podeInstalarApp ? `<button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>` : ""}
             <div class="barra-acoes" style="margin-top:10px;">
               <button class="botao-icone" data-acao="alternar-tema" title="Alternar tema">🌓</button>
               <button class="botao secundario pequeno" data-acao="logout" style="margin-left:auto;">Sair</button>
@@ -1358,15 +1359,25 @@
       </div>`;
   }
 
+  // Só o administrador recebe mensagens apagadas do servidor. Pra ele, em
+  // vez de a mensagem sumir sem rastro, ela fica visível numa cor
+  // diferente com quem apagou — é o que permite conferir depois.
+  function htmlSeloApagada(m) {
+    if (!m.excluida_em) return "";
+    const quem = m.excluida_por_nome ? ` por ${escapeHtml(m.excluida_por_nome)}` : "";
+    return `<div class="wpp-bolha-apagada-selo">🗑️ Apagada${quem} · ${fmtData(m.excluida_em)}</div>`;
+  }
+
   function htmlBolha(m) {
     const saida = m.direcao === "saida";
     const iconeStatus = { pendente: "🕓", enviada: "✓", entregue: "✓✓", lida: "✓✓", falhou: "⚠️", recebida: "" }[m.status] || "";
-    return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.status === "falhou" ? "wpp-bolha-falhou" : ""}" data-wpp-bolha-id="${m.id}">
+    return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.status === "falhou" ? "wpp-bolha-falhou" : ""} ${m.excluida_em ? "wpp-bolha-apagada" : ""}" data-wpp-bolha-id="${m.id}">
+      ${htmlSeloApagada(m)}
       ${htmlAnexoBolha(m)}
       ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
       <div class="wpp-bolha-rodape">
         ${saida && m.status === "falhou" ? `<button type="button" class="wpp-bolha-excluir" data-acao="reenviar-mensagem" data-id="${m.id}" title="Tentar enviar de novo">🔄</button>` : ""}
-        ${saida ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem" data-id="${m.id}" title="Excluir mensagem (ex.: enviada por engano)">🗑️</button>` : ""}
+        ${saida && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem" data-id="${m.id}" title="Excluir mensagem (ex.: enviada por engano)">🗑️</button>` : ""}
         <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
         ${saida ? `<span class="wpp-bolha-status wpp-status-${m.status}" title="${m.erro ? escapeHtml(m.erro) : ""}">${iconeStatus}</span>` : ""}
       </div>
@@ -1725,12 +1736,13 @@
     // lado, só pra não ficar tudo emendado do mesmo lado.
     const saida = souAlheio ? m.usuario_id === conversa.criado_por_id : m.usuario_id === eu;
     const nomeAutor = m.usuario_id === conversa.criado_por_id ? conversa.criado_por_nome : (conversa.participante_nome || "—");
-    return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"}">
+    return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.excluida_em ? "wpp-bolha-apagada" : ""}">
       ${!saida || souAlheio ? `<div class="texto-suave" style="font-size:11px; font-weight:700; margin-bottom:2px;">${escapeHtml(nomeAutor)}</div>` : ""}
+      ${htmlSeloApagada(m)}
       ${htmlAnexoBolha(m)}
       ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
       <div class="wpp-bolha-rodape">
-        ${m.usuario_id === eu ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" title="Apagar (mandei por engano)">🗑️</button>` : ""}
+        ${m.usuario_id === eu && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" title="Apagar (mandei por engano)">🗑️</button>` : ""}
         <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
         ${m.usuario_id === eu ? htmlVistoInterno(m, conversa, eu) : ""}
       </div>
@@ -2903,6 +2915,26 @@
   // =======================================================================
   async function tratarAcao(acao, alvo) {
     switch (acao) {
+      case "instalar-app": {
+        // O navegador só deixa chamar prompt() a partir de um clique de
+        // verdade — por isso o evento fica guardado desde o carregamento
+        // e é usado aqui, não na hora em que ele chega.
+        const evt = state._promptInstalar;
+        if (!evt) {
+          return abrirModal(`
+            <h3 style="margin-top:0;">📲 Instalar no aparelho</h3>
+            <p>Pelo menu do navegador:</p>
+            <p><strong>Android (Chrome):</strong> toque em ⋮ → <strong>Adicionar à tela inicial</strong> / Instalar app.</p>
+            <p><strong>iPhone (Safari):</strong> toque no botão Compartilhar → <strong>Adicionar à Tela de Início</strong>.</p>
+            <div class="rodape-modal"><button type="button" class="botao" data-acao="fechar-modal">Entendi</button></div>`);
+        }
+        evt.prompt();
+        const escolha = await evt.userChoice;
+        state._promptInstalar = null;
+        state.podeInstalarApp = false;
+        if (escolha && escolha.outcome === "accepted") definirFlash("ok", "Pronto — o ícone do Whatts Inbox foi criado no aparelho.");
+        return montarRota();
+      }
       case "alternar-menu-mobile":
         document.querySelector(".barra-lateral").classList.toggle("aberta");
         document.querySelector(".fundo-menu-mobile").classList.toggle("visivel");
@@ -3934,6 +3966,22 @@
     state.flash = { tipo: "ok", texto: flashPosReload };
     localStorage.removeItem("whatts_flash_pos_reload");
   }
+  // App instalável no celular: o service worker é o que permite ao
+  // Android/iPhone oferecer "instalar" e abrir sem barra do navegador.
+  // Falhar aqui não pode derrubar nada — o sistema funciona igual no
+  // navegador comum, instalar é só conveniência.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    });
+  }
+  window.addEventListener("beforeinstallprompt", (evento) => {
+    evento.preventDefault();
+    state._promptInstalar = evento;
+    state.podeInstalarApp = true;
+    if (state.usuarioAtual) montarRota();
+  });
+
   carregarLogo();
   montarRota();
 })();
