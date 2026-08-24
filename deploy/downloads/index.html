@@ -83,6 +83,23 @@
     color: var(--aviso-texto); border-radius: 9px; padding: 12px 14px; font-size: 13px;
   }
   .aviso strong { display: block; margin-bottom: 3px; }
+  .celular { flex-direction: row; align-items: flex-start; }
+  .qr {
+    width: 132px; flex-shrink: 0; text-align: center; background: #fff;
+    border: 1px solid var(--borda); border-radius: 10px; padding: 8px;
+  }
+  .qr img { width: 100%; display: block; }
+  .qr span { display: block; font-size: 10.5px; color: #5a6472; margin-top: 5px; line-height: 1.3; }
+  .plataformas { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; width: 100%; margin-top: 4px; }
+  .plataforma {
+    border: 1px solid var(--borda); border-radius: 10px; padding: 14px 16px;
+    background: var(--fundo);
+  }
+  .plataforma h4 { margin: 0 0 8px; font-size: 13.5px; display: flex; align-items: center; gap: 7px; }
+  .plataforma ol { margin: 0; padding-left: 17px; font-size: 12.5px; color: var(--texto-suave); }
+  .plataforma ol li { margin-bottom: 4px; }
+  .plataforma strong { color: var(--texto); }
+  @media (max-width: 560px) { .celular { flex-direction: column; } .qr { width: 100%; max-width: 180px; margin: 0 auto; } }
   footer { text-align: center; padding: 20px; font-size: 12px; color: var(--texto-suave); }
   footer a { color: var(--leaf); }
 </style>
@@ -120,19 +137,63 @@
     </ol>
   </div>
 
-  <div class="cartao">
-    <div class="cartao-icone">📱</div>
+  <div class="cartao celular">
+    <div class="qr">
+      <img src="/downloads/qr-whatts.png" alt="QR Code do Whatts Inbox">
+      <span>Aponte a câmera<br>do aparelho aqui</span>
+    </div>
     <div class="cartao-texto">
       <h2>Whatts Inbox — celular e tablet</h2>
-      <p>Não precisa baixar nada: o próprio site vira um app, com ícone na tela de início
-         e abrindo em tela cheia. Funciona em qualquer rede, igual ao computador.</p>
+      <p>
+        Não existe arquivo para baixar aqui, e é de propósito: o próprio site <em>é</em> o
+        app. Ele se instala pelo navegador, com ícone na tela de início, abrindo em tela
+        cheia, sem barra de endereço — igual a um aplicativo de loja. Vantagem: atualiza
+        sozinho, sem ninguém precisar reinstalar nada quando o sistema muda.
+      </p>
     </div>
-    <a class="botao" href="https://whatts.alphafitus.com.br/">Abrir no aparelho</a>
-    <ol class="passos">
-      <li><strong>Android (Chrome):</strong> abra o site, toque em ⋮ e escolha <strong>Instalar app</strong> (ou “Adicionar à tela inicial”).</li>
-      <li><strong>iPhone / iPad (Safari):</strong> abra o site, toque em <strong>Compartilhar</strong> e escolha <strong>Adicionar à Tela de Início</strong>.</li>
-      <li>Já logado, o botão <strong>“Instalar no aparelho”</strong> também aparece no menu lateral do sistema.</li>
-    </ol>
+    <div class="plataformas">
+      <div class="plataforma">
+        <h4>🤖 Android — celular</h4>
+        <ol>
+          <li>Abra <strong>whatts.alphafitus.com.br</strong> no <strong>Chrome</strong>.</li>
+          <li>Toque em <strong>⋮</strong> (canto superior direito).</li>
+          <li>Escolha <strong>Instalar app</strong> ou <strong>Adicionar à tela inicial</strong>.</li>
+          <li>Confirme. O ícone aparece junto dos outros apps.</li>
+        </ol>
+      </div>
+      <div class="plataforma">
+        <h4>🍎 iPhone</h4>
+        <ol>
+          <li>Abra o endereço no <strong>Safari</strong> (no iPhone só funciona pelo Safari).</li>
+          <li>Toque no botão <strong>Compartilhar</strong> (quadrado com seta pra cima).</li>
+          <li>Role e escolha <strong>Adicionar à Tela de Início</strong>.</li>
+          <li>Toque em <strong>Adicionar</strong>.</li>
+        </ol>
+      </div>
+      <div class="plataforma">
+        <h4>📋 Tablet Android</h4>
+        <ol>
+          <li>Mesmo caminho do celular Android, pelo <strong>Chrome</strong>.</li>
+          <li>A tela se reorganiza sozinha pro tamanho maior: lista de conversas e conversa aberta lado a lado.</li>
+        </ol>
+      </div>
+      <div class="plataforma">
+        <h4>📋 iPad</h4>
+        <ol>
+          <li>Mesmo caminho do iPhone, pelo <strong>Safari</strong>.</li>
+          <li>Compartilhar → <strong>Adicionar à Tela de Início</strong>.</li>
+        </ol>
+      </div>
+    </div>
+    <div class="aviso">
+      <strong>Por que não tem APK nem arquivo da App Store?</strong>
+      Um APK precisaria ser assinado e reinstalado à mão em cada aparelho a cada
+      atualização; e o iPhone só aceita app publicado na App Store (conta paga de
+      desenvolvedor Apple e revisão a cada versão). Instalado pelo navegador, o app fica
+      idêntico na tela e sempre na última versão. Se um dia fizer falta ter o APK de
+      verdade pro Android, dá pra gerar — é só pedir.
+    </div>
+    <a class="botao" href="https://whatts.alphafitus.com.br/">Abrir o sistema</a>
   </div>
 
   <h3 class="secao">Ferramentas técnicas</h3>

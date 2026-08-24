@@ -845,6 +845,29 @@ def atualizar_foto_contato(conversa_id):
     return jsonify({"foto_url": foto_url})
 
 
+@bp.post("/contatos/atualizar-fotos")
+@requires_auth
+@requires_admin
+def atualizar_fotos_contatos():
+    """Puxa de uma vez a foto de perfil de todo contato que ainda não
+    tem. Útil logo depois de conectar um número: os contatos que já
+    existiam foram criados sem foto (o WhatsApp estava fora do ar na
+    hora), e sem isso eles só ganhariam foto na próxima mensagem."""
+    conn = get_db()
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("Conecte um número do WhatsApp antes — sem conexão não dá pra consultar as fotos.", status=400)
+    sem_foto = conn.execute(
+        "SELECT id, telefone FROM whatsapp_contatos WHERE empresa_id = ? AND foto_url IS NULL ORDER BY id",
+        (g.empresa_id,),
+    ).fetchall()
+    encontradas = 0
+    for contato in sem_foto:
+        if whatsapp_service.atualizar_foto_contato(conn, config, contato["id"], contato["telefone"]):
+            encontradas += 1
+    return jsonify({"consultados": len(sem_foto), "encontradas": encontradas})
+
+
 # ============================================================
 # NOTAS INTERNAS — nunca enviadas ao cliente, só visíveis pra equipe
 # ============================================================

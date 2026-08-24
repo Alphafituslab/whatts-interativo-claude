@@ -1172,12 +1172,40 @@ def buscar_foto_perfil_contato(config, telefone: str):
 
 
 def atualizar_foto_contato(conn, config, contato_id: int, telefone: str):
+    """Devolve a URL da foto e registra a tentativa.
+
+    Se o WhatsApp não estiver conectado, NÃO registra nada: perguntar não
+    foi possível, então não é uma resposta "esse contato não tem foto".
+    Sem esse cuidado, todo contato que chegou num momento de conexão
+    instável ficava marcado pra sempre como "já tentei" e nunca mais
+    ganhava foto — era por isso que a lista aparecia só com as iniciais.
+    """
+    if config.get("status_conexao") != "conectado":
+        return None
     url = buscar_foto_perfil_contato(config, telefone)
     conn.execute(
         "UPDATE whatsapp_contatos SET foto_url = ?, foto_atualizada_em = ? WHERE id = ?",
         (url, _now_iso(), contato_id),
     )
     return url
+
+
+# Contato sem foto é tentado de novo de vez em quando: ele pode ter posto
+# uma depois, ou ter aberto a privacidade. Com foto, não se insiste.
+DIAS_RETENTAR_FOTO = 3
+
+
+def _precisa_tentar_foto(contato: dict) -> bool:
+    if contato.get("foto_url"):
+        return False
+    ultima = contato.get("foto_atualizada_em")
+    if not ultima:
+        return True
+    try:
+        quando = datetime.datetime.fromisoformat(str(ultima).rstrip("Z"))
+    except (TypeError, ValueError):
+        return True
+    return (datetime.datetime.utcnow() - quando).days >= DIAS_RETENTAR_FOTO
 
 
 def obter_ou_criar_contato(conn, empresa_id: int, telefone: str, nome: str = None):
@@ -1701,11 +1729,13 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
 
     nome_contato = dados.get("pushName")
     contato = obter_ou_criar_contato(conn, empresa_id, telefone, nome_contato)
-    # Só tenta buscar a foto de perfil uma vez por contato (não em toda
-    # mensagem) — se ele não tiver foto pública, não adianta insistir a
-    # cada webhook; quem quiser tentar de novo usa o botão de atualizar.
-    if contato.get("foto_atualizada_em") is None:
-        contato["foto_url"] = atualizar_foto_contato(conn, config, contato["id"], telefone)
+    # Não busca a foto em toda mensagem: quem já tem foto não é
+    # consultado de novo, e quem não tem só é tentado a cada poucos dias
+    # (ver _precisa_tentar_foto).
+    if _precisa_tentar_foto(contato):
+        nova = atualizar_foto_contato(conn, config, contato["id"], telefone)
+        if nova:
+            contato["foto_url"] = nova
     conversa, conversa_nova = obter_ou_criar_conversa(conn, contato["id"])
     texto = _extrair_texto(dados)
     agora = _now_iso()

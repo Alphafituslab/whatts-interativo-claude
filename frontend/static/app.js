@@ -268,8 +268,8 @@
               <button type="button" class="wpp-avatar-botao" data-acao="abrir-seletor-foto" title="Trocar foto de perfil">${htmlAvatar(usuario, 34)}</button>
               <input type="file" class="wpp-input-foto-oculto" data-acao-change="enviar-foto-perfil" accept="image/*" hidden>
               <div>
-                <div class="usuario-atual-nome">${escapeHtml(usuario ? usuario.nome : "")}</div>
-                <div class="usuario-atual-email">${escapeHtml(usuario ? usuario.email : "")}</div>
+                <div class="usuario-atual-nome" title="${escapeHtml(usuario ? usuario.nome : "")}">${escapeHtml(usuario ? usuario.nome : "")}</div>
+                <div class="usuario-atual-email" title="${escapeHtml(usuario ? usuario.email : "")}">${escapeHtml(usuario ? usuario.email : "")}</div>
               </div>
             </div>
             ${state.podeInstalarApp ? `<button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>` : ""}
@@ -2260,6 +2260,12 @@
        </div>
 
        <div class="cartao">
+         <h3 style="margin-top:0;">Fotos dos contatos</h3>
+         <p class="dica">Na lista de conversas aparece a foto de perfil do WhatsApp de cada cliente; quem não tem foto pública fica com as iniciais. Contatos que já existiam antes de conectar o número foram criados sem foto — este botão busca todas de uma vez.</p>
+         <button type="button" class="botao secundario" data-acao="atualizar-fotos-contatos">🖼️ Buscar fotos que faltam</button>
+       </div>
+
+       <div class="cartao">
          <h3 style="margin-top:0;">Mensagem de saudação</h3>
          <p class="dica">É a primeira mensagem que o cliente recebe. Deixe em branco pra usar o padrão automático (saudação simples + lista gerada a partir dos setores cadastrados). Se escrever aqui, esse texto vale <strong>exatamente como está escrito</strong> — inclusive a lista numerada — nada é acrescentado depois.</p>
          <p class="dica">Importante: mantenha os números 1, 2, 3… na <strong>mesma ordem</strong> dos setores cadastrados hoje (${setoresAtuais.map((s, i) => `${i + 1}=${s}`).join(", ")}) — é por esse número que o sistema sabe pra qual setor direcionar, o texto ao lado do número é só o que o cliente lê.</p>
@@ -3119,6 +3125,17 @@
         const usuarios = await chamarApi("/usuarios");
         modalEncaminhar(Number(alvo.dataset.id), usuarios);
         return;
+      }
+      case "atualizar-fotos-contatos": {
+        alvo.disabled = true;
+        alvo.textContent = "Buscando…";
+        try {
+          const r = await chamarApi("/whatsapp/contatos/atualizar-fotos", { method: "POST" });
+          definirFlash("ok", `${r.encontradas} foto(s) encontrada(s) em ${r.consultados} contato(s) sem foto. Quem não apareceu é porque não tem foto pública no WhatsApp.`);
+        } finally {
+          alvo.disabled = false;
+        }
+        return renderWhatsappConfiguracao();
       }
       case "atualizar-foto-contato": {
         const id = Number(alvo.dataset.id);

@@ -257,7 +257,11 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-versao-rodape { margin-top: 10px; font-size: 10px; color: var(--texto-suave); opacity: 0.55; text-align: center; font-variant-numeric: tabular-nums; }
 .wpp-digitando { color: var(--primaria); font-style: italic; font-weight: 600; animation: piscar-aviso 1.4s ease-in-out infinite; }
 .wpp-icone-preenchido { background: color-mix(in srgb, var(--primaria) 16%, transparent); }
-.usuario-atual-chip { display: flex; align-items: center; gap: 10px; padding: 6px; }
+/* min-width:0 nos dois níveis: sem isso o item flex se recusa a encolher
+   abaixo do conteúdo e o email vaza pra fora da barra lateral. */
+.usuario-atual-chip { display: flex; align-items: center; gap: 10px; padding: 6px; min-width: 0; }
+.usuario-atual-chip > div { flex: 1; min-width: 0; }
+.usuario-atual-nome, .usuario-atual-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usuario-atual-nome { font-size: 13px; font-weight: 700; line-height: 1.2; }
 .usuario-atual-email { font-size: 11px; color: var(--texto-suave); }
 

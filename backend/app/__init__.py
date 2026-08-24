@@ -1,23 +1,13 @@
-import io
 import logging
 import os
 import secrets
-import zipfile
 
-from flask import Flask, jsonify, redirect, send_file, send_from_directory
+from flask import Flask, jsonify, redirect, send_from_directory
 
 from .context import ApiError, close_db
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "frontend")
 FRONTEND_DIR = os.path.abspath(FRONTEND_DIR)
-# Pasta com os arquivos-fonte do instalador do atalho de desktop. O ZIP
-# entregue em /instalador é montado DESTA pasta a cada download, então
-# nunca existe uma versão antiga esquecida em algum lugar: o que está no
-# repositório é o que o usuário baixa.
-INSTALADOR_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "instalador")
-)
-
 # Muda a cada vez que o processo sobe (cada atualização/restart do
 # backend). O frontend fica de olho nisso (ver GET /api/v1/versao) pra
 # saber quando uma versão nova subiu e forçar todo mundo a logar de novo
@@ -67,13 +57,14 @@ def create_app(test_config: dict = None) -> Flask:
         app.logger.exception("Erro não tratado")
         return jsonify({"erro": "erro_interno", "mensagem": "Erro interno do servidor."}), 500
 
-    from .routes import auth, chat_interno, followup, sistema, usuarios, whatsapp
+    from .routes import auth, chat_interno, downloads, followup, sistema, usuarios, whatsapp
     app.register_blueprint(auth.bp)
     app.register_blueprint(whatsapp.bp)
     app.register_blueprint(usuarios.bp)
     app.register_blueprint(sistema.bp)
     app.register_blueprint(chat_interno.bp)
     app.register_blueprint(followup.bp)
+    app.register_blueprint(downloads.bp)
 
     @app.get("/api/v1/saude")
     def saude():
@@ -103,35 +94,12 @@ def create_app(test_config: dict = None) -> Flask:
     def frontend_index():
         return send_from_directory(FRONTEND_DIR, "index.html")
 
-    # ATENÇÃO ao endereço: /downloads/* NÃO chega aqui — o Caddy serve
-    # aquela pasta direto do disco (/opt/alphafitus-downloads), que é a
-    # página central de downloads da Alphafitus, compartilhada com o
-    # Alphafitus OS. Por isso o ZIP mora em /instalador/, e é a página de
-    # lá que aponta pra cá.
     @app.get("/instalador/WhattsInbox-instalador.zip")
-    def baixar_instalador():
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
-            for nome in sorted(os.listdir(INSTALADOR_DIR)):
-                caminho = os.path.join(INSTALADOR_DIR, nome)
-                if os.path.isfile(caminho):
-                    z.write(caminho, nome)
-        buffer.seek(0)
-        return send_file(
-            buffer,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name="WhattsInbox-instalador.zip",
-            max_age=0,
-        )
-
     @app.get("/static/instalador/WhattsInbox-instalador.zip")
-    def instalador_link_antigo():
-        """O ZIP ficava aqui, numa cópia estática que precisava ser
-        regerada à mão (e por isso envelhecia). Agora ele é montado na
-        hora em /instalador — este endereço só existe pra não quebrar
-        link antigo que alguém tenha salvo."""
-        return redirect("/instalador/WhattsInbox-instalador.zip", code=302)
+    def instalador_enderecos_antigos():
+        """Dois endereços que o ZIP já teve. Agora ele mora junto da
+        página de downloads, atrás do login do sistema."""
+        return redirect("/downloads/WhattsInbox-instalador.zip", code=302)
 
     @app.get("/manifest.webmanifest")
     def manifesto_pwa():

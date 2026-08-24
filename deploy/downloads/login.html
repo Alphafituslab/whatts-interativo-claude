@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Downloads Alphafitus</title>
+<meta name="theme-color" content="#00b4a3">
+<link rel="icon" href="/static/img/icone-192.png">
+<style>
+  :root {
+    --teal: #00b4a3; --leaf: #00af6b; --ink: #071912;
+    --fundo: #f4f6f8; --superficie: #fff; --texto: #1a202c;
+    --texto-suave: #5a6472; --borda: #e2e6ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fundo: #0d1614; --superficie: #15201d; --texto: #e8efec; --texto-suave: #94a5a0; --borda: #243230; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: var(--fundo); color: var(--texto);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; line-height: 1.5;
+  }
+  .caixa {
+    width: 100%; max-width: 380px; background: var(--superficie);
+    border: 1px solid var(--borda); border-radius: 14px; padding: 30px 28px;
+    box-shadow: 0 10px 34px rgba(0,0,0,0.10);
+  }
+  .marca { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .marca img { width: 44px; height: 44px; border-radius: 11px; }
+  .marca h1 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
+  .marca p { margin: 0; font-size: 12.5px; color: var(--texto-suave); }
+  label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 5px; color: var(--texto-suave); }
+  input {
+    width: 100%; padding: 11px 13px; margin-bottom: 15px; font-size: 14px;
+    border: 1px solid var(--borda); border-radius: 9px;
+    background: var(--fundo); color: var(--texto);
+  }
+  input:focus { outline: 2px solid var(--leaf); outline-offset: 1px; border-color: transparent; }
+  button {
+    width: 100%; padding: 12px; border: none; border-radius: 9px; cursor: pointer;
+    background: var(--leaf); color: #fff; font-weight: 700; font-size: 14.5px;
+  }
+  button:hover { background: var(--teal); }
+  .erro {
+    background: rgba(200, 50, 50, 0.12); border: 1px solid rgba(200, 50, 50, 0.4);
+    color: #c0392b; border-radius: 9px; padding: 10px 12px; font-size: 13px; margin: 0 0 16px;
+  }
+  .nota { font-size: 12.5px; color: var(--texto-suave); margin: 18px 0 0; text-align: center; }
+  .nota a { color: var(--leaf); }
+</style>
+</head>
+<body>
+  <form class="caixa" method="post" action="/downloads/entrar">
+    <div class="marca">
+      <img src="/static/img/icone-192.png" alt="">
+      <div>
+        <h1>Downloads Alphafitus</h1>
+        <p>Instaladores e ferramentas</p>
+      </div>
+    </div>
+    <!--ERRO-->
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="username" required autofocus>
+    <label for="senha">Senha</label>
+    <input id="senha" name="senha" type="password" autocomplete="current-password" required>
+    <button type="submit">Entrar</button>
+    <p class="nota">
+      É o <strong>mesmo login e senha</strong> do Whatts Inbox.<br>
+      Trocou a senha lá? Ela já vale aqui.<br>
+      <a href="/">← Ir para o sistema</a>
+    </p>
+  </form>
+</body>
+</html>
