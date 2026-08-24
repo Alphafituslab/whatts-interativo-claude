@@ -333,14 +333,28 @@
     chamarApi(`/chat-interno/conversas/${conversaId}/digitando`, { method: "POST" }).catch(() => {});
   });
 
-  // Enter envia a mensagem (padrão de todo chat); Shift+Enter quebra linha.
-  // Cobre tanto o WhatsApp quanto o chat interno.
+  // Enter envia (padrão de todo chat); Shift+Enter quebra linha.
+  // Vale nas barras de digitação das duas telas e também nas janelas de
+  // iniciar conversa — lá o Enter fazia nada e a pessoa tinha que ir
+  // com o mouse até o botão.
+  const FORMS_ENTER_ENVIA = [
+    "enviar-mensagem",            // conversa de cliente
+    "enviar-mensagem-interna",    // conversa interna
+    "iniciar-conversa",           // janela "Nova conversa" (cliente)
+    "iniciar-conversa-interna",   // janela "Nova conversa interna"
+  ];
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.shiftKey) return;
-    const textarea = e.target.closest('form[data-form="enviar-mensagem"] textarea[name="texto"], form[data-form="enviar-mensagem-interna"] textarea[name="texto"]');
+    const seletor = FORMS_ENTER_ENVIA.map((f) => `form[data-form="${f}"] textarea[name="texto"]`).join(", ");
+    const textarea = e.target.closest(seletor);
     if (!textarea) return;
+    const form = textarea.closest("form");
+    // Nas janelas há campos obrigatórios antes (ex.: com quem falar) —
+    // se faltar preencher, deixa o navegador mostrar o aviso dele em vez
+    // de enviar pela metade.
+    if (!form.checkValidity()) { form.reportValidity(); e.preventDefault(); return; }
     e.preventDefault();
-    textarea.closest("form").requestSubmit();
+    form.requestSubmit();
   });
 
   function abrirModal(html) {
