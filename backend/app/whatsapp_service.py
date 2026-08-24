@@ -2224,43 +2224,82 @@ def criar_nota(conn, conversa_id: int, usuario_id: int, texto: str):
 # ============================================================
 # ETIQUETAS (TAGS) LIVRES
 # ============================================================
-def listar_tags(conn, empresa_id: int):
-    return [dict(r) for r in conn.execute("SELECT * FROM whatsapp_tags WHERE empresa_id = ? ORDER BY nome", (empresa_id,)).fetchall()]
+# ============================================================
+# ETIQUETAS
+#
+# Cada etiqueta pertence a UM usuário: o que eu escrevo num cliente é
+# anotação minha, e o colega que atende o mesmo cliente não vê nem é
+# atrapalhado por ela. Duas pessoas podem ter uma "Urgente" cada uma,
+# com cores diferentes, sem se pisarem.
+#
+# Como a etiqueta tem dono, a etiquetagem herda o dono junto — por isso
+# as tabelas de ligação não guardam usuario_id: basta olhar de quem é a
+# etiqueta. Todas as consultas abaixo filtram por t.usuario_id.
+# ============================================================
+def listar_tags(conn, empresa_id: int, usuario_id: int):
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM whatsapp_tags WHERE empresa_id = ? AND usuario_id = ? ORDER BY nome",
+        (empresa_id, usuario_id),
+    ).fetchall()]
 
 
-def criar_tag(conn, empresa_id: int, nome: str, cor: str):
-    ja_existe = conn.execute("SELECT 1 FROM whatsapp_tags WHERE empresa_id = ? AND nome = ?", (empresa_id, nome)).fetchone()
+def criar_tag(conn, empresa_id: int, usuario_id: int, nome: str, cor: str):
+    ja_existe = conn.execute(
+        "SELECT 1 FROM whatsapp_tags WHERE empresa_id = ? AND usuario_id = ? AND lower(nome) = lower(?)",
+        (empresa_id, usuario_id, nome),
+    ).fetchone()
     if ja_existe:
-        raise ApiError(f"Já existe uma etiqueta '{nome}'.", status=409, codigo="tag_duplicada")
-    conn.execute("INSERT INTO whatsapp_tags (empresa_id, nome, cor) VALUES (?, ?, ?)", (empresa_id, nome, cor or "#6b7280"))
-    return dict(conn.execute("SELECT * FROM whatsapp_tags WHERE empresa_id = ? AND nome = ?", (empresa_id, nome)).fetchone())
+        raise ApiError(f"Você já tem uma etiqueta '{nome}'.", status=409, codigo="tag_duplicada")
+    conn.execute(
+        "INSERT INTO whatsapp_tags (empresa_id, usuario_id, nome, cor) VALUES (?, ?, ?, ?)",
+        (empresa_id, usuario_id, nome, cor or "#6b7280"),
+    )
+    return dict(conn.execute(
+        "SELECT * FROM whatsapp_tags WHERE empresa_id = ? AND usuario_id = ? AND nome = ?",
+        (empresa_id, usuario_id, nome),
+    ).fetchone())
 
 
-def excluir_tag(conn, empresa_id: int, tag_id: int) -> bool:
-    conn.execute("DELETE FROM whatsapp_conversa_tags WHERE tag_id = ? AND tag_id IN (SELECT id FROM whatsapp_tags WHERE empresa_id = ?)", (tag_id, empresa_id))
-    cur = conn.execute("DELETE FROM whatsapp_tags WHERE id = ? AND empresa_id = ?", (tag_id, empresa_id))
+def excluir_tag(conn, empresa_id: int, usuario_id: int, tag_id: int) -> bool:
+    dona = conn.execute(
+        "SELECT 1 FROM whatsapp_tags WHERE id = ? AND empresa_id = ? AND usuario_id = ?",
+        (tag_id, empresa_id, usuario_id),
+    ).fetchone()
+    if dona is None:
+        return False
+    conn.execute("DELETE FROM whatsapp_conversa_tags WHERE tag_id = ?", (tag_id,))
+    conn.execute("DELETE FROM chat_interno_conversa_tags WHERE tag_id = ?", (tag_id,))
+    cur = conn.execute("DELETE FROM whatsapp_tags WHERE id = ?", (tag_id,))
     return cur.rowcount > 0
 
 
-def definir_tags_da_conversa(conn, empresa_id: int, conversa_id: int, tag_ids: list):
-    conn.execute("DELETE FROM whatsapp_conversa_tags WHERE conversa_id = ?", (conversa_id,))
+def definir_tags_da_conversa(conn, empresa_id: int, usuario_id: int, conversa_id: int, tag_ids: list):
+    """Apaga só as MINHAS etiquetagens desta conversa antes de regravar —
+    as que o colega pôs continuam intactas, ele nem fica sabendo."""
+    conn.execute(
+        "DELETE FROM whatsapp_conversa_tags WHERE conversa_id = ? AND tag_id IN "
+        "(SELECT id FROM whatsapp_tags WHERE usuario_id = ?)",
+        (conversa_id, usuario_id),
+    )
     for tid in tag_ids:
         conn.execute(
-            "INSERT INTO whatsapp_conversa_tags (conversa_id, tag_id) SELECT ?, id FROM whatsapp_tags WHERE id = ? AND empresa_id = ?",
-            (conversa_id, tid, empresa_id),
+            "INSERT INTO whatsapp_conversa_tags (conversa_id, tag_id) "
+            "SELECT ?, id FROM whatsapp_tags WHERE id = ? AND empresa_id = ? AND usuario_id = ?",
+            (conversa_id, tid, empresa_id, usuario_id),
         )
 
 
-def tags_por_conversa(conn, conversa_ids: list):
-    """Busca as tags de várias conversas de uma vez (evita 1 query por
-    conversa na listagem)."""
+def tags_por_conversa(conn, conversa_ids: list, usuario_id: int):
+    """Etiquetas de várias conversas de uma vez (evita uma consulta por
+    linha da lista). Traz só as do usuário que está olhando."""
     if not conversa_ids:
         return {}
     marcadores = ",".join("?" * len(conversa_ids))
     rows = conn.execute(
         f"SELECT ct.conversa_id, t.id, t.nome, t.cor FROM whatsapp_conversa_tags ct "
-        f"JOIN whatsapp_tags t ON t.id = ct.tag_id WHERE ct.conversa_id IN ({marcadores}) ORDER BY t.nome",
-        conversa_ids,
+        f"JOIN whatsapp_tags t ON t.id = ct.tag_id "
+        f"WHERE ct.conversa_id IN ({marcadores}) AND t.usuario_id = ? ORDER BY t.nome",
+        list(conversa_ids) + [usuario_id],
     ).fetchall()
     resultado = {}
     for r in rows:

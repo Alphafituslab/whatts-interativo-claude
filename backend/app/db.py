@@ -43,6 +43,7 @@ SCHEMA_FILES = [
     "schema_028_quem_apagou.sql",
     "schema_029_citar_editar.sql",
     "schema_030_etiquetas_chat_interno.sql",
+    "schema_031_etiquetas_por_usuario.sql",
 ]
 
 

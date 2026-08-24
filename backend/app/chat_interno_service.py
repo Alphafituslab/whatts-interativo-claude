@@ -134,17 +134,18 @@ def _aplicar_apelidos(conversas, apelidos):
     return conversas
 
 
-def tags_por_conversa(conn, conversa_ids: list):
+def tags_por_conversa(conn, conversa_ids: list, usuario_id: int):
     """Etiquetas de várias conversas internas de uma vez — evita uma
-    consulta por linha da lista. Mesma tabela de etiquetas das conversas
-    de cliente: a etiqueta é da empresa, não do canal."""
+    consulta por linha da lista. Só as do usuário que está olhando: a
+    etiqueta é dele, não da empresa (ver whatsapp_service)."""
     if not conversa_ids:
         return {}
     marcadores = ",".join("?" * len(conversa_ids))
     rows = conn.execute(
         f"SELECT ct.conversa_id, t.id, t.nome, t.cor FROM chat_interno_conversa_tags ct "
-        f"JOIN whatsapp_tags t ON t.id = ct.tag_id WHERE ct.conversa_id IN ({marcadores}) ORDER BY t.nome",
-        conversa_ids,
+        f"JOIN whatsapp_tags t ON t.id = ct.tag_id "
+        f"WHERE ct.conversa_id IN ({marcadores}) AND t.usuario_id = ? ORDER BY t.nome",
+        list(conversa_ids) + [usuario_id],
     ).fetchall()
     resultado = {}
     for r in rows:
@@ -152,19 +153,24 @@ def tags_por_conversa(conn, conversa_ids: list):
     return resultado
 
 
-def definir_tags_da_conversa(conn, empresa_id: int, conversa_id: int, tag_ids: list):
-    """O SELECT ... WHERE empresa_id garante que só entra etiqueta da
-    própria empresa, mesmo se vier um id de fora no pedido."""
-    conn.execute("DELETE FROM chat_interno_conversa_tags WHERE conversa_id = ?", (conversa_id,))
+def definir_tags_da_conversa(conn, empresa_id: int, usuario_id: int, conversa_id: int, tag_ids: list):
+    """Mexe só nas etiquetagens de quem está chamando; as do colega
+    ficam onde estão. O WHERE de empresa/usuário no INSERT também
+    garante que nenhum id de fora entra, mesmo se vier no pedido."""
+    conn.execute(
+        "DELETE FROM chat_interno_conversa_tags WHERE conversa_id = ? AND tag_id IN "
+        "(SELECT id FROM whatsapp_tags WHERE usuario_id = ?)",
+        (conversa_id, usuario_id),
+    )
     for tid in tag_ids:
         conn.execute(
             "INSERT INTO chat_interno_conversa_tags (conversa_id, tag_id) "
-            "SELECT ?, id FROM whatsapp_tags WHERE id = ? AND empresa_id = ?",
-            (conversa_id, tid, empresa_id),
+            "SELECT ?, id FROM whatsapp_tags WHERE id = ? AND empresa_id = ? AND usuario_id = ?",
+            (conversa_id, tid, empresa_id, usuario_id),
         )
 
 
-def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, empresa_id_admin: int = None, tag_id=None):
+def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, empresa_id_admin: int = None, tag_id=None, tags_de: int = None):
     """Por padrão só mostra as em aberto — encerrar uma conversa faz ela
     sumir da lista (sem apagar nada, ver fechar_conversa), pra tela não
     ficar poluída de conversas antigas. incluir_encerradas=True mostra só
@@ -183,8 +189,14 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
     # Filtro por etiqueta, opcional — vale junto com a aba escolhida.
     condicao_tag = ""
     if tag_id:
-        condicao_tag = " AND EXISTS (SELECT 1 FROM chat_interno_conversa_tags ct WHERE ct.conversa_id = c.id AND ct.tag_id = ?)"
-        params = tuple(params) + (tag_id,)
+        # A etiqueta tem que ser de quem está filtrando — filtrar pelo id
+        # de uma etiqueta alheia não pode devolver nada.
+        condicao_tag = (
+            " AND EXISTS (SELECT 1 FROM chat_interno_conversa_tags ct "
+            "JOIN whatsapp_tags t ON t.id = ct.tag_id "
+            "WHERE ct.conversa_id = c.id AND ct.tag_id = ? AND t.usuario_id = ?)"
+        )
+        params = tuple(params) + (tag_id, tags_de if tags_de is not None else usuario_id)
     rows = conn.execute(
         f"""
         SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
@@ -200,7 +212,7 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
         params,
     ).fetchall()
     conversas = _marcar_online([dict(r) for r in rows])
-    mapa_tags = tags_por_conversa(conn, [c["id"] for c in conversas])
+    mapa_tags = tags_por_conversa(conn, [c["id"] for c in conversas], tags_de if tags_de is not None else usuario_id)
     for c in conversas:
         c["tags"] = mapa_tags.get(c["id"], [])
     return _aplicar_apelidos(conversas, obter_apelidos(conn, usuario_id))

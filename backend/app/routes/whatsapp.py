@@ -192,7 +192,7 @@ def _conversa_para_json(row, tags=None):
 
 
 def _conversas_com_tags(conn, rows):
-    mapa_tags = whatsapp_service.tags_por_conversa(conn, [r["id"] for r in rows])
+    mapa_tags = whatsapp_service.tags_por_conversa(conn, [r["id"] for r in rows], g.usuario_atual["id"])
     return [_conversa_para_json(r, mapa_tags.get(r["id"], [])) for r in rows]
 
 
@@ -302,12 +302,14 @@ def listar_conversas():
     # os "Orçamento enviado" que estão na fila, por exemplo).
     tag_id = request.args.get("tag_id")
     if tag_id:
+        # t2.usuario_id: filtrar pelo id de uma etiqueta alheia não pode
+        # devolver nada — nem revelar que ela existe.
         condicoes.append(
             "EXISTS (SELECT 1 FROM whatsapp_conversa_tags ct2 "
             "JOIN whatsapp_tags t2 ON t2.id = ct2.tag_id "
-            "WHERE ct2.conversa_id = c.id AND ct2.tag_id = ? AND t2.empresa_id = ?)"
+            "WHERE ct2.conversa_id = c.id AND ct2.tag_id = ? AND t2.empresa_id = ? AND t2.usuario_id = ?)"
         )
-        params.extend([tag_id, g.empresa_id])
+        params.extend([tag_id, g.empresa_id, g.usuario_atual["id"]])
 
     where = "WHERE " + " AND ".join(condicoes)
     rows = conn.execute(
@@ -1033,31 +1035,35 @@ def criar_nota(conversa_id):
 # ============================================================
 # ETIQUETAS (TAGS) LIVRES
 # ============================================================
+# Nenhuma rota daqui é de admin: a etiqueta é de quem a criou, e cada
+# um cuida das suas. Um admin também não mexe nas etiquetas dos outros —
+# é anotação pessoal, não configuração da empresa.
 @bp.get("/tags")
 @requires_auth
 def listar_tags():
     conn = get_db()
-    return jsonify(whatsapp_service.listar_tags(conn, g.empresa_id))
+    return jsonify(whatsapp_service.listar_tags(conn, g.empresa_id, g.usuario_atual["id"]))
 
 
 @bp.post("/tags")
-@requires_admin
+@requires_auth
 def criar_tag():
     dados = request.get_json(silent=True) or {}
     nome = (dados.get("nome") or "").strip()
     if not nome:
         raise ApiError("Informe o nome da etiqueta.", status=400)
     conn = get_db()
-    return jsonify(whatsapp_service.criar_tag(conn, g.empresa_id, nome, dados.get("cor"))), 201
+    return jsonify(whatsapp_service.criar_tag(conn, g.empresa_id, g.usuario_atual["id"], nome, dados.get("cor"))), 201
 
 
 @bp.put("/tags/<int:tag_id>")
 @requires_auth
-@requires_admin
 def editar_tag(tag_id):
     """Renomeia a etiqueta e/ou troca a cor. Como a conversa guarda o ID
     da etiqueta (e não uma cópia do nome), renomear aqui muda o nome em
-    todas as conversas de uma vez — ninguém precisa reetiquetar nada."""
+    todas as conversas de uma vez — não é preciso reetiquetar nada.
+
+    Só o dono edita: a etiqueta é anotação pessoal dele."""
     conn = get_db()
     dados = request.get_json(silent=True) or {}
     nome = (dados.get("nome") or "").strip()
@@ -1065,16 +1071,17 @@ def editar_tag(tag_id):
     if not nome:
         raise ApiError("Informe o nome da etiqueta.", status=400)
     existe = conn.execute(
-        "SELECT 1 FROM whatsapp_tags WHERE id = ? AND empresa_id = ?", (tag_id, g.empresa_id)
+        "SELECT 1 FROM whatsapp_tags WHERE id = ? AND empresa_id = ? AND usuario_id = ?",
+        (tag_id, g.empresa_id, g.usuario_atual["id"]),
     ).fetchone()
     if existe is None:
         raise ApiError("Etiqueta não encontrada.", status=404, codigo="nao_encontrado")
     duplicada = conn.execute(
-        "SELECT 1 FROM whatsapp_tags WHERE empresa_id = ? AND lower(nome) = lower(?) AND id != ?",
-        (g.empresa_id, nome, tag_id),
+        "SELECT 1 FROM whatsapp_tags WHERE empresa_id = ? AND usuario_id = ? AND lower(nome) = lower(?) AND id != ?",
+        (g.empresa_id, g.usuario_atual["id"], nome, tag_id),
     ).fetchone()
     if duplicada:
-        raise ApiError("Já existe uma etiqueta com esse nome.", status=409, codigo="nome_duplicado")
+        raise ApiError("Você já tem uma etiqueta com esse nome.", status=409, codigo="nome_duplicado")
     if cor:
         conn.execute("UPDATE whatsapp_tags SET nome = ?, cor = ? WHERE id = ?", (nome, cor, tag_id))
     else:
@@ -1095,19 +1102,19 @@ def contar_por_tag():
         LEFT JOIN whatsapp_conversa_tags ct2 ON ct2.tag_id = t.id
         LEFT JOIN whatsapp_conversas c ON c.id = ct2.conversa_id
              AND c.excluida_em IS NULL AND c.arquivada = 0
-        WHERE t.empresa_id = ?
+        WHERE t.empresa_id = ? AND t.usuario_id = ?
         GROUP BY t.id
         """,
-        (g.empresa_id,),
+        (g.empresa_id, g.usuario_atual["id"]),
     ).fetchall()
     return jsonify({str(r["id"]): r["total"] for r in rows})
 
 
 @bp.delete("/tags/<int:tag_id>")
-@requires_admin
+@requires_auth
 def excluir_tag(tag_id):
     conn = get_db()
-    if not whatsapp_service.excluir_tag(conn, g.empresa_id, tag_id):
+    if not whatsapp_service.excluir_tag(conn, g.empresa_id, g.usuario_atual["id"], tag_id):
         raise ApiError("Etiqueta não encontrada.", status=404, codigo="nao_encontrado")
     return jsonify({"ok": True})
 
@@ -1121,7 +1128,7 @@ def definir_tags_conversa(conversa_id):
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
         raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
-    whatsapp_service.definir_tags_da_conversa(conn, g.empresa_id, conversa_id, dados.get("tag_ids") or [])
+    whatsapp_service.definir_tags_da_conversa(conn, g.empresa_id, g.usuario_atual["id"], conversa_id, dados.get("tag_ids") or [])
     return jsonify({"ok": True})
 
 

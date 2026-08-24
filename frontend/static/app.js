@@ -1881,7 +1881,7 @@
       </div>
       <div class="wpp-tags-linha">
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}
-        <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta — depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
+        <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
       ${htmlNotas(conversa.id, notas || [])}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
@@ -2064,7 +2064,7 @@
   function modalNovaEtiqueta(aoCriar) {
     const wrap = abrirModal(`
       <h3 style="margin-top:0;">🏷️ Nova etiqueta</h3>
-      <p class="dica">Ela fica disponível para todas as conversas, e a lista de Conversas pode ser filtrada por ela.</p>
+      <p class="dica">Só você enxerga suas etiquetas. Ela fica disponível em todas as suas conversas — de cliente e do chat interno — e a lista pode ser filtrada por ela.</p>
       <div class="campo"><label>Nome</label><input name="nome" placeholder="Ex.: Orçamento enviado" required maxlength="40"></div>
       <div class="campo"><label>Cor</label><input type="color" name="cor" value="#0a7d67" style="width:64px; padding:2px;"></div>
       <div class="rodape-modal">
@@ -2311,7 +2311,7 @@
       </div>
       <div class="wpp-tags-linha">
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}
-        <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
+        <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens-interno>${mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("")}</div>
@@ -2551,6 +2551,7 @@
   function modalTags(conversaId, todasTags, marcadas, interna) {
     abrirModal(`
       <h3 style="margin-top:0;">Etiquetas</h3>
+      <p class="dica">Suas etiquetas — os colegas não veem as que você marca aqui.</p>
       <form data-form="definir-tags-conversa" data-conversa-id="${conversaId}" data-interna="${interna ? "1" : "0"}">
         <div class="wpp-tags-checklist">
           ${todasTags.length ? todasTags.map((t) => `
@@ -2835,8 +2836,8 @@
        </div>
 
        <div class="cartao">
-         <h3 style="margin-top:0;">Etiquetas dos clientes</h3>
-         <p class="dica">Marque conversas por assunto ou fase — "Orçamento enviado", "Cliente novo", "Urgente" — e depois filtre a lista de Conversas por elas. Renomear ou trocar a cor aqui vale para <strong>todas</strong> as conversas já etiquetadas de uma vez.</p>
+         <h3 style="margin-top:0;">Minhas etiquetas</h3>
+         <p class="dica">Marque conversas por assunto ou fase — "Orçamento enviado", "Cliente novo", "Urgente" — e depois filtre a lista por elas. <strong>São suas:</strong> ninguém mais vê as etiquetas que você põe, e cada colega tem as dele (dois podem ter uma "Urgente" cada um, com cores diferentes). Valem tanto nas conversas de cliente quanto no chat interno. Renomear ou trocar a cor aqui muda em todas as suas conversas já etiquetadas de uma vez.</p>
          <ul style="list-style:none; padding:0; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
            ${etiquetas.map((t) => `
              <li style="display:flex; align-items:center; gap:8px;">
@@ -3858,7 +3859,7 @@
         if (!nome) { definirFlash("erro", "A etiqueta precisa de um nome."); return renderWhatsappConfiguracao(); }
         await chamarApi(`/whatsapp/tags/${alvo.dataset.tagId}`, { method: "PUT", body: { nome } });
         state._tagsCache = null;
-        definirFlash("ok", "Etiqueta renomeada em todas as conversas.");
+        definirFlash("ok", "Etiqueta renomeada em todas as suas conversas.");
         return renderWhatsappConfiguracao();
       }
       case "recolorir-etiqueta": {
@@ -3869,7 +3870,7 @@
         return renderWhatsappConfiguracao();
       }
       case "excluir-etiqueta": {
-        if (!confirm(`Excluir a etiqueta "${alvo.dataset.nome}"? Ela sai de todas as conversas que a usam. As conversas em si não são apagadas.`)) return;
+        if (!confirm(`Excluir a etiqueta "${alvo.dataset.nome}"? Ela sai de todas as conversas onde você a usou. As conversas em si não são apagadas.`)) return;
         await chamarApi(`/whatsapp/tags/${alvo.dataset.id}`, { method: "DELETE" });
         state._tagsCache = null;
         if (String(state.tagFiltro) === String(alvo.dataset.id)) state.tagFiltro = null;

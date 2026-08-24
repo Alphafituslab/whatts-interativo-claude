@@ -111,7 +111,7 @@ def definir_tags(conversa_id):
     if not _pode_ver(usuario, conversa):
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
     dados = request.get_json(silent=True) or {}
-    chat_interno_service.definir_tags_da_conversa(conn, usuario["empresa_id"], conversa_id, dados.get("tag_ids") or [])
+    chat_interno_service.definir_tags_da_conversa(conn, usuario["empresa_id"], usuario["id"], conversa_id, dados.get("tag_ids") or [])
     return jsonify({"ok": True})
 
 
