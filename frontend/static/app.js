@@ -1580,8 +1580,15 @@
       const outroNome = souAlheio ? `${c.criado_por_nome} → ${c.participante_nome || "—"}` : (souCriador ? (c.participante_nome || "—") : c.criado_por_nome);
       const naoLidas = souAlheio ? 0 : (souCriador ? c.nao_lidas_criador : c.nao_lidas_participante);
       const outroDigitandoAte = souAlheio ? (c.digitando_criador_ate || c.digitando_participante_ate) : (souCriador ? c.digitando_participante_ate : c.digitando_criador_ate);
+      // Online de quem está do OUTRO lado — é o que interessa saber antes
+      // de escrever. Na supervisão (admin), mostra a do participante,
+      // que costuma ser quem deve a resposta.
+      const outroOnline = souCriador ? c.participante_online : (souAlheio ? c.participante_online : c.criado_por_online);
       return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""}" href="#/chat-interno/${c.id}">
-        <div class="wpp-avatar" style="background:${corAvatar(outroNome)};">${escapeHtml(iniciaisContato(outroNome))}</div>
+        <span style="position:relative; flex-shrink:0;">
+          <div class="wpp-avatar" style="background:${corAvatar(outroNome)};">${escapeHtml(iniciaisContato(outroNome))}</div>
+          <span class="wpp-online-bolinha ${outroOnline ? "wpp-online-sim" : "wpp-online-nao"}" title="${outroOnline ? "Online agora" : "Offline"}"></span>
+        </span>
         <div class="wpp-conversa-info">
           <div class="wpp-conversa-linha1">
             <span class="wpp-conversa-nome">${escapeHtml(outroNome)}</span>
@@ -1644,7 +1651,10 @@
     return `
       <div class="wpp-chat-cabecalho">
         <button type="button" class="botao-icone wpp-botao-voltar" data-acao="voltar-lista-interno" title="Voltar">←</button>
-        <div class="wpp-avatar" style="background:${corAvatar(outroNome)};">${escapeHtml(iniciaisContato(outroNome))}</div>
+        <span style="position:relative; flex-shrink:0;">
+          <div class="wpp-avatar" style="background:${corAvatar(outroNome)};">${escapeHtml(iniciaisContato(outroNome))}</div>
+          <span class="wpp-online-bolinha ${(souCriador ? conversa.participante_online : conversa.criado_por_online) ? "wpp-online-sim" : "wpp-online-nao"}"></span>
+        </span>
         <div style="flex:1; min-width:0;">
           <div class="wpp-chat-nome">${escapeHtml(outroNome)}${souAlheio ? "" : ` <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="abrir-apelido-interno" data-conversa-id="${conversa.id}" data-apelido="${escapeHtml(outroNome)}" title="Definir apelido (só você vê)">✏️</button>`}</div>
           <div class="texto-suave wpp-chat-telefone">${souAlheio ? "👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${conversa.setor_destino ? `${souAlheio ? " · " : ""}🏷️ ${escapeHtml(conversa.setor_destino)}` : (souAlheio ? "" : "Chat interno")}</div>

@@ -114,6 +114,17 @@ def definir_apelido(conn, usuario_id: int, alvo_usuario_id: int, apelido: str):
         )
 
 
+def _marcar_online(conversas):
+    """Traduz o último acesso de cada lado em online/offline aqui no
+    servidor — a tela não precisa conhecer a regra (nem receber o horário
+    de acesso de ninguém, que é informação interna)."""
+    from . import whatsapp_service
+    for c in conversas:
+        c["criado_por_online"] = whatsapp_service.usuario_esta_online(c.pop("_uc_acesso", None), c.pop("_uc_off", 0))
+        c["participante_online"] = whatsapp_service.usuario_esta_online(c.pop("_up_acesso", None), c.pop("_up_off", 0))
+    return conversas
+
+
 def _aplicar_apelidos(conversas, apelidos):
     for c in conversas:
         if c["criado_por_id"] in apelidos:
@@ -141,7 +152,9 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
         params = (usuario_id, usuario_id)
     rows = conn.execute(
         f"""
-        SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id
+        SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
+               uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
+               up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off
         FROM chat_interno_conversas c
         JOIN usuarios uc ON uc.id = c.criado_por_id
         LEFT JOIN usuarios up ON up.id = c.participante_id
@@ -150,7 +163,7 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
         """,
         params,
     ).fetchall()
-    conversas = [dict(r) for r in rows]
+    conversas = _marcar_online([dict(r) for r in rows])
     return _aplicar_apelidos(conversas, obter_apelidos(conn, usuario_id))
 
 
@@ -160,7 +173,9 @@ def carregar_conversa(conn, conversa_id: int):
     confiável de qual empresa esta conversa pertence."""
     row = conn.execute(
         """
-        SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id
+        SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
+               uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
+               up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off
         FROM chat_interno_conversas c
         JOIN usuarios uc ON uc.id = c.criado_por_id
         LEFT JOIN usuarios up ON up.id = c.participante_id
@@ -168,7 +183,7 @@ def carregar_conversa(conn, conversa_id: int):
         """,
         (conversa_id,),
     ).fetchone()
-    return dict(row) if row else None
+    return _marcar_online([dict(row)])[0] if row else None
 
 
 def listar_mensagens(conn, conversa_id: int, lado: str = None):
