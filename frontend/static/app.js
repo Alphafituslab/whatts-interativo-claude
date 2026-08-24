@@ -26,6 +26,9 @@
     // toca pras mensagens que já estavam lá quando a pessoa entrou).
     naoLidasWpp: null,
     naoLidasInterno: null,
+    // Pendências de follow-up na contagem anterior — o aviso só toca
+    // quando aparece pendência nova, não a cada verificação.
+    followupPendentes: null,
     filtroAtividadesUsuarioId: null,
     versaoServidor: null,
     buscaConversas: null,
@@ -738,6 +741,17 @@
     em_dia: ["🟢", "Em dia"],
   };
 
+  // Som do follow-up: três notas iguais e espaçadas, diferente dos
+  // outros dois avisos (cliente e colega) — é cobrança de pendência, não
+  // mensagem nova chegando.
+  function tocarAvisoFollowup() {
+    _tocarNotas([
+      { hz: 660, inicio: 0,    duracao: 0.14, volume: 0.12 },
+      { hz: 660, inicio: 0.28, duracao: 0.14, volume: 0.12 },
+      { hz: 660, inicio: 0.56, duracao: 0.24, volume: 0.12 },
+    ]);
+  }
+
   async function atualizarContadorFollowup() {
     const contador = document.querySelector("[data-followup-contador]");
     if (!contador) return;
@@ -747,6 +761,26 @@
       contador.hidden = total === 0;
       contador.textContent = total > 99 ? "99+" : String(total);
       contador.classList.toggle("piscando", total > 0);
+
+      // Avisa quando APARECE pendência nova (o número subiu). Sem essa
+      // comparação, tocaria a cada minuto enquanto houvesse pendência.
+      if (state.followupPendentes !== null && total > state.followupPendentes) {
+        tocarAvisoFollowup();
+        const novos = total - state.followupPendentes;
+        definirFlash("erro", `🔔 ${novos} cliente(s) precisam de contato — veja em Follow-up.`);
+        if (window.Notification && Notification.permission === "granted") {
+          try {
+            new Notification("Follow-up necessário", {
+              body: `${total} cliente(s) sem retorno esperando contato.`,
+              tag: "followup", // substitui o aviso anterior em vez de empilhar
+            });
+          } catch (e) { /* navegador pode recusar, não é crítico */ }
+        }
+        // Se a pessoa está numa tela qualquer, o flash só aparece na
+        // próxima troca de tela — repinta a atual pra ela ver na hora.
+        if (!document.querySelector(".fundo-modal")) montarRota();
+      }
+      state.followupPendentes = total;
     } catch (e) { /* próximo tick corrige */ }
   }
 
@@ -1248,6 +1282,7 @@
         <div class="wpp-chat-acoes">
           <button type="button" class="botao-icone ${conversa.resumo ? "wpp-icone-preenchido" : ""}" data-acao="abrir-resumo" data-id="${conversa.id}" data-resumo="${escapeHtml(conversa.resumo || "")}" title="${conversa.resumo ? "Ver/editar resumo do atendimento" : "Adicionar resumo do atendimento"}">📝</button>
           <button type="button" class="botao-icone" data-acao="abrir-lembrete" data-id="${conversa.id}" title="Criar lembrete de retorno">🔔</button>
+          <button type="button" class="botao-icone ${conversa.proximo_contato_em ? "wpp-icone-preenchido" : ""}" data-acao="abrir-agendar-contato" data-id="${conversa.id}" title="${conversa.proximo_contato_em ? "Próximo contato marcado pra " + fmtData(conversa.proximo_contato_em) : "Agendar próximo contato (o sistema para de cobrar até a data)"}">📞</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`

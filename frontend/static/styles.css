@@ -394,7 +394,16 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-bolha-rodape { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 3px; }
 .wpp-bolha-hora { font-size: 10.5px; opacity: 0.65; }
 .wpp-bolha-status { font-size: 11px; opacity: 0.75; }
-.wpp-bolha-status.wpp-status-lida { color: #34b7f1; opacity: 1; }
+/* Visualizado: azul forte e em negrito. O azul claro original quase
+   sumia sobre o fundo da bolha enviada, e ficava difícil ter certeza se
+   o outro lado leu ou não. */
+.wpp-bolha-status.wpp-status-lida {
+  color: #0b76d6; opacity: 1; font-weight: 800; letter-spacing: -1px;
+}
+[data-tema="escuro"] .wpp-bolha-status.wpp-status-lida { color: #4aa8ff; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema="claro"]) .wpp-bolha-status.wpp-status-lida { color: #4aa8ff; }
+}
 .wpp-bolha-entrada { align-self: flex-start; background: var(--superficie); border: 1px solid var(--borda); border-bottom-left-radius: 3px; }
 .wpp-bolha-saida { align-self: flex-end; background: linear-gradient(135deg, color-mix(in srgb, var(--primaria) 22%, var(--superficie)), color-mix(in srgb, var(--primaria) 12%, var(--superficie))); border-bottom-right-radius: 3px; }
 .wpp-bolha-falhou { background: color-mix(in srgb, var(--vermelho) 14%, var(--superficie)); border: 1px solid color-mix(in srgb, var(--vermelho) 30%, transparent); }
@@ -765,7 +774,10 @@ nav { perspective: 800px; }
    Discreto de propósito: fica fora do caminho até ser chamado.
    ===================================================================== */
 .followup-aba {
-  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
+  /* Embaixo, não no meio: em janela pequena (modo aplicativo) o meio da
+     tela cai na altura dos botões do topo e a aba ficava por cima do
+     "+ Nova conversa". No rodapé ela nunca disputa espaço com nada. */
+  position: fixed; right: 0; bottom: 24px;
   background: var(--superficie); border: 1px solid var(--borda); border-right: none;
   border-radius: var(--raio-peq) 0 0 var(--raio-peq); padding: 12px 8px; cursor: pointer;
   box-shadow: var(--sombra); z-index: 30; display: flex; flex-direction: column;
