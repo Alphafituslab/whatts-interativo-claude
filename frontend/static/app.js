@@ -851,6 +851,25 @@
     } catch (e) { /* próximo tick corrige */ }
   }
 
+  // Lembrete/agendamento pode ser de uma conversa de CLIENTE ou de uma
+  // INTERNA. Este helper resolve o nome e o link certos pros dois casos
+  // — sem ele, os itens internos apareciam sem nome nenhum na lista.
+  function _alvoDoItem(item) {
+    if (item.origem === "interno") {
+      const eu = state.usuarioAtual && state.usuarioAtual.id;
+      // Mostra o OUTRO lado da conversa, não quem criou.
+      const outro = item.interna_criador_id === eu ? item.interna_participante : item.interna_criador;
+      return {
+        rotulo: `${outro || "—"} <span class="selo">interno</span>`,
+        href: `#/chat-interno/${item.chat_interno_conversa_id}`,
+      };
+    }
+    return {
+      rotulo: escapeHtml(item.contato_nome || item.telefone || "—"),
+      href: `#/whatsapp/${item.conversa_id}`,
+    };
+  }
+
   function _fmtDataCurta(iso) {
     const d = iso ? new Date(iso.endsWith("Z") ? iso : iso + "Z") : null;
     if (!d || isNaN(d)) return "—";
@@ -1054,16 +1073,16 @@
   function dispararAlertaLembrete(l) {
     tocarBeepLembrete();
     if (window.Notification && Notification.permission === "granted") {
-      try { new Notification("🔔 Lembrete — Whatts Inbox", { body: l.texto || `Hora de falar com ${l.contato_nome || l.telefone} de novo` }); }
+      try { new Notification("🔔 Lembrete — Whatts Inbox", { body: l.texto || `Hora de falar com ${l.origem === "interno" ? (l.interna_participante || l.interna_criador) : (l.contato_nome || l.telefone)} de novo` }); }
       catch (e) { /* ignora — o modal já avisa */ }
     }
     abrirModal(`
       <h3 style="margin-top:0;">🔔 Lembrete: hora de retornar!</h3>
       <p>${l.texto ? escapeHtml(l.texto) : "Você marcou pra falar com este cliente de novo agora."}</p>
-      <p class="texto-suave">Cliente: ${escapeHtml(l.contato_nome || l.telefone)} — previsto para ${fmtData(l.lembrar_em)}</p>
+      <p class="texto-suave">${l.origem === "interno" ? "Conversa interna com" : "Cliente"}: ${_alvoDoItem(l).rotulo} — previsto para ${fmtData(l.lembrar_em)}</p>
       <div class="rodape-modal">
         <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
-        <button type="button" class="botao secundario" data-acao="ir-conversa-lembrete" data-conversa-id="${l.conversa_id}">Ver conversa</button>
+        <a class="botao secundario" href="${_alvoDoItem(l).href}" data-acao="fechar-modal">Ver conversa</a>
         <button type="button" class="botao" data-acao="concluir-lembrete-alerta" data-id="${l.id}">Concluir</button>
       </div>`);
   }
@@ -2181,7 +2200,7 @@
     const linhas = agendadas.map((a) => `
       <tr>
         <td>${fmtData(a.agendado_para)}</td>
-        <td><a href="#/whatsapp/${a.conversa_id}">${escapeHtml(a.contato_nome || a.telefone)}</a></td>
+        <td><a href="${_alvoDoItem(a).href}">${_alvoDoItem(a).rotulo}</a></td>
         <td>${escapeHtml(a.texto.length > 90 ? a.texto.slice(0, 90) + "…" : a.texto)}</td>
         ${verTodos ? `<td>${escapeHtml(a.criado_por_nome)}</td>` : ""}
         <td><button type="button" class="botao secundario pequeno" data-acao="cancelar-agendada-global" data-id="${a.id}">Cancelar</button></td>
@@ -2217,7 +2236,7 @@
       const vencido = new Date(l.lembrar_em.endsWith("Z") ? l.lembrar_em : l.lembrar_em + "Z") <= agora;
       return `<tr class="${vencido ? "linha-alerta" : ""}">
         <td>${fmtData(l.lembrar_em)}${vencido ? ' <span class="selo bloqueado">Vencido</span>' : ""}</td>
-        <td><a href="#/whatsapp/${l.conversa_id}">${escapeHtml(l.contato_nome || l.telefone)}</a></td>
+        <td><a href="${_alvoDoItem(l).href}">${_alvoDoItem(l).rotulo}</a></td>
         <td>${escapeHtml(l.texto || "—")}</td>
         ${verTodos ? `<td>${escapeHtml(l.usuario_nome)}</td>` : ""}
         <td><button type="button" class="botao secundario pequeno" data-acao="concluir-lembrete" data-id="${l.id}">Concluir</button></td>
