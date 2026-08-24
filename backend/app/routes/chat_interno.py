@@ -136,6 +136,31 @@ def enviar_mensagem(conversa_id):
     return jsonify({"ok": True}), 201
 
 
+@bp.delete("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>")
+@requires_auth
+def excluir_mensagem(conversa_id, mensagem_id):
+    """Apaga uma mensagem mandada por engano (texto, foto, áudio, o que
+    for). Só a PRÓPRIA mensagem: não dá pra apagar o que o colega
+    escreveu — nem admin, que aqui é só supervisor."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    mensagem = conn.execute(
+        "SELECT usuario_id FROM chat_interno_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    if mensagem["usuario_id"] != usuario["id"]:
+        raise ApiError("Só dá pra apagar as suas próprias mensagens.", status=403, codigo="sem_permissao")
+    conn.execute(
+        "UPDATE chat_interno_mensagens SET excluida_em = ? WHERE id = ?",
+        (whatsapp_service._now_iso(), mensagem_id),
+    )
+    return jsonify({"ok": True})
+
+
 @bp.post("/conversas/<int:conversa_id>/anexo")
 @requires_auth
 def enviar_anexo(conversa_id):

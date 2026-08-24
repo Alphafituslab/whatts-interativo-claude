@@ -35,6 +35,8 @@ SCHEMA_FILES = [
     "schema_020_apelidos_contatos.sql",
     "schema_021_logo_empresa.sql",
     "schema_022_super_admin.sql",
+    "schema_023_figurinhas_emojis.sql",
+    "schema_024_excluir_mensagem_interna.sql",
 ]
 
 

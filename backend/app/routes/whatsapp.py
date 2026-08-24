@@ -908,6 +908,144 @@ def definir_tags_conversa(conversa_id):
 # ============================================================
 # RESPOSTAS PRONTAS
 # ============================================================
+# ============================================================
+# FIGURINHAS E EMOJIS — o banco cresce com o uso: o atendente guarda a
+# figurinha que o cliente mandou e ela fica disponível pra todo mundo da
+# empresa reusar depois.
+# ============================================================
+@bp.get("/figurinhas")
+@requires_auth
+def listar_figurinhas():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, midia_url, descricao FROM whatsapp_figurinhas WHERE empresa_id = ? ORDER BY id DESC LIMIT 200",
+        (g.empresa_id,),
+    ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.post("/figurinhas")
+@requires_auth
+def salvar_figurinha():
+    """Guarda no banco da empresa uma figurinha/imagem que já está numa
+    conversa. Só aceita URL dos nossos próprios anexos — sem isso daria
+    pra cadastrar qualquer endereço da internet e o sistema passaria a
+    servir conteúdo de fora como se fosse nosso."""
+    dados = request.get_json(silent=True) or {}
+    midia_url = (dados.get("midia_url") or "").strip()
+    if not midia_url.startswith("/api/v1/whatsapp/uploads/"):
+        raise ApiError("Só dá pra salvar figurinha que veio de uma conversa.", status=400)
+    conn = get_db()
+    ja = conn.execute(
+        "SELECT id FROM whatsapp_figurinhas WHERE empresa_id = ? AND midia_url = ?", (g.empresa_id, midia_url)
+    ).fetchone()
+    if ja:
+        return jsonify({"ok": True, "id": ja["id"], "ja_existia": True})
+    cur = conn.execute(
+        "INSERT INTO whatsapp_figurinhas (empresa_id, midia_url, descricao, criado_por, criado_em) VALUES (?, ?, ?, ?, ?)",
+        (g.empresa_id, midia_url, (dados.get("descricao") or "").strip() or None,
+         g.usuario_atual["id"], whatsapp_service._now_iso()),
+    )
+    return jsonify({"ok": True, "id": cur.lastrowid}), 201
+
+
+@bp.delete("/figurinhas/<int:figurinha_id>")
+@requires_auth
+def excluir_figurinha(figurinha_id):
+    conn = get_db()
+    cur = conn.execute(
+        "DELETE FROM whatsapp_figurinhas WHERE id = ? AND empresa_id = ?", (figurinha_id, g.empresa_id)
+    )
+    if cur.rowcount == 0:
+        raise ApiError("Figurinha não encontrada.", status=404, codigo="nao_encontrado")
+    return jsonify({"ok": True})
+
+
+@bp.post("/conversas/<int:conversa_id>/figurinha")
+@requires_auth
+def enviar_figurinha_conversa(conversa_id):
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+
+    dados = request.get_json(silent=True) or {}
+    figurinha = conn.execute(
+        "SELECT midia_url FROM whatsapp_figurinhas WHERE id = ? AND empresa_id = ?",
+        (dados.get("figurinha_id"), g.empresa_id),
+    ).fetchone()
+    if figurinha is None:
+        raise ApiError("Figurinha não encontrada.", status=404, codigo="nao_encontrado")
+
+    if conversa["atribuida_usuario_id"] is None:
+        whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
+
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    try:
+        url_completa = whatsapp_service.url_publica(config, figurinha["midia_url"])
+        externo_id = whatsapp_service.enviar_figurinha(config, conversa["telefone"], url_completa)
+        status_msg, erro = "enviada", None
+    except ApiError as e:
+        externo_id, status_msg, erro = None, "falhou", e.mensagem
+
+    agora = whatsapp_service._now_iso()
+    conn.execute(
+        """
+        INSERT INTO whatsapp_mensagens (conversa_id, usuario_id, direcao, tipo, texto, midia_url, externo_id, status, erro, criado_em)
+        VALUES (?, ?, 'saida', 'figurinha', NULL, ?, ?, ?, ?, ?)
+        """,
+        (conversa_id, usuario["id"], figurinha["midia_url"], externo_id, status_msg, erro, agora),
+    )
+    conn.execute(
+        "UPDATE whatsapp_conversas SET ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
+        (agora, "🧩 Figurinha", conversa_id),
+    )
+    return jsonify({"ok": status_msg == "enviada", "aviso": erro}), 201
+
+
+@bp.get("/emojis")
+@requires_auth
+def listar_emojis():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, emoji FROM whatsapp_emojis WHERE empresa_id = ? ORDER BY id DESC LIMIT 200", (g.empresa_id,)
+    ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.post("/emojis")
+@requires_auth
+def salvar_emoji():
+    dados = request.get_json(silent=True) or {}
+    emoji = (dados.get("emoji") or "").strip()
+    if not emoji:
+        raise ApiError("Informe o emoji.", status=400)
+    if len(emoji) > 16:
+        raise ApiError("Isso não parece um emoji — cole apenas um.", status=400)
+    conn = get_db()
+    ja = conn.execute(
+        "SELECT id FROM whatsapp_emojis WHERE empresa_id = ? AND emoji = ?", (g.empresa_id, emoji)
+    ).fetchone()
+    if ja:
+        return jsonify({"ok": True, "id": ja["id"], "ja_existia": True})
+    cur = conn.execute(
+        "INSERT INTO whatsapp_emojis (empresa_id, emoji, criado_por, criado_em) VALUES (?, ?, ?, ?)",
+        (g.empresa_id, emoji, g.usuario_atual["id"], whatsapp_service._now_iso()),
+    )
+    return jsonify({"ok": True, "id": cur.lastrowid}), 201
+
+
+@bp.delete("/emojis/<int:emoji_id>")
+@requires_auth
+def excluir_emoji(emoji_id):
+    conn = get_db()
+    cur = conn.execute("DELETE FROM whatsapp_emojis WHERE id = ? AND empresa_id = ?", (emoji_id, g.empresa_id))
+    if cur.rowcount == 0:
+        raise ApiError("Emoji não encontrado.", status=404, codigo="nao_encontrado")
+    return jsonify({"ok": True})
+
+
 @bp.get("/respostas-prontas")
 @requires_auth
 def listar_respostas_prontas():

@@ -578,7 +578,25 @@ def enviar_texto(config, telefone: str, texto: str) -> str:
     return chave.get("id")
 
 
-MAPA_TIPO_MEDIA_EVOLUTION = {"imagem": "image", "video": "video", "documento": "document", "audio": "audio"}
+MAPA_TIPO_MEDIA_EVOLUTION = {"imagem": "image", "video": "video", "documento": "document", "audio": "audio", "figurinha": "image"}
+
+
+def enviar_figurinha(config, telefone: str, midia_url: str) -> str:
+    """Figurinha tem rota própria na Evolution API. Mandar pelo sendMedia
+    faria ela chegar como imagem comum (com fundo e moldura de foto) em
+    vez de figurinha de verdade. Mesmo esquema do enviar_midia: manda a
+    URL e a Evolution API busca o arquivo sozinha."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento. Peça a um administrador para reconectar em Configurações.", status=400)
+    requests = _requests()
+    resp = requests.post(
+        f"{config['evolution_url']}/message/sendSticker/{config['instancia_nome']}",
+        json={"number": normalizar_telefone(telefone), "sticker": midia_url},
+        headers=_cabecalhos(config), timeout=120,
+    )
+    corpo = _tratar_resposta(resp)
+    return (corpo.get("key") or {}).get("id")
 
 
 def enviar_midia(config, telefone: str, tipo: str, midia_url: str, nome_arquivo: str, legenda: str = None) -> str:
@@ -1014,6 +1032,9 @@ _CAMPOS_MIDIA_WHATSAPP = {
     "videoMessage": "video",
     "documentMessage": "documento",
     "audioMessage": "audio",
+    # Sem isto a figurinha recebida sumia: nao batia com nenhum tipo
+    # conhecido, entao a mensagem entrava vazia, sem imagem nenhuma.
+    "stickerMessage": "figurinha",
 }
 
 

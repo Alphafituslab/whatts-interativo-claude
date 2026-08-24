@@ -177,7 +177,7 @@ def listar_mensagens(conn, conversa_id: int, lado: str = None):
     não-lida DELE. None quando é um admin só espiando (aba "Todas") —
     nesse caso não mexe em nada, ninguém pode saber que foi visto."""
     rows = conn.execute(
-        "SELECT * FROM chat_interno_mensagens WHERE conversa_id = ? ORDER BY criado_em, id",
+        "SELECT * FROM chat_interno_mensagens WHERE conversa_id = ? AND excluida_em IS NULL ORDER BY criado_em, id",
         (conversa_id,),
     ).fetchall()
     if lado in ("criador", "participante"):

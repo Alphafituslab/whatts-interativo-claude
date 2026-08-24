@@ -488,6 +488,56 @@
     }
   }
 
+  // Prévia da gravação: ouvir antes de mandar evita o clássico "mandei
+  // um áudio sem querer / falei errado". Enter manda, Esc descarta.
+  function modalPreviaAudio(blob, url, aoTerminar, botaoGravar) {
+    const src = URL.createObjectURL(blob);
+    const seg = Math.round(blob.size / 16000); // estimativa só pra dar noção do tamanho
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🎙️ Áudio gravado</h3>
+      <p class="dica">Ouça antes de enviar. Se não gostou, é só regravar.</p>
+      <audio controls autofocus src="${src}" style="width:100%; margin:10px 0;"></audio>
+      <p class="texto-suave" style="font-size:12px;">Aproximadamente ${seg}s${seg > 60 ? " (áudio longo)" : ""}</p>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao-previa="descartar">Descartar</button>
+        <button type="button" class="botao secundario" data-acao-previa="regravar">Regravar</button>
+        <button type="button" class="botao" data-acao-previa="enviar">Enviar áudio</button>
+      </div>`);
+
+    const limpar = () => { URL.revokeObjectURL(src); fecharModais(); };
+
+    const enviar = async () => {
+      limpar();
+      definirFlash("ok", "Enviando áudio…");
+      montarRota();
+      try {
+        // tipo="audio" explícito: o nome (audio.webm) não distingue de
+        // um vídeo .webm, já que o navegador grava áudio dentro de webm.
+        await _subirAnexo(url, blob, "audio");
+        definirFlash("ok", "Áudio enviado.");
+      } catch (e) {
+        definirFlash("erro", "Erro ao enviar áudio: " + e.message);
+      }
+      return aoTerminar();
+    };
+
+    wrap.addEventListener("click", (e) => {
+      const acao = e.target.closest("[data-acao-previa]");
+      if (!acao) return;
+      const qual = acao.dataset.acaoPrevia;
+      if (qual === "enviar") return enviar();
+      limpar();
+      if (qual === "regravar" && botaoGravar && botaoGravar.isConnected) botaoGravar.click();
+    });
+
+    // Enter envia, Esc descarta — mesma lógica do resto do sistema.
+    const teclas = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); document.removeEventListener("keydown", teclas); enviar(); }
+      if (e.key === "Escape") { document.removeEventListener("keydown", teclas); limpar(); }
+    };
+    document.addEventListener("keydown", teclas);
+  }
+
   // Primeiro clique começa a gravar, segundo para e envia. Serve pras
   // duas telas: quem chama diz pra onde mandar e o que redesenhar
   // depois.
@@ -513,17 +563,9 @@
       const gravado = new Blob(_gravadorChunks, { type: "audio/webm" });
       if (gravado.size < 800) { definirFlash("erro", "Gravação muito curta — tente de novo."); return; }
       const blob = new File([gravado], "audio.webm", { type: "audio/webm" });
-      definirFlash("ok", "Enviando áudio…");
-      montarRota();
-      try {
-        // tipo="audio" explícito: o nome (audio.webm) não distingue de
-        // um vídeo .webm, já que o navegador grava áudio dentro de webm.
-        await _subirAnexo(url, blob, "audio");
-        definirFlash("ok", "Áudio enviado.");
-      } catch (e) {
-        definirFlash("erro", "Erro ao enviar áudio: " + e.message);
-      }
-      return aoTerminar();
+      // Em vez de mandar direto, mostra a prévia: dá pra ouvir antes,
+      // regravar se não gostou, ou mandar de vez (Enter também manda).
+      modalPreviaAudio(blob, url, aoTerminar, botao);
     };
     _gravador.start();
     _atualizarBotaoGravacao(botao, true, 0);
@@ -904,6 +946,11 @@
 
   function htmlAnexoBolha(m) {
     if (!m.midia_url) return "";
+    if (m.tipo === "figurinha") return `
+      <div class="wpp-bolha-midia-envolucro">
+        <img class="wpp-bolha-figurinha" src="${urlImagemSegura(m.midia_url)}" alt="Figurinha">
+        <button type="button" class="wpp-bolha-baixar" data-acao="salvar-figurinha" data-url="${escapeHtml(m.midia_url)}" title="Guardar no banco de figurinhas da empresa">💾</button>
+      </div>`;
     if (m.tipo === "imagem") return `
       <div class="wpp-bolha-midia-envolucro">
         <a href="${urlImagemSegura(m.midia_url)}" target="_blank" rel="noopener" title="Ver em tamanho grande"><img class="wpp-bolha-imagem" src="${urlImagemSegura(m.midia_url)}" alt="Imagem anexada"></a>
@@ -944,6 +991,48 @@
     "👏","🙌","💪","🤝","✅","❌","⭐","🔥","🎉","❤️","💬","📌","⏰","📎","📄","🖼️",
     "☕","🎁","💰","📦","🚚","📍","📅","🔔","👋","😴","🤗","😇","🥳","👌","✍️","📞",
   ];
+
+  // Emojis e figurinhas que a empresa foi juntando. Ficam em cache
+  // porque o painel é montado toda vez que a conversa é redesenhada
+  // (que acontece a cada mensagem enviada) — buscar no servidor sempre
+  // deixaria o envio lento à toa. Quem adiciona/remove limpa o cache.
+  async function obterEmojisSalvos() {
+    if (!state._emojisCache) {
+      try { state._emojisCache = await chamarApi("/whatsapp/emojis"); }
+      catch (e) { state._emojisCache = []; }
+    }
+    return state._emojisCache;
+  }
+
+  async function obterFigurinhas() {
+    if (!state._figurinhasCache) {
+      try { state._figurinhasCache = await chamarApi("/whatsapp/figurinhas"); }
+      catch (e) { state._figurinhasCache = []; }
+    }
+    return state._figurinhasCache;
+  }
+
+  function htmlPainelEmojis(emojisSalvos) {
+    // Os da empresa primeiro: são os que aquele time realmente usa.
+    const salvos = (emojisSalvos || []).map((e) => e.emoji);
+    const lista = [...salvos, ...EMOJIS_COMUNS.filter((e) => !salvos.includes(e))];
+    return `
+      ${lista.map((e) => `<button type="button" class="wpp-emoji-item" data-acao="inserir-emoji" data-emoji="${e}">${e}</button>`).join("")}
+      <button type="button" class="wpp-emoji-item wpp-emoji-adicionar" data-acao="adicionar-emoji" title="Adicionar um emoji à lista da empresa">➕</button>`;
+  }
+
+  function htmlPainelFigurinhas(figurinhas, conversaId) {
+    if (!figurinhas || !figurinhas.length) {
+      return `<p class="texto-suave" style="padding:10px; margin:0; font-size:12px;">Nenhuma figurinha salva ainda.<br>Quando um cliente mandar uma, clique em 💾 na mensagem dela pra guardar aqui.</p>`;
+    }
+    return figurinhas.map((f) => `
+      <span class="wpp-figurinha-item">
+        <button type="button" data-acao="enviar-figurinha" data-id="${f.id}" data-conversa-id="${conversaId}" title="Enviar esta figurinha">
+          <img src="${urlImagemSegura(f.midia_url)}" alt="Figurinha">
+        </button>
+        <button type="button" class="wpp-figurinha-excluir" data-acao="excluir-figurinha" data-id="${f.id}" title="Tirar do banco">×</button>
+      </span>`).join("");
+  }
 
   async function obterRespostasProntas() {
     if (!state._respostasProntasCache) {
@@ -987,7 +1076,7 @@
     </details>`;
   }
 
-  function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas) {
+  function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas) {
     if (!conversa) {
       return `<div class="wpp-chat-vazio"><div class="wpp-chat-vazio-icone">💬</div><p class="texto-suave">Selecione uma conversa à esquerda para ver as mensagens.</p></div>`;
     }
@@ -1031,7 +1120,11 @@
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
         <div class="wpp-emoji-envolucro">
           <button type="button" class="botao-icone" data-acao="alternar-emoji" title="Emoji">😀</button>
-          <div class="wpp-emoji-painel" data-wpp-emoji-painel hidden>${EMOJIS_COMUNS.map((e) => `<button type="button" class="wpp-emoji-item" data-acao="inserir-emoji" data-emoji="${e}">${e}</button>`).join("")}</div>
+          <div class="wpp-emoji-painel" data-wpp-emoji-painel hidden>${htmlPainelEmojis(emojisSalvos)}</div>
+        </div>
+        <div class="wpp-emoji-envolucro">
+          <button type="button" class="botao-icone" data-acao="alternar-figurinhas" title="Figurinhas">🧩</button>
+          <div class="wpp-figurinhas-painel" data-wpp-figurinhas-painel hidden>${htmlPainelFigurinhas(figurinhas, conversa.id)}</div>
         </div>
         <div class="wpp-emoji-envolucro">
           <button type="button" class="botao-icone" data-acao="alternar-respostas-prontas" title="Respostas prontas">📋</button>
@@ -1071,6 +1164,7 @@
     }
 
     let conversaAtual = null, mensagens = [], agendadas = [], respostasProntas = [], notas = [];
+    let emojisSalvos = [], figurinhas = [];
     if (conversaId) {
       conversaAtual = conversas.find((c) => c.id === conversaId) || null;
       if (!conversaAtual) {
@@ -1080,11 +1174,13 @@
         conversaAtual = await chamarApi(`/whatsapp/conversas?escopo=todas`).then((todas) => todas.find((c) => c.id === conversaId)).catch(() => null);
       }
       if (conversaAtual) {
-        [mensagens, agendadas, respostasProntas, notas] = await Promise.all([
+        [mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas] = await Promise.all([
           chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`),
           chamarApi(`/whatsapp/conversas/${conversaId}/agendadas`),
           obterRespostasProntas(),
           chamarApi(`/whatsapp/conversas/${conversaId}/notas`),
+          obterEmojisSalvos(),
+          obterFigurinhas(),
         ]);
         if (conversaAtual.atribuida_usuario_id === state.usuarioAtual.id) conversaAtual.nao_lidas = 0;
       }
@@ -1108,7 +1204,7 @@
            ${state.buscaConversas ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados para "${escapeHtml(state.buscaConversas)}"</p>` : htmlAbasConversas()}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}</div>
          </div>
-         <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas)}</div>
+         <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas)}</div>
        </div>`,
       "whatsapp"
     );
@@ -1211,7 +1307,10 @@
       ${!saida || souAlheio ? `<div class="texto-suave" style="font-size:11px; font-weight:700; margin-bottom:2px;">${escapeHtml(nomeAutor)}</div>` : ""}
       ${htmlAnexoBolha(m)}
       ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
-      <div class="wpp-bolha-rodape"><span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span></div>
+      <div class="wpp-bolha-rodape">
+        ${m.usuario_id === eu ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" title="Apagar (mandei por engano)">🗑️</button>` : ""}
+        <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
+      </div>
     </div>`;
   }
 
@@ -2629,6 +2728,47 @@
           alvo.disabled = false;
         }
         return renderChatInterno(conversaId);
+      }
+      case "excluir-mensagem-interna": {
+        if (!confirm("Apagar esta mensagem? Ela some pra você e pro colega.")) return;
+        const conversaId = Number(alvo.dataset.conversaId);
+        await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens/${alvo.dataset.id}`, { method: "DELETE" });
+        definirFlash("ok", "Mensagem apagada.");
+        return renderChatInterno(conversaId);
+      }
+      case "alternar-figurinhas": {
+        const painel = alvo.parentElement.querySelector("[data-wpp-figurinhas-painel]");
+        painel.hidden = !painel.hidden;
+        return;
+      }
+      case "adicionar-emoji": {
+        const emoji = prompt("Cole aqui o emoji que quer adicionar à lista da empresa:");
+        if (!emoji || !emoji.trim()) return;
+        await chamarApi("/whatsapp/emojis", { method: "POST", body: { emoji: emoji.trim() } });
+        state._emojisCache = null; // força buscar de novo com o novo item
+        definirFlash("ok", "Emoji adicionado à lista da empresa.");
+        return montarRota();
+      }
+      case "salvar-figurinha": {
+        await chamarApi("/whatsapp/figurinhas", { method: "POST", body: { midia_url: alvo.dataset.url } });
+        state._figurinhasCache = null;
+        definirFlash("ok", "Figurinha guardada — já dá pra usar em qualquer conversa.");
+        return montarRota();
+      }
+      case "enviar-figurinha": {
+        const conversaId = Number(alvo.dataset.conversaId);
+        const resp = await chamarApi(`/whatsapp/conversas/${conversaId}/figurinha`, {
+          method: "POST", body: { figurinha_id: Number(alvo.dataset.id) },
+        });
+        if (!resp.ok) definirFlash("erro", "Figurinha registrada, mas o envio falhou: " + (resp.aviso || ""));
+        return renderWhatsapp(conversaId);
+      }
+      case "excluir-figurinha": {
+        if (!confirm("Tirar esta figurinha do banco da empresa? As mensagens já enviadas com ela não mudam.")) return;
+        await chamarApi(`/whatsapp/figurinhas/${alvo.dataset.id}`, { method: "DELETE" });
+        state._figurinhasCache = null;
+        definirFlash("ok", "Figurinha removida do banco.");
+        return montarRota();
       }
       case "alternar-emoji": {
         const painel = alvo.parentElement.querySelector("[data-wpp-emoji-painel]");
