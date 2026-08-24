@@ -2180,6 +2180,16 @@
   // CHAT INTERNO — privado entre colaboradores, separado das conversas
   // de clientes. Sempre 1-para-1, encaminhável sem perder histórico.
   // =======================================================================
+  // Saber se o colega está na frente do computador muda o que você faz
+  // (esperar resposta agora, ou ir atrás por outro caminho), então isso
+  // aparece escrito — não só como uma bolinha de 8px que se perde no
+  // meio da tela.
+  function htmlSeloPresenca(online) {
+    return online
+      ? `<span class="wpp-presenca wpp-presenca-online">● Online agora</span>`
+      : `<span class="wpp-presenca wpp-presenca-offline">● Offline</span>`;
+  }
+
   function htmlListaConversasInternas(conversas, ativaId) {
     if (!conversas.length) {
       return `<div class="wpp-lista-vazia"><div class="wpp-lista-vazia-icone">🗨️</div><p class="texto-suave">Nenhuma conversa interna ainda — clique em "+ Nova conversa" pra chamar alguém de um setor.</p></div>`;
@@ -2213,6 +2223,7 @@
         <div class="wpp-conversa-info">
           <div class="wpp-conversa-linha1">
             <span class="wpp-conversa-nome">${escapeHtml(outroNome)}</span>
+            ${htmlSeloPresenca(outroOnline)}
             <span class="wpp-conversa-hora">${fmtHoraCurta(c.ultima_mensagem_em)}</span>
           </div>
           <div class="wpp-conversa-linha2">
@@ -2284,7 +2295,10 @@
         </span>
         <div style="flex:1; min-width:0;">
           <div class="wpp-chat-nome">${escapeHtml(outroNome)}${souAlheio ? "" : ` <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="abrir-apelido-interno" data-conversa-id="${conversa.id}" data-apelido="${escapeHtml(outroNome)}" title="Definir apelido (só você vê)">✏️</button>`}</div>
-          <div class="texto-suave wpp-chat-telefone">${souAlheio ? "👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${conversa.setor_destino ? `${souAlheio ? " · " : ""}🏷️ ${escapeHtml(conversa.setor_destino)}` : (souAlheio ? "" : "Chat interno")}</div>
+          <div class="texto-suave wpp-chat-telefone">
+            ${htmlSeloPresenca(souCriador ? conversa.participante_online : conversa.criado_por_online)}
+            ${souAlheio ? " · 👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${conversa.setor_destino ? ` · 🏷️ ${escapeHtml(conversa.setor_destino)}` : ""}
+          </div>
         </div>
         <div class="wpp-chat-acoes">
           <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
