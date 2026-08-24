@@ -669,7 +669,8 @@ def listar_todas_agendadas(conn, empresa_id: int, usuario_id=None):
     base = """
         SELECT a.*, ct.nome AS contato_nome, ct.telefone, u.nome AS criado_por_nome,
                CASE WHEN a.chat_interno_conversa_id IS NOT NULL THEN 'interno' ELSE 'cliente' END AS origem,
-               COALESCE(uc.nome, up.nome) AS interna_com
+               uc.nome AS interna_criador, up.nome AS interna_participante,
+               ci.criado_por_id AS interna_criador_id, ci.participante_id AS interna_participante_id
         FROM whatsapp_mensagens_agendadas a
         LEFT JOIN whatsapp_conversas c ON c.id = a.conversa_id
         LEFT JOIN whatsapp_contatos ct ON ct.id = c.contato_id
@@ -802,7 +803,8 @@ def listar_lembretes(conn, empresa_id: int, usuario_id=None):
         SELECT l.*, c.contato_id, ct.nome AS contato_nome, ct.telefone, u.nome AS usuario_nome,
                ci.id AS interna_id,
                CASE WHEN l.chat_interno_conversa_id IS NOT NULL THEN 'interno' ELSE 'cliente' END AS origem,
-               COALESCE(uc.nome, up.nome) AS interna_com
+               uc.nome AS interna_criador, up.nome AS interna_participante,
+               ci.criado_por_id AS interna_criador_id, ci.participante_id AS interna_participante_id
         FROM whatsapp_lembretes l
         LEFT JOIN whatsapp_conversas c ON c.id = l.conversa_id
         LEFT JOIN whatsapp_contatos ct ON ct.id = c.contato_id

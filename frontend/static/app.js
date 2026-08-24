@@ -364,6 +364,8 @@
   ];
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.shiftKey) return;
+    // Gravando: Enter encerra e manda o áudio, mesmo sem foco no campo.
+    if (_estaGravando()) { e.preventDefault(); _pararEEnviarAudio(); return; }
     const seletor = FORMS_ENTER_ENVIA.map((f) => `form[data-form="${f}"] textarea[name="texto"]`).join(", ");
     const textarea = e.target.closest(seletor);
     if (!textarea) return;
@@ -489,6 +491,22 @@
   // módulo porque a gravação precisa sobreviver entre o clique de
   // iniciar e o clique de parar, sem depender de nenhum estado de tela.
   let _gravador = null, _gravadorChunks = [], _gravadorTimer = null;
+  // Ligada quando o envio foi pedido por Enter/seta durante a gravação:
+  // aí o áudio vai direto, sem a tela de prévia.
+  let _enviarAudioDireto = false;
+
+  function _estaGravando() {
+    return !!(_gravador && _gravador.state === "recording");
+  }
+
+  /** Para a gravação e manda na hora. Devolve true se havia gravação
+      rolando (pra quem chamou saber que não deve enviar o texto). */
+  function _pararEEnviarAudio() {
+    if (!_estaGravando()) return false;
+    _enviarAudioDireto = true;
+    _gravador.stop();
+    return true;
+  }
 
   // Sobe um arquivo pra uma conversa (de cliente ou interna) — as duas
   // telas mandam do mesmo jeito, só muda o endereço.
@@ -658,8 +676,21 @@
       const gravado = new Blob(_gravadorChunks, { type: "audio/webm" });
       if (gravado.size < 800) { definirFlash("erro", "Gravação muito curta — tente de novo."); return; }
       const blob = new File([gravado], "audio.webm", { type: "audio/webm" });
-      // Em vez de mandar direto, mostra a prévia: dá pra ouvir antes,
-      // regravar se não gostou, ou mandar de vez (Enter também manda).
+      // Enter ou a seta de envio durante a gravação = manda na hora, sem
+      // passar pela prévia. Parar pelo próprio microfone abre a prévia,
+      // pra quem quer conferir antes.
+      if (_enviarAudioDireto) {
+        _enviarAudioDireto = false;
+        definirFlash("ok", "Enviando áudio…");
+        montarRota();
+        try {
+          await _subirAnexo(url, blob, "audio");
+          definirFlash("ok", "Áudio enviado.");
+        } catch (e) {
+          definirFlash("erro", "Erro ao enviar áudio: " + e.message);
+        }
+        return aoTerminar();
+      }
       modalPreviaAudio(blob, url, aoTerminar, botao);
     };
     _gravador.start();
@@ -3474,6 +3505,8 @@
         return montarRota();
       }
       case "enviar-mensagem": {
+        // Se está gravando, a seta encerra e manda o áudio — não o texto.
+        if (_pararEEnviarAudio()) return;
         const texto = (dados.get("texto") || "").trim();
         if (!texto) return;
         const conversaId = Number(form.dataset.conversaId);
@@ -3500,6 +3533,8 @@
         return navegarPara(`#/chat-interno/${conversa.id}`);
       }
       case "enviar-mensagem-interna": {
+        // Se está gravando, a seta encerra e manda o áudio — não o texto.
+        if (_pararEEnviarAudio()) return;
         const texto = (dados.get("texto") || "").trim();
         if (!texto) return;
         const conversaId = Number(form.dataset.conversaId);
