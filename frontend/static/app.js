@@ -272,13 +272,14 @@
                 <div class="usuario-atual-email" title="${escapeHtml(usuario ? usuario.email : "")}">${escapeHtml(usuario ? usuario.email : "")}</div>
               </div>
             </div>
-            ${state.podeInstalarApp ? `<button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>` : ""}
-            <a class="botao secundario pequeno" href="/downloads/" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>
+            ${usuario && usuario.admin ? `
+              ${state.podeInstalarApp ? `<button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>` : ""}
+              <a class="botao secundario pequeno" href="/downloads/" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
             <div class="barra-acoes" style="margin-top:10px;">
               <button class="botao-icone" data-acao="alternar-tema" title="Alternar tema">🌓</button>
               <button class="botao secundario pequeno" data-acao="logout" style="margin-left:auto;">Sair</button>
             </div>
-            <div class="wpp-versao-rodape" data-wpp-versao title="Versão do sistema — muda a cada atualização">${state.versaoServidor ? `v${state.versaoServidor.slice(0, 8)}` : ""}</div>
+            ${usuario && usuario.admin ? `<div class="wpp-versao-rodape" data-wpp-versao title="Versão do sistema — muda a cada atualização">${state.versaoServidor ? `v${state.versaoServidor.slice(0, 8)}` : ""}</div>` : ""}
           </div>
         </aside>
         <div class="conteudo-principal">
