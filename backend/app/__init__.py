@@ -1,13 +1,22 @@
+import io
 import logging
 import os
 import secrets
+import zipfile
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, redirect, send_file, send_from_directory
 
 from .context import ApiError, close_db
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "frontend")
 FRONTEND_DIR = os.path.abspath(FRONTEND_DIR)
+# Pasta com os arquivos-fonte do instalador do atalho de desktop. O ZIP
+# entregue em /downloads é montado DESTA pasta a cada download, então
+# nunca existe uma versão antiga esquecida em algum lugar: o que está no
+# repositório é o que o usuário baixa.
+INSTALADOR_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "instalador")
+)
 
 # Muda a cada vez que o processo sobe (cada atualização/restart do
 # backend). O frontend fica de olho nisso (ver GET /api/v1/versao) pra
@@ -93,6 +102,40 @@ def create_app(test_config: dict = None) -> Flask:
     @app.get("/")
     def frontend_index():
         return send_from_directory(FRONTEND_DIR, "index.html")
+
+    @app.get("/downloads/")
+    @app.get("/downloads")
+    def pagina_downloads():
+        """Página pública com o instalador. Pública de propósito: o
+        colaborador precisa baixar isso ANTES de ter o atalho, muitas
+        vezes numa máquina onde ele ainda nem logou. Não expõe dado
+        nenhum — são só dois scripts que criam um atalho."""
+        return send_from_directory(FRONTEND_DIR, "downloads.html")
+
+    @app.get("/downloads/WhattsInbox-instalador.zip")
+    def baixar_instalador():
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
+            for nome in sorted(os.listdir(INSTALADOR_DIR)):
+                caminho = os.path.join(INSTALADOR_DIR, nome)
+                if os.path.isfile(caminho):
+                    z.write(caminho, nome)
+        buffer.seek(0)
+        return send_file(
+            buffer,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name="WhattsInbox-instalador.zip",
+            max_age=0,
+        )
+
+    @app.get("/static/instalador/WhattsInbox-instalador.zip")
+    def instalador_link_antigo():
+        """O ZIP ficava aqui, numa cópia estática que precisava ser
+        regerada à mão (e por isso envelhecia). Agora ele é montado na
+        hora em /downloads — este endereço só existe pra não quebrar
+        link antigo que alguém tenha salvo."""
+        return redirect("/downloads/WhattsInbox-instalador.zip", code=302)
 
     @app.get("/manifest.webmanifest")
     def manifesto_pwa():

@@ -273,6 +273,7 @@
               </div>
             </div>
             ${state.podeInstalarApp ? `<button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>` : ""}
+            <a class="botao secundario pequeno" href="/downloads/" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>
             <div class="barra-acoes" style="margin-top:10px;">
               <button class="botao-icone" data-acao="alternar-tema" title="Alternar tema">🌓</button>
               <button class="botao secundario pequeno" data-acao="logout" style="margin-left:auto;">Sair</button>
