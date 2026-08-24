@@ -21,6 +21,11 @@
     lembretesTodos: false, // admin: false = só os meus, true = de todo mundo
     agendamentosTodos: false,
     lembretesAlertados: new Set(), // ids de lembrete já alertados nesta sessão do navegador
+    // Quantas não lidas na contagem anterior — o aviso sonoro só toca
+    // quando o número sobe. null = ainda não contamos nenhuma vez (não
+    // toca pras mensagens que já estavam lá quando a pessoa entrou).
+    naoLidasWpp: null,
+    naoLidasInterno: null,
     filtroAtividadesUsuarioId: null,
     versaoServidor: null,
     buscaConversas: null,
@@ -451,6 +456,67 @@
   // módulo porque a gravação precisa sobreviver entre o clique de
   // iniciar e o clique de parar, sem depender de nenhum estado de tela.
   let _gravador = null, _gravadorChunks = [], _gravadorTimer = null;
+
+  // Sobe um arquivo pra uma conversa (de cliente ou interna) — as duas
+  // telas mandam do mesmo jeito, só muda o endereço.
+  async function _subirAnexo(url, arquivo, tipoForcado) {
+    const formData = new FormData();
+    formData.append("arquivo", arquivo, arquivo.name || "arquivo");
+    if (tipoForcado) formData.append("tipo", tipoForcado);
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.accessToken },
+      body: formData,
+    });
+    if (!resp.ok) {
+      const corpo = await resp.json().catch(() => ({}));
+      throw new Error(corpo.mensagem || `Erro ${resp.status}`);
+    }
+  }
+
+  // Primeiro clique começa a gravar, segundo para e envia. Serve pras
+  // duas telas: quem chama diz pra onde mandar e o que redesenhar
+  // depois.
+  async function _alternarGravacaoAudio(botao, url, aoTerminar) {
+    if (_gravador && _gravador.state === "recording") {
+      _gravador.stop(); // o resto acontece no onstop, registrado abaixo
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      definirFlash("erro", "Não consegui acessar o microfone — verifique a permissão do navegador pra este site.");
+      return;
+    }
+    _gravadorChunks = [];
+    _gravador = new MediaRecorder(stream);
+    _gravador.ondataavailable = (e) => { if (e.data.size > 0) _gravadorChunks.push(e.data); };
+    _gravador.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(_gravadorTimer);
+      _atualizarBotaoGravacao(botao, false);
+      const gravado = new Blob(_gravadorChunks, { type: "audio/webm" });
+      if (gravado.size < 800) { definirFlash("erro", "Gravação muito curta — tente de novo."); return; }
+      const blob = new File([gravado], "audio.webm", { type: "audio/webm" });
+      definirFlash("ok", "Enviando áudio…");
+      montarRota();
+      try {
+        // tipo="audio" explícito: o nome (audio.webm) não distingue de
+        // um vídeo .webm, já que o navegador grava áudio dentro de webm.
+        await _subirAnexo(url, blob, "audio");
+        definirFlash("ok", "Áudio enviado.");
+      } catch (e) {
+        definirFlash("erro", "Erro ao enviar áudio: " + e.message);
+      }
+      return aoTerminar();
+    };
+    _gravador.start();
+    _atualizarBotaoGravacao(botao, true, 0);
+    const inicioGravacao = Date.now();
+    _gravadorTimer = setInterval(() => _atualizarBotaoGravacao(botao, true, Date.now() - inicioGravacao), 500);
+  }
+
   function _atualizarBotaoGravacao(btn, gravando, ms) {
     if (!btn || !btn.isConnected) return;
     if (gravando) {
@@ -486,6 +552,59 @@
   // Avisa (com bolinha piscando no menu lateral) que chegou mensagem nova
   // — de cliente (Conversas) ou de colega (Chat interno) — mesmo que a
   // pessoa não esteja olhando pra nenhuma das duas telas agora.
+  // Aviso sonoro de mensagem nova. Os sons são gerados na hora (Web
+  // Audio) em vez de arquivos .mp3: não depende de baixar nada, funciona
+  // offline e não estoura o limite de conteúdo externo. São dois toques
+  // bem diferentes pra dar pra saber, sem olhar a tela, se veio cliente
+  // ou colega.
+  let _audioCtx = null;
+  function _contextoAudio() {
+    if (!_audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      _audioCtx = new Ctx();
+    }
+    // O navegador só libera som depois de algum clique; a primeira vez
+    // costuma vir suspensa, então destrava aqui.
+    if (_audioCtx.state === "suspended") _audioCtx.resume().catch(() => {});
+    return _audioCtx;
+  }
+
+  function _tocarNotas(notas) {
+    const ctx = _contextoAudio();
+    if (!ctx) return;
+    notas.forEach(({ hz, inicio, duracao, volume = 0.16 }) => {
+      const osc = ctx.createOscillator();
+      const ganho = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = hz;
+      const t0 = ctx.currentTime + inicio;
+      // Sobe e desce o volume suavemente — sem isso o som "estala".
+      ganho.gain.setValueAtTime(0.0001, t0);
+      ganho.gain.exponentialRampToValueAtTime(volume, t0 + 0.02);
+      ganho.gain.exponentialRampToValueAtTime(0.0001, t0 + duracao);
+      osc.connect(ganho).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + duracao + 0.02);
+    });
+  }
+
+  // Cliente no WhatsApp: dois toques subindo, mais agudo e "chamativo".
+  function tocarAvisoWhatsapp() {
+    _tocarNotas([
+      { hz: 880, inicio: 0, duracao: 0.13 },
+      { hz: 1318, inicio: 0.14, duracao: 0.22 },
+    ]);
+  }
+
+  // Colega no chat interno: nota grave dupla, mais discreta e curta.
+  function tocarAvisoChatInterno() {
+    _tocarNotas([
+      { hz: 523, inicio: 0, duracao: 0.11, volume: 0.13 },
+      { hz: 392, inicio: 0.12, duracao: 0.2, volume: 0.13 },
+    ]);
+  }
+
   async function atualizarBadgesNaoLidos() {
     try {
       // Conta pelas duas abas: "fila" é onde ficam as que estão
@@ -508,6 +627,11 @@
         badge.textContent = total > 99 ? "99+" : String(total);
         badge.classList.toggle("piscando", total > 0);
       }
+      // Só toca quando o número SOBE. Na primeira contagem depois de
+      // entrar, state.naoLidasWpp ainda é null — sem essa guarda, tocaria
+      // pras mensagens que já estavam lá esperando.
+      if (state.naoLidasWpp !== null && total > state.naoLidasWpp) tocarAvisoWhatsapp();
+      state.naoLidasWpp = total;
     } catch (e) { /* próxima tentativa corrige */ }
     try {
       const conversasInternas = await chamarApi("/chat-interno/conversas");
@@ -519,6 +643,8 @@
         badge.textContent = total > 99 ? "99+" : String(total);
         badge.classList.toggle("piscando", total > 0);
       }
+      if (state.naoLidasInterno !== null && total > state.naoLidasInterno) tocarAvisoChatInterno();
+      state.naoLidasInterno = total;
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
@@ -1069,7 +1195,8 @@
     const nomeAutor = m.usuario_id === conversa.criado_por_id ? conversa.criado_por_nome : (conversa.participante_nome || "—");
     return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"}">
       ${!saida || souAlheio ? `<div class="texto-suave" style="font-size:11px; font-weight:700; margin-bottom:2px;">${escapeHtml(nomeAutor)}</div>` : ""}
-      <div class="wpp-bolha-texto">${escapeHtml(m.texto || "")}</div>
+      ${htmlAnexoBolha(m)}
+      ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
       <div class="wpp-bolha-rodape"><span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span></div>
     </div>`;
   }
@@ -1101,7 +1228,14 @@
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens-interno>${mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("")}</div>
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
-        <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1" required></textarea>
+        <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" hidden>
+        <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
+        <div class="wpp-emoji-envolucro">
+          <button type="button" class="botao-icone" data-acao="alternar-emoji" title="Emoji">😀</button>
+          <div class="wpp-emoji-painel" data-wpp-emoji-painel hidden>${EMOJIS_COMUNS.map((e) => `<button type="button" class="wpp-emoji-item" data-acao="inserir-emoji" data-emoji="${e}">${e}</button>`).join("")}</div>
+        </div>
+        <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1"></textarea>
+        <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio-interno" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
         <button type="submit" class="botao wpp-botao-enviar" title="Enviar">➤</button>
       </form>`;
   }
@@ -2457,52 +2591,30 @@
         }
         return renderWhatsapp(conversaId);
       }
-      case "alternar-gravacao-audio": {
-        const conversaId = Number(alvo.dataset.id);
-        if (_gravador && _gravador.state === "recording") {
-          _gravador.stop(); // o resto acontece em onstop, registrado no início da gravação
-          return;
-        }
-        let stream;
+      case "alternar-gravacao-audio":
+        return _alternarGravacaoAudio(
+          alvo,
+          `${API}/whatsapp/conversas/${Number(alvo.dataset.id)}/anexo`,
+          () => renderWhatsapp(Number(alvo.dataset.id)),
+        );
+      case "alternar-gravacao-audio-interno":
+        return _alternarGravacaoAudio(
+          alvo,
+          `${API}/chat-interno/conversas/${Number(alvo.dataset.id)}/anexo`,
+          () => renderChatInterno(Number(alvo.dataset.id)),
+        );
+      case "anexar-arquivo-interno": {
+        const arquivo = alvo.files[0];
+        if (!arquivo) return;
+        const conversaId = Number(alvo.dataset.conversaId);
+        if (arquivo.size > 35 * 1024 * 1024) { definirFlash("erro", "Arquivo maior que 35MB."); return renderChatInterno(conversaId); }
+        alvo.disabled = true;
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        } catch (e) {
-          definirFlash("erro", "Não consegui acessar o microfone — verifique a permissão do navegador pra este site.");
-          return;
+          await _subirAnexo(`${API}/chat-interno/conversas/${conversaId}/anexo`, arquivo);
+        } finally {
+          alvo.disabled = false;
         }
-        _gravadorChunks = [];
-        _gravador = new MediaRecorder(stream);
-        _gravador.ondataavailable = (e) => { if (e.data.size > 0) _gravadorChunks.push(e.data); };
-        _gravador.onstop = async () => {
-          stream.getTracks().forEach((t) => t.stop());
-          clearInterval(_gravadorTimer);
-          _atualizarBotaoGravacao(alvo, false);
-          const blob = new Blob(_gravadorChunks, { type: "audio/webm" });
-          if (blob.size < 800) { definirFlash("erro", "Gravação muito curta — tente de novo."); return; }
-          const formData = new FormData();
-          formData.append("arquivo", blob, "audio.webm");
-          formData.append("tipo", "audio");
-          definirFlash("ok", "Enviando áudio…");
-          montarRota();
-          try {
-            await fetch(`${API}/whatsapp/conversas/${conversaId}/anexo`, {
-              method: "POST",
-              headers: { Authorization: "Bearer " + state.accessToken },
-              body: formData,
-            }).then(async (resp) => {
-              if (!resp.ok) { const corpo = await resp.json().catch(() => ({})); throw new Error(corpo.mensagem || `Erro ${resp.status}`); }
-            });
-            definirFlash("ok", "Áudio enviado.");
-          } catch (e) {
-            definirFlash("erro", "Erro ao enviar áudio: " + e.message);
-          }
-          return renderWhatsapp(conversaId);
-        };
-        _gravador.start();
-        _atualizarBotaoGravacao(alvo, true, 0);
-        const inicioGravacao = Date.now();
-        _gravadorTimer = setInterval(() => _atualizarBotaoGravacao(alvo, true, Date.now() - inicioGravacao), 500);
-        return;
+        return renderChatInterno(conversaId);
       }
       case "alternar-emoji": {
         const painel = alvo.parentElement.querySelector("[data-wpp-emoji-painel]");

@@ -27,7 +27,14 @@ from .context import ApiError
 TIMEOUT_PROVEDOR_SEGUNDOS = 30
 PASTA_UPLOADS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "uploads")
 
-MINUTOS_ONLINE = 3
+# Quanto tempo sem sinal do navegador até considerar a pessoa ausente.
+# Era 3 min, mas o Windows/navegador reduz (e às vezes congela) os
+# temporizadores de aba minimizada ou em segundo plano — quem só
+# minimizava a janela aparecia como ausente e o cliente ouvia "não há
+# ninguém disponível" com a pessoa ali do lado. Com 30 min a aba
+# minimizada continua dando sinal a tempo. Sair do sistema derruba o
+# status na hora (ver logout), então isto não deixa "fantasma" online.
+MINUTOS_ONLINE = 30
 
 # DDD -> UF (tabela pública da ANATEL) — usado pra descobrir de qual
 # estado/região é cada contato automaticamente pelo telefone, sem

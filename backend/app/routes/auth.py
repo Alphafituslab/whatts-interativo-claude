@@ -201,6 +201,16 @@ def logout():
         sessao = conn.execute("SELECT usuario_id FROM sessoes WHERE refresh_token_hash = ?", (token_hash,)).fetchone()
         conn.execute("UPDATE sessoes SET revogado = 1 WHERE refresh_token_hash = ?", (token_hash,))
         if sessao:
+            # Sair do sistema derruba o status na hora. Sem isto a pessoa
+            # continuaria "atendendo" até o tempo de MINUTOS_ONLINE
+            # vencer, e o cliente seria direcionado pra quem já foi
+            # embora. Só derruba se não tiver outra sessão ativa (ex.:
+            # deslogou no computador mas continua no celular).
+            outra_sessao = conn.execute(
+                "SELECT 1 FROM sessoes WHERE usuario_id = ? AND revogado = 0 LIMIT 1", (sessao["usuario_id"],)
+            ).fetchone()
+            if not outra_sessao:
+                conn.execute("UPDATE usuarios SET ultimo_acesso = NULL WHERE id = ?", (sessao["usuario_id"],))
             whatsapp_service.registrar_atividade(conn, sessao["usuario_id"], "logout")
     return jsonify({"ok": True})
 

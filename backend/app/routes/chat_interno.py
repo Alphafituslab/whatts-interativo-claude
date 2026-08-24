@@ -4,10 +4,17 @@ WhatsApp/Evolution API, é 100% interno ao sistema. Mesma régua de
 visibilidade das conversas de clientes: só os dois participantes (mais
 admin, em modo supervisão) veem/agem numa conversa.
 """
+import os
+import secrets
+
 from flask import Blueprint, g, jsonify, request
+from werkzeug.utils import secure_filename
 
 from .. import chat_interno_service, whatsapp_service
 from ..context import ApiError, get_db, requires_auth
+# Reaproveita os limites, a classificação de tipo e a pasta de anexos do
+# WhatsApp — anexo é anexo, não faz sentido ter duas regras diferentes.
+from . import whatsapp as rotas_whatsapp
 
 bp = Blueprint("chat_interno", __name__, url_prefix="/api/v1/chat-interno")
 
@@ -127,6 +134,46 @@ def enviar_mensagem(conversa_id):
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
     chat_interno_service.enviar_mensagem(conn, conversa_id, usuario["id"], texto)
     return jsonify({"ok": True}), 201
+
+
+@bp.post("/conversas/<int:conversa_id>/anexo")
+@requires_auth
+def enviar_anexo(conversa_id):
+    """Imagem, vídeo, documento ou áudio gravado no chat interno.
+
+    Guarda o arquivo na MESMA pasta dos anexos de WhatsApp e serve pela
+    mesma rota (/whatsapp/uploads/<arquivo>), com nome aleatório de 16
+    hex — é o que já funciona com <img src> e link de download, sem
+    duplicar a lógica de servir arquivo em dois lugares."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+
+    arquivo = request.files.get("arquivo")
+    if not arquivo or not arquivo.filename:
+        raise ApiError("Nenhum arquivo enviado.", status=400)
+    dados_bytes = arquivo.read()
+    if len(dados_bytes) > rotas_whatsapp.MAX_ANEXO_MB * 1024 * 1024:
+        raise ApiError(f"Arquivo maior que o limite de {rotas_whatsapp.MAX_ANEXO_MB}MB.", status=400)
+
+    # A gravação de áudio manda tipo="audio" explícito: o nome do arquivo
+    # sozinho (audio.webm) não distingue de um vídeo .webm anexado.
+    tipo_forcado = request.form.get("tipo")
+    tipo = tipo_forcado if tipo_forcado in rotas_whatsapp.EXTENSOES_TIPO else rotas_whatsapp._classificar_tipo(arquivo.filename)
+    legenda = (request.form.get("legenda") or "").strip() or None
+
+    os.makedirs(rotas_whatsapp.PASTA_UPLOADS, exist_ok=True)
+    nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
+    with open(os.path.join(rotas_whatsapp.PASTA_UPLOADS, nome_seguro), "wb") as f:
+        f.write(dados_bytes)
+    midia_url = f"/api/v1/whatsapp/uploads/{nome_seguro}"
+
+    chat_interno_service.enviar_mensagem(
+        conn, conversa_id, usuario["id"], legenda, tipo=tipo, midia_url=midia_url, nome_arquivo=arquivo.filename
+    )
+    return jsonify({"ok": True, "midia_url": midia_url, "tipo": tipo}), 201
 
 
 @bp.post("/conversas/<int:conversa_id>/digitando")
