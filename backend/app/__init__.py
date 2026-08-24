@@ -11,7 +11,7 @@ from .context import ApiError, close_db
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "frontend")
 FRONTEND_DIR = os.path.abspath(FRONTEND_DIR)
 # Pasta com os arquivos-fonte do instalador do atalho de desktop. O ZIP
-# entregue em /downloads é montado DESTA pasta a cada download, então
+# entregue em /instalador é montado DESTA pasta a cada download, então
 # nunca existe uma versão antiga esquecida em algum lugar: o que está no
 # repositório é o que o usuário baixa.
 INSTALADOR_DIR = os.path.abspath(
@@ -103,16 +103,12 @@ def create_app(test_config: dict = None) -> Flask:
     def frontend_index():
         return send_from_directory(FRONTEND_DIR, "index.html")
 
-    @app.get("/downloads/")
-    @app.get("/downloads")
-    def pagina_downloads():
-        """Página pública com o instalador. Pública de propósito: o
-        colaborador precisa baixar isso ANTES de ter o atalho, muitas
-        vezes numa máquina onde ele ainda nem logou. Não expõe dado
-        nenhum — são só dois scripts que criam um atalho."""
-        return send_from_directory(FRONTEND_DIR, "downloads.html")
-
-    @app.get("/downloads/WhattsInbox-instalador.zip")
+    # ATENÇÃO ao endereço: /downloads/* NÃO chega aqui — o Caddy serve
+    # aquela pasta direto do disco (/opt/alphafitus-downloads), que é a
+    # página central de downloads da Alphafitus, compartilhada com o
+    # Alphafitus OS. Por isso o ZIP mora em /instalador/, e é a página de
+    # lá que aponta pra cá.
+    @app.get("/instalador/WhattsInbox-instalador.zip")
     def baixar_instalador():
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
@@ -133,9 +129,9 @@ def create_app(test_config: dict = None) -> Flask:
     def instalador_link_antigo():
         """O ZIP ficava aqui, numa cópia estática que precisava ser
         regerada à mão (e por isso envelhecia). Agora ele é montado na
-        hora em /downloads — este endereço só existe pra não quebrar
+        hora em /instalador — este endereço só existe pra não quebrar
         link antigo que alguém tenha salvo."""
-        return redirect("/downloads/WhattsInbox-instalador.zip", code=302)
+        return redirect("/instalador/WhattsInbox-instalador.zip", code=302)
 
     @app.get("/manifest.webmanifest")
     def manifesto_pwa():

@@ -1,0 +1,169 @@
+<!doctype html>
+<!--
+  Página central de downloads da Alphafitus — servida pelo Caddy direto
+  de /opt/alphafitus-downloads (ver /etc/caddy/Caddyfile), FORA do app
+  Flask. Fica versionada aqui pra não se perder; pra publicar, copie
+  este arquivo pra aquela pasta no servidor (ver deploy/README.md).
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Downloads Alphafitus</title>
+<meta name="theme-color" content="#00b4a3">
+<link rel="icon" href="https://whatts.alphafitus.com.br/static/img/icone-192.png">
+<style>
+  :root {
+    --teal: #00b4a3;
+    --leaf: #00af6b;
+    --ink: #071912;
+    --fundo: #f4f6f8;
+    --superficie: #ffffff;
+    --texto: #1a202c;
+    --texto-suave: #5a6472;
+    --borda: #e2e6ea;
+    --aviso-fundo: #fff8e6;
+    --aviso-borda: #f0d089;
+    --aviso-texto: #6b4d06;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #0d1614; --superficie: #15201d; --texto: #e8efec;
+      --texto-suave: #94a5a0; --borda: #243230;
+      --aviso-fundo: #2a2213; --aviso-borda: #5c4a1c; --aviso-texto: #f0d089;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--fundo); color: var(--texto); line-height: 1.5;
+  }
+  header {
+    background: linear-gradient(135deg, var(--teal) 0%, var(--ink) 100%);
+    color: #fff; padding: 40px 24px 44px; text-align: center;
+  }
+  header h1 { margin: 0 0 6px; font-size: 24px; letter-spacing: -0.02em; }
+  header p { margin: 0; opacity: 0.85; font-size: 14px; }
+  main {
+    max-width: 720px; margin: -24px auto 40px; padding: 0 20px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  h3.secao {
+    margin: 18px 0 0; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--texto-suave);
+  }
+  .cartao {
+    background: var(--superficie); border: 1px solid var(--borda); border-radius: 12px;
+    padding: 20px 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .cartao-icone {
+    width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--teal), var(--leaf));
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 20px;
+  }
+  .cartao-texto { flex: 1; min-width: 190px; }
+  .cartao-texto h2 { margin: 0 0 4px; font-size: 16px; }
+  .cartao-texto p { margin: 0; font-size: 13px; color: var(--texto-suave); }
+  .botao {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 18px; border-radius: 8px; border: none;
+    background: var(--leaf); color: #fff; font-weight: 600; font-size: 13.5px;
+    text-decoration: none; white-space: nowrap; flex-shrink: 0;
+  }
+  .botao:hover { background: var(--teal); }
+  .botao.leve { background: transparent; color: var(--leaf); border: 1px solid var(--borda); }
+  .botao.leve:hover { background: rgba(0,175,107,0.08); color: var(--leaf); }
+  .passos { width: 100%; margin: 4px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--texto-suave); }
+  .passos li { margin-bottom: 5px; }
+  .passos strong { color: var(--texto); }
+  .aviso {
+    width: 100%; background: var(--aviso-fundo); border: 1px solid var(--aviso-borda);
+    color: var(--aviso-texto); border-radius: 9px; padding: 12px 14px; font-size: 13px;
+  }
+  .aviso strong { display: block; margin-bottom: 3px; }
+  footer { text-align: center; padding: 20px; font-size: 12px; color: var(--texto-suave); }
+  footer a { color: var(--leaf); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Downloads Alphafitus</h1>
+  <p>Instaladores e ferramentas dos sistemas internos da empresa</p>
+</header>
+<main>
+
+  <h3 class="secao">Sistemas</h3>
+
+  <div class="cartao">
+    <div class="cartao-icone">A</div>
+    <div class="cartao-texto">
+      <h2>Alphafitus OS</h2>
+      <p>ERP completo — instala no computador, com banco de dados próprio (Windows).</p>
+    </div>
+    <a class="botao" href="/downloads/AlphafitusOS_Servidor_Instalar.exe">Baixar</a>
+  </div>
+
+  <div class="cartao">
+    <div class="cartao-icone">W</div>
+    <div class="cartao-texto">
+      <h2>Whatts Inbox — computador (Windows)</h2>
+      <p>Cria o atalho na área de trabalho, com a logo da empresa, abrindo o sistema em
+         janela limpa. Não instala programa nenhum e não precisa ser administrador.</p>
+    </div>
+    <a class="botao" href="https://whatts.alphafitus.com.br/instalador/WhattsInbox-instalador.zip">Baixar</a>
+    <ol class="passos">
+      <li>Baixe o arquivo, clique com o botão direito → <strong>Extrair tudo</strong>.</li>
+      <li>Dê dois cliques em <strong>Instalar Whatts Inbox</strong>.</li>
+      <li>O ícone aparece na área de trabalho. Este link é montado na hora, então sempre traz a versão atual.</li>
+    </ol>
+  </div>
+
+  <div class="cartao">
+    <div class="cartao-icone">📱</div>
+    <div class="cartao-texto">
+      <h2>Whatts Inbox — celular e tablet</h2>
+      <p>Não precisa baixar nada: o próprio site vira um app, com ícone na tela de início
+         e abrindo em tela cheia. Funciona em qualquer rede, igual ao computador.</p>
+    </div>
+    <a class="botao" href="https://whatts.alphafitus.com.br/">Abrir no aparelho</a>
+    <ol class="passos">
+      <li><strong>Android (Chrome):</strong> abra o site, toque em ⋮ e escolha <strong>Instalar app</strong> (ou “Adicionar à tela inicial”).</li>
+      <li><strong>iPhone / iPad (Safari):</strong> abra o site, toque em <strong>Compartilhar</strong> e escolha <strong>Adicionar à Tela de Início</strong>.</li>
+      <li>Já logado, o botão <strong>“Instalar no aparelho”</strong> também aparece no menu lateral do sistema.</li>
+    </ol>
+  </div>
+
+  <h3 class="secao">Ferramentas técnicas</h3>
+
+  <div class="cartao">
+    <div class="cartao-icone">🗄️</div>
+    <div class="cartao-texto">
+      <h2>Banco de dados do Whatts Inbox</h2>
+      <p>O banco é <strong>SQLite</strong> (um arquivo só: <code>whatsapp.db</code>), guardado no
+         servidor. Para abrir e editar à mão, use estes dois programas gratuitos.</p>
+    </div>
+    <a class="botao" href="https://sqlitebrowser.org/dl/" target="_blank" rel="noopener">DB Browser</a>
+    <a class="botao leve" href="https://winscp.net/eng/download.php" target="_blank" rel="noopener">WinSCP</a>
+    <ol class="passos">
+      <li><strong>DB Browser for SQLite</strong> — abre o banco em tela, mostra as tabelas e deixa editar linha a linha ou rodar SQL.</li>
+      <li><strong>WinSCP</strong> — copia o arquivo do servidor pro seu computador e devolve depois (conecta em <code>46.202.151.252</code>, usuário <code>root</code>, com a chave SSH).</li>
+      <li>O arquivo fica em <code>/opt/whatts-inbox/backend/data/whatsapp.db</code>.</li>
+    </ol>
+    <div class="aviso">
+      <strong>Antes de editar, faça nesta ordem:</strong>
+      1) gere um backup pelo próprio sistema (Configurações → Backup);
+      2) pare o serviço no servidor (<code>systemctl stop whatts-inbox</code>) — editar com o
+      sistema rodando pode corromper o banco e derrubar o atendimento;
+      3) edite; 4) suba o arquivo de volta e ligue (<code>systemctl start whatts-inbox</code>).
+      Para só <em>consultar</em> sem alterar nada, pode abrir uma cópia com o sistema no ar.
+    </div>
+  </div>
+
+</main>
+<footer>
+  Alphafitus · <a href="https://whatts.alphafitus.com.br/">Whatts Inbox</a>
+</footer>
+</body>
+</html>
