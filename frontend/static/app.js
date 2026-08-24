@@ -1444,6 +1444,19 @@
     }).join("");
   }
 
+  // Visto no chat interno: em vez de marcar mensagem por mensagem, o
+  // sistema guarda quando cada lado leu a conversa pela última vez —
+  // toda mensagem anterior a esse instante já foi vista.
+  function htmlVistoInterno(m, conversa, eu) {
+    const souCriador = conversa.criado_por_id === eu;
+    const vistoOutro = souCriador ? conversa.visto_participante_em : conversa.visto_criador_em;
+    if (!vistoOutro) return `<span class="wpp-bolha-status" title="Enviada">✓</span>`;
+    const lida = new Date(vistoOutro) >= new Date(m.criado_em);
+    return lida
+      ? `<span class="wpp-bolha-status wpp-status-lida" title="Visualizada em ${fmtData(vistoOutro)}">✓✓</span>`
+      : `<span class="wpp-bolha-status" title="Enviada — ainda não visualizada">✓</span>`;
+  }
+
   function htmlBolhaInterna(m, conversa) {
     const eu = state.usuarioAtual.id;
     const souAlheio = conversa.criado_por_id !== eu && conversa.participante_id !== eu;
@@ -1459,6 +1472,7 @@
       <div class="wpp-bolha-rodape">
         ${m.usuario_id === eu ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" title="Apagar (mandei por engano)">🗑️</button>` : ""}
         <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
+        ${m.usuario_id === eu ? htmlVistoInterno(m, conversa, eu) : ""}
       </div>
     </div>`;
   }

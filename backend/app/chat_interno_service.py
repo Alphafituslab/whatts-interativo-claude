@@ -182,7 +182,13 @@ def listar_mensagens(conn, conversa_id: int, lado: str = None):
     ).fetchall()
     if lado in ("criador", "participante"):
         campo = "nao_lidas_criador" if lado == "criador" else "nao_lidas_participante"
-        conn.execute(f"UPDATE chat_interno_conversas SET {campo} = 0 WHERE id = ?", (conversa_id,))
+        # Grava TAMBÉM quando foi lido: é o que faz o "visualizado"
+        # aparecer pro outro lado (ver visto_criador_em/visto_participante_em).
+        campo_visto = "visto_criador_em" if lado == "criador" else "visto_participante_em"
+        conn.execute(
+            f"UPDATE chat_interno_conversas SET {campo} = 0, {campo_visto} = ? WHERE id = ?",
+            (_now_iso(), conversa_id),
+        )
     return [dict(r) for r in rows]
 
 

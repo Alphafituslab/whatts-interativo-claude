@@ -38,6 +38,7 @@ SCHEMA_FILES = [
     "schema_023_figurinhas_emojis.sql",
     "schema_024_excluir_mensagem_interna.sql",
     "schema_025_followup.sql",
+    "schema_026_visto_chat_interno.sql",
 ]
 
 
