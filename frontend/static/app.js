@@ -276,6 +276,21 @@
           </div>
           <div class="pagina">${flashHtml}${conteudoHtml}</div>
         </div>
+        <!-- Aba de follow-up: fica encostada na borda direita, discreta,
+             e só abre o painel quando clicada. -->
+        <button type="button" class="followup-aba" data-acao="alternar-followup" title="Follow-up — clientes que precisam de contato">
+          <span class="followup-aba-icone">🔔</span>
+          <span class="followup-aba-contador" data-followup-contador hidden>0</span>
+        </button>
+        <aside class="followup-painel" data-followup-painel hidden>
+          <div class="followup-cabecalho">
+            <strong>Follow-up</strong>
+            <button type="button" class="botao-icone" data-acao="alternar-followup" title="Fechar">✕</button>
+          </div>
+          <div class="followup-conteudo" data-followup-conteudo>
+            <p class="texto-suave" style="padding:12px;">Carregando…</p>
+          </div>
+        </aside>
       </div>`;
     state.flash = null;
     atualizarBolinhaStatusGlobal(); // o DOM acabou de ser trocado inteiro — sem isso a bolinha mostraria "Verificando…" até o próximo tick do polling
@@ -490,6 +505,47 @@
 
   // Prévia da gravação: ouvir antes de mandar evita o clássico "mandei
   // um áudio sem querer / falei errado". Enter manda, Esc descarta.
+  function modalAgendarContato(conversaId) {
+    // Sugere amanhã às 10h: é o caso mais comum e evita digitação.
+    const amanha = new Date(Date.now() + 24 * 3600 * 1000);
+    const dataPadrao = amanha.toISOString().slice(0, 10);
+    abrirModal(`
+      <h3 style="margin-top:0;">📞 Próximo contato</h3>
+      <p class="dica">Enquanto essa data não chegar, o sistema não vai cobrar você por essa conversa.</p>
+      <form data-form="agendar-contato" data-conversa-id="${conversaId}">
+        <div style="display:flex; gap:8px;">
+          <div class="campo" style="flex:1;"><label>Data</label><input type="date" name="data" value="${dataPadrao}" required></div>
+          <div class="campo" style="flex:1;"><label>Horário</label><input type="time" name="hora" value="10:00" required></div>
+        </div>
+        <div class="campo"><label>Forma de contato</label>
+          <select name="forma">
+            <option value="whatsapp">WhatsApp</option>
+            <option value="ligacao">Ligação</option>
+            <option value="email">E-mail</option>
+            <option value="outro">Outro</option>
+          </select>
+        </div>
+        <div class="campo"><label>Observação (opcional)</label><textarea name="observacao" rows="2" placeholder="Ex.: retornar com o orçamento revisado"></textarea></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Agendar follow-up</button>
+        </div>
+      </form>`);
+  }
+
+  function modalAdiar(conversaId) {
+    const opcoes = [["1h", "1 hora"], ["amanha", "Amanhã"], ["2dias", "2 dias"], ["3dias", "3 dias"], ["7dias", "7 dias"]];
+    abrirModal(`
+      <h3 style="margin-top:0;">Adiar follow-up</h3>
+      <p class="dica">Só silencia o aviso por um tempo — diferente de agendar, não é um compromisso com o cliente.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin:14px 0;">
+        ${opcoes.map(([v, r]) => `<button type="button" class="botao secundario" data-acao="adiar-rapido" data-id="${conversaId}" data-quanto="${v}">${r}</button>`).join("")}
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+      </div>`);
+  }
+
   function modalPreviaAudio(blob, url, aoTerminar, botaoGravar) {
     const src = URL.createObjectURL(blob);
     const seg = Math.round(blob.size / 16000); // estimativa só pra dar noção do tamanho
@@ -603,6 +659,10 @@
     // roda em qualquer tela (não só Conversas/Chat interno), pra piscar
     // o menu lateral mesmo se a pessoa estiver, por exemplo, no Dashboard.
     timerBadgesNaoLidos = setInterval(atualizarBadgesNaoLidos, 4000);
+    // Follow-up muda em dias, não em segundos — 60s já é de sobra e
+    // evita consulta pesada a cada 4s.
+    atualizarContadorFollowup();
+    setInterval(atualizarContadorFollowup, 60000);
   }
 
   // Avisa (com bolinha piscando no menu lateral) que chegou mensagem nova
@@ -653,12 +713,94 @@
     ]);
   }
 
-  // Colega no chat interno: nota grave dupla, mais discreta e curta.
+  // Colega no chat interno: sequência mais longa e grave (4 notas
+  // descendo, ~1s). O toque do cliente é curto e agudo; alongar este
+  // aqui deixa a diferença óbvia sem precisar olhar a tela.
   function tocarAvisoChatInterno() {
     _tocarNotas([
-      { hz: 523, inicio: 0, duracao: 0.11, volume: 0.13 },
-      { hz: 392, inicio: 0.12, duracao: 0.2, volume: 0.13 },
+      { hz: 587, inicio: 0,    duracao: 0.16, volume: 0.13 },
+      { hz: 494, inicio: 0.18, duracao: 0.16, volume: 0.13 },
+      { hz: 440, inicio: 0.36, duracao: 0.18, volume: 0.13 },
+      { hz: 349, inicio: 0.56, duracao: 0.4,  volume: 0.14 },
     ]);
+  }
+
+  // ---------------------------------------------------------------
+  // FOLLOW-UP — painel lateral discreto: contador sempre visível, lista
+  // só quando aberta (pra não pesar as telas nem roubar espaço).
+  // ---------------------------------------------------------------
+  const ROTULO_SITUACAO = {
+    agendado_vencido: ["🔴", "Retorno prometido e não cumprido"],
+    atrasado: ["🔴", "Sem contato há tempo demais"],
+    proximo_do_vencimento: ["🟠", "Perto de vencer"],
+    agendado: ["🟢", "Contato agendado"],
+    adiado: ["⚪", "Adiado"],
+    em_dia: ["🟢", "Em dia"],
+  };
+
+  async function atualizarContadorFollowup() {
+    const contador = document.querySelector("[data-followup-contador]");
+    if (!contador) return;
+    try {
+      const r = await chamarApi("/followup/resumo");
+      const total = r.total_pendente || 0;
+      contador.hidden = total === 0;
+      contador.textContent = total > 99 ? "99+" : String(total);
+      contador.classList.toggle("piscando", total > 0);
+    } catch (e) { /* próximo tick corrige */ }
+  }
+
+  function _fmtDataCurta(iso) {
+    const d = iso ? new Date(iso.endsWith("Z") ? iso : iso + "Z") : null;
+    if (!d || isNaN(d)) return "—";
+    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function htmlItemFollowup(i) {
+    const [cor, rotulo] = ROTULO_SITUACAO[i.situacao] || ["⚪", i.situacao];
+    const detalhe = i.situacao === "agendado" || i.situacao === "agendado_vencido"
+      ? `Contato marcado pra ${_fmtDataCurta(i.quando)}`
+      : `${i.dias_parado} dia(s) sem retorno · prazo ${i.prazo_dias}d`;
+    return `
+      <div class="followup-item followup-${i.situacao}">
+        <div class="followup-item-topo">
+          <strong>${escapeHtml(i.contato_nome || "")}</strong>
+          <span title="${escapeHtml(rotulo)}">${cor}</span>
+        </div>
+        <div class="texto-suave" style="font-size:11.5px;">${escapeHtml(detalhe)}</div>
+        <div class="texto-suave" style="font-size:11.5px;">
+          ${i.responsavel_nome ? "Resp.: " + escapeHtml(i.responsavel_nome) : "<em>sem responsável</em>"}
+          ${i.menu_setor ? " · 🏷️ " + escapeHtml(i.menu_setor) : ""}
+        </div>
+        <div class="followup-item-acoes">
+          <a class="botao pequeno" href="#/whatsapp/${i.conversa_id}" data-acao="fechar-followup">Abrir</a>
+          <button type="button" class="botao secundario pequeno" data-acao="abrir-agendar-contato" data-id="${i.conversa_id}">Agendar</button>
+          <button type="button" class="botao secundario pequeno" data-acao="abrir-adiar" data-id="${i.conversa_id}">Adiar</button>
+        </div>
+      </div>`;
+  }
+
+  async function carregarPainelFollowup() {
+    const alvo = document.querySelector("[data-followup-conteudo]");
+    if (!alvo) return;
+    try {
+      const [resumo, itens] = await Promise.all([
+        chamarApi("/followup/resumo"),
+        chamarApi("/followup"),
+      ]);
+      const pendentes = itens.filter((i) => ["atrasado", "agendado_vencido"].includes(i.situacao));
+      const proximos = itens.filter((i) => ["proximo_do_vencimento", "agendado"].includes(i.situacao));
+      alvo.innerHTML = `
+        <div class="followup-resumo">
+          <span>🔴 ${resumo.atrasados + resumo.agendados_vencidos} atrasados</span>
+          <span>🟠 ${resumo.para_hoje} pra hoje</span>
+          <span>🟢 ${resumo.agendados} agendados</span>
+        </div>
+        ${pendentes.length ? pendentes.map(htmlItemFollowup).join("") : '<p class="texto-suave" style="padding:12px;">Nada atrasado. 👏</p>'}
+        ${proximos.length ? `<div class="followup-secao">Próximos</div>${proximos.map(htmlItemFollowup).join("")}` : ""}`;
+    } catch (e) {
+      alvo.innerHTML = `<p class="texto-suave" style="padding:12px;">Não consegui carregar agora.</p>`;
+    }
   }
 
   async function atualizarBadgesNaoLidos() {
@@ -2743,6 +2885,33 @@
         definirFlash("ok", "Mensagem apagada.");
         return renderChatInterno(conversaId);
       }
+      case "alternar-followup": {
+        const painel = document.querySelector("[data-followup-painel]");
+        painel.hidden = !painel.hidden;
+        if (!painel.hidden) carregarPainelFollowup();
+        return;
+      }
+      case "fechar-followup": {
+        const painel = document.querySelector("[data-followup-painel]");
+        if (painel) painel.hidden = true;
+        return; // o href do link segue normalmente
+      }
+      case "abrir-agendar-contato": {
+        modalAgendarContato(Number(alvo.dataset.id));
+        return;
+      }
+      case "abrir-adiar": {
+        modalAdiar(Number(alvo.dataset.id));
+        return;
+      }
+      case "adiar-rapido": {
+        await chamarApi(`/followup/conversas/${alvo.dataset.id}/adiar`, { method: "POST", body: { quanto: alvo.dataset.quanto } });
+        fecharModais();
+        definirFlash("ok", "Follow-up adiado.");
+        atualizarContadorFollowup();
+        carregarPainelFollowup();
+        return;
+      }
       case "alternar-figurinhas": {
         const painel = alvo.parentElement.querySelector("[data-wpp-figurinhas-painel]");
         painel.hidden = !painel.hidden;
@@ -3355,6 +3524,19 @@
         fecharModais();
         definirFlash("ok", "Apelido salvo.");
         return renderChatInterno(conversaId);
+      }
+      case "agendar-contato": {
+        const conversaId = Number(form.dataset.conversaId);
+        const quando = `${dados.get("data")}T${dados.get("hora")}:00.000Z`;
+        await chamarApi(`/followup/conversas/${conversaId}/agendar`, {
+          method: "PUT",
+          body: { quando, forma: dados.get("forma"), observacao: dados.get("observacao") || "" },
+        });
+        fecharModais();
+        definirFlash("ok", "Próximo contato agendado.");
+        atualizarContadorFollowup();
+        carregarPainelFollowup();
+        return;
       }
       case "criar-setor": {
         await chamarApi("/usuarios/setores", { method: "POST", body: { nome: dados.get("nome") || "" } });

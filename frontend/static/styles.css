@@ -759,3 +759,54 @@ nav { perspective: 800px; }
   .marca-icone { animation: none; }
   .link-nav, .link-nav span:first-child { transition: none; }
 }
+
+/* =====================================================================
+   Follow-up — aba encostada na borda direita + painel deslizante.
+   Discreto de propósito: fica fora do caminho até ser chamado.
+   ===================================================================== */
+.followup-aba {
+  position: fixed; right: 0; top: 50%; transform: translateY(-50%);
+  background: var(--superficie); border: 1px solid var(--borda); border-right: none;
+  border-radius: var(--raio-peq) 0 0 var(--raio-peq); padding: 12px 8px; cursor: pointer;
+  box-shadow: var(--sombra); z-index: 30; display: flex; flex-direction: column;
+  align-items: center; gap: 4px; transition: padding-right 0.15s;
+}
+.followup-aba:hover { padding-right: 12px; }
+.followup-aba-icone { font-size: 18px; line-height: 1; }
+.followup-aba-contador {
+  background: var(--vermelho); color: #fff; font-size: 10.5px; font-weight: 800;
+  min-width: 18px; padding: 1px 5px; border-radius: 999px; line-height: 1.5;
+}
+.followup-aba-contador[hidden] { display: none; }
+
+.followup-painel {
+  position: fixed; right: 0; top: 0; bottom: 0; width: 330px; max-width: 92vw;
+  background: var(--superficie); border-left: 1px solid var(--borda);
+  box-shadow: var(--sombra-flutuante); z-index: 40; display: flex; flex-direction: column;
+}
+.followup-painel[hidden] { display: none; }
+.followup-cabecalho {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--borda); flex-shrink: 0;
+}
+.followup-conteudo { overflow-y: auto; flex: 1; }
+.followup-resumo {
+  display: flex; justify-content: space-between; gap: 6px; padding: 10px 14px;
+  font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--borda);
+}
+.followup-secao {
+  padding: 10px 14px 6px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--texto-suave);
+}
+.followup-item { padding: 12px 14px; border-bottom: 1px solid var(--borda); border-left: 3px solid transparent; }
+.followup-item-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.followup-item-acoes { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+/* A cor da barra lateral repete o sinal do emoji — quem já conhece o
+   padrão identifica o estado sem ler. */
+.followup-atrasado, .followup-agendado_vencido { border-left-color: var(--vermelho); }
+.followup-proximo_do_vencimento { border-left-color: var(--amarelo); }
+.followup-agendado { border-left-color: var(--verde); }
+
+@media (max-width: 700px) {
+  .followup-painel { width: 100%; }
+}
