@@ -153,6 +153,7 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
     rows = conn.execute(
         f"""
         SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
+               uc.foto_perfil AS criado_por_foto, up.foto_perfil AS participante_foto,
                uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
                up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off
         FROM chat_interno_conversas c
@@ -174,6 +175,7 @@ def carregar_conversa(conn, conversa_id: int):
     row = conn.execute(
         """
         SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
+               uc.foto_perfil AS criado_por_foto, up.foto_perfil AS participante_foto,
                uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
                up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off
         FROM chat_interno_conversas c

@@ -603,6 +603,94 @@
       </div>`);
   }
 
+  /** Enquadrar a foto antes de salvar: a foto sai recortada em círculo,
+      e sem isto quem manda uma foto de corpo inteiro fica com o rosto
+      cortado. Mostra grande, deixa arrastar e dar zoom, e envia só o
+      pedaço escolhido (recortado aqui no navegador — o servidor recebe
+      a imagem já pronta). */
+  function modalEnquadrarFoto(arquivo, aoConfirmar) {
+    const LADO = 320;   // tamanho da área de recorte na tela
+    const SAIDA = 512;  // resolução final salva
+    const url = URL.createObjectURL(arquivo);
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">Ajustar foto</h3>
+      <p class="dica">Arraste pra posicionar e use o controle pra aproximar. O que ficar dentro do círculo é o que vai aparecer.</p>
+      <div class="foto-enquadrar" style="width:${LADO}px;height:${LADO}px;">
+        <canvas data-foto-canvas width="${LADO}" height="${LADO}"></canvas>
+        <div class="foto-enquadrar-mascara"></div>
+      </div>
+      <div class="campo" style="margin-top:14px;">
+        <label>Aproximar</label>
+        <input type="range" data-foto-zoom min="1" max="4" step="0.01" value="1">
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-foto-salvar>Salvar foto</button>
+      </div>`);
+
+    const canvas = wrap.querySelector("[data-foto-canvas]");
+    const ctx = canvas.getContext("2d");
+    const zoom = wrap.querySelector("[data-foto-zoom]");
+    const img = new Image();
+    let escalaBase = 1, escala = 1, deslocX = 0, deslocY = 0;
+
+    function desenhar() {
+      ctx.clearRect(0, 0, LADO, LADO);
+      const l = img.width * escalaBase * escala;
+      const a = img.height * escalaBase * escala;
+      // Não deixa arrastar além da borda: sempre sobra imagem cobrindo
+      // o círculo inteiro, sem faixa vazia.
+      deslocX = Math.min(0, Math.max(LADO - l, deslocX));
+      deslocY = Math.min(0, Math.max(LADO - a, deslocY));
+      ctx.drawImage(img, deslocX, deslocY, l, a);
+    }
+
+    img.onload = () => {
+      // "cover": a menor dimensão preenche o quadro
+      escalaBase = Math.max(LADO / img.width, LADO / img.height);
+      deslocX = (LADO - img.width * escalaBase) / 2;
+      deslocY = (LADO - img.height * escalaBase) / 2;
+      desenhar();
+    };
+    img.src = url;
+
+    let arrastando = false, ultimoX = 0, ultimoY = 0;
+    const iniciar = (x, y) => { arrastando = true; ultimoX = x; ultimoY = y; };
+    const mover = (x, y) => {
+      if (!arrastando) return;
+      deslocX += x - ultimoX; deslocY += y - ultimoY;
+      ultimoX = x; ultimoY = y;
+      desenhar();
+    };
+    canvas.addEventListener("mousedown", (e) => iniciar(e.clientX, e.clientY));
+    window.addEventListener("mousemove", (e) => mover(e.clientX, e.clientY));
+    window.addEventListener("mouseup", () => { arrastando = false; });
+    canvas.addEventListener("touchstart", (e) => iniciar(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+    canvas.addEventListener("touchmove", (e) => { mover(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }, { passive: false });
+    canvas.addEventListener("touchend", () => { arrastando = false; });
+
+    zoom.addEventListener("input", () => {
+      // Aproxima mirando o centro, senão a imagem "foge" do enquadramento.
+      const antes = escala;
+      escala = parseFloat(zoom.value);
+      const fator = escala / antes;
+      deslocX = LADO / 2 - (LADO / 2 - deslocX) * fator;
+      deslocY = LADO / 2 - (LADO / 2 - deslocY) * fator;
+      desenhar();
+    });
+
+    wrap.querySelector("[data-foto-salvar]").addEventListener("click", () => {
+      const fora = document.createElement("canvas");
+      fora.width = fora.height = SAIDA;
+      fora.getContext("2d").drawImage(canvas, 0, 0, LADO, LADO, 0, 0, SAIDA, SAIDA);
+      fora.toBlob((blob) => {
+        URL.revokeObjectURL(url);
+        fecharModais();
+        aoConfirmar(new File([blob], "foto.png", { type: "image/png" }));
+      }, "image/png");
+    });
+  }
+
   function modalPreviaAudio(blob, url, aoTerminar, botaoGravar) {
     const src = URL.createObjectURL(blob);
     const seg = Math.round(blob.size / 16000); // estimativa só pra dar noção do tamanho
@@ -1123,7 +1211,10 @@
         await atualizarListaConversasInternasNoDom();
         if (conversaId) await atualizarMensagensInternasNoDom(conversaId);
       } catch (e) { /* próxima tentativa corrige */ }
-    }, 2500);
+      // 1,2s, mesmo ritmo das conversas de cliente: o "digitando…" e o
+      // "visualizado" precisam parecer instantâneos pra conversa entre
+      // colegas não dar sensação de atraso.
+    }, 1200);
   }
 
   function _queryChatInterno() {
@@ -1147,7 +1238,13 @@
     const conversa = conversas.find((c) => c.id === conversaId);
     if (!conversa) return;
     const mensagens = await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`);
-    if (mensagens.length === painel.children.length) return;
+    // Redesenha quando muda o número de mensagens OU quando o outro lado
+    // acabou de ler. Antes só olhava a contagem — e como "visualizar"
+    // não cria mensagem nenhuma, o ✓✓ só aparecia na próxima mensagem
+    // que chegasse. Era esse o atraso.
+    const assinatura = `${mensagens.length}|${conversa.visto_criador_em || ""}|${conversa.visto_participante_em || ""}`;
+    if (assinatura === painel.dataset.assinatura) return;
+    painel.dataset.assinatura = assinatura;
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
     painel.innerHTML = mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("");
     if (estavaNoFim) painel.scrollTop = painel.scrollHeight;
@@ -1584,9 +1681,10 @@
       // de escrever. Na supervisão (admin), mostra a do participante,
       // que costuma ser quem deve a resposta.
       const outroOnline = souCriador ? c.participante_online : (souAlheio ? c.participante_online : c.criado_por_online);
+      const outraFoto = souCriador ? c.participante_foto : (souAlheio ? c.participante_foto : c.criado_por_foto);
       return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""}" href="#/chat-interno/${c.id}">
         <span style="position:relative; flex-shrink:0;">
-          <div class="wpp-avatar" style="background:${corAvatar(outroNome)};">${escapeHtml(iniciaisContato(outroNome))}</div>
+          ${htmlAvatarContato(outraFoto, outroNome, outroNome, 36)}
           <span class="wpp-online-bolinha ${outroOnline ? "wpp-online-sim" : "wpp-online-nao"}" title="${outroOnline ? "Online agora" : "Offline"}"></span>
         </span>
         <div class="wpp-conversa-info">
@@ -1652,7 +1750,7 @@
       <div class="wpp-chat-cabecalho">
         <button type="button" class="botao-icone wpp-botao-voltar" data-acao="voltar-lista-interno" title="Voltar">←</button>
         <span style="position:relative; flex-shrink:0;">
-          <div class="wpp-avatar" style="background:${corAvatar(outroNome)};">${escapeHtml(iniciaisContato(outroNome))}</div>
+          ${htmlAvatarContato(souCriador ? conversa.participante_foto : conversa.criado_por_foto, outroNome, outroNome, 36)}
           <span class="wpp-online-bolinha ${(souCriador ? conversa.participante_online : conversa.criado_por_online) ? "wpp-online-sim" : "wpp-online-nao"}"></span>
         </span>
         <div style="flex:1; min-width:0;">
@@ -2932,8 +3030,10 @@
         return;
       }
       case "enviar-foto-perfil": {
-        const arquivo = alvo.files[0];
-        if (!arquivo) return;
+        const escolhido = alvo.files[0];
+        if (!escolhido) return;
+        alvo.value = ""; // permite escolher a mesma foto de novo depois
+        return modalEnquadrarFoto(escolhido, async (arquivo) => {
         const formData = new FormData();
         formData.append("foto", arquivo);
         const resp = await fetch(`${API}/usuarios/foto`, {
@@ -2947,6 +3047,7 @@
         state.usuarioAtual.foto_perfil = resp.foto_perfil;
         definirFlash("ok", "Foto de perfil atualizada.");
         return montarRota();
+        });
       }
       case "exportar-dashboard": {
         const resp = await fetch(`${API}/whatsapp/dashboard/exportar`, { headers: { Authorization: "Bearer " + state.accessToken } });
