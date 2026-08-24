@@ -787,11 +787,17 @@
   // descendo, ~1s). O toque do cliente é curto e agudo; alongar este
   // aqui deixa a diferença óbvia sem precisar olhar a tela.
   function tocarAvisoChatInterno() {
+    // ~2,4s: melodia de 7 notas que desce e sobe de volta. Bem mais
+    // longa que o toque do cliente (~0,4s) pra dar pra reconhecer sem
+    // olhar a tela, mesmo em sala barulhenta ou de longe.
     _tocarNotas([
-      { hz: 587, inicio: 0,    duracao: 0.16, volume: 0.13 },
-      { hz: 494, inicio: 0.18, duracao: 0.16, volume: 0.13 },
-      { hz: 440, inicio: 0.36, duracao: 0.18, volume: 0.13 },
-      { hz: 349, inicio: 0.56, duracao: 0.4,  volume: 0.14 },
+      { hz: 659, inicio: 0,    duracao: 0.18, volume: 0.13 },
+      { hz: 587, inicio: 0.22, duracao: 0.18, volume: 0.13 },
+      { hz: 494, inicio: 0.44, duracao: 0.18, volume: 0.13 },
+      { hz: 440, inicio: 0.66, duracao: 0.22, volume: 0.13 },
+      { hz: 392, inicio: 0.92, duracao: 0.26, volume: 0.14 },
+      { hz: 494, inicio: 1.24, duracao: 0.26, volume: 0.13 },
+      { hz: 587, inicio: 1.54, duracao: 0.85, volume: 0.14 },
     ]);
   }
 
