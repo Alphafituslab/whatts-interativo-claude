@@ -207,9 +207,27 @@ def listar_mensagens(conn, conversa_id: int, lado: str = None, incluir_excluidas
         # Grava TAMBÉM quando foi lido: é o que faz o "visualizado"
         # aparecer pro outro lado (ver visto_criador_em/visto_participante_em).
         campo_visto = "visto_criador_em" if lado == "criador" else "visto_participante_em"
+        # Guarda a data da ÚLTIMA MENSAGEM DO OUTRO LADO, não "agora".
+        #
+        # Com "agora", cada consulta gravava um horário diferente — e a
+        # tela consulta a cada 1,2s. Resultado: o valor mudava 50 vezes
+        # por minuto sem nada ter acontecido, a conversa era redesenhada
+        # toda vez e a tela piscava sem parar. Assim o valor só muda
+        # quando o outro realmente escreveu algo novo, e reler dez vezes
+        # grava sempre o mesmo. O sentido continua o mesmo pra quem lê o
+        # ✓✓: "vi tudo o que você mandou até aqui".
+        coluna_outro = "participante_id" if lado == "criador" else "criado_por_id"
         conn.execute(
-            f"UPDATE chat_interno_conversas SET {campo} = 0, {campo_visto} = ? WHERE id = ?",
-            (_now_iso(), conversa_id),
+            f"""UPDATE chat_interno_conversas
+                   SET {campo} = 0,
+                       {campo_visto} = COALESCE(
+                           (SELECT MAX(m.criado_em) FROM chat_interno_mensagens m
+                             WHERE m.conversa_id = chat_interno_conversas.id
+                               AND m.usuario_id = chat_interno_conversas.{coluna_outro}
+                               AND m.excluida_em IS NULL),
+                           {campo_visto})
+                 WHERE id = ?""",
+            (conversa_id,),
         )
     return [dict(r) for r in rows]
 

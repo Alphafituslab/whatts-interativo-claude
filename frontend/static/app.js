@@ -1219,6 +1219,23 @@
     }, 1200);
   }
 
+  // Só troca o conteúdo quando ele REALMENTE mudou.
+  //
+  // O polling roda a cada 1,2s. Reescrever innerHTML sempre destrói e
+  // recria tudo — as fotos dos contatos recarregam, a animação do badge
+  // de não lidas volta pro começo, o hover se perde e a tela inteira
+  // pisca 50 vezes por minuto, mesmo com ninguém conversando. Comparar a
+  // string antes é barato e resolve.
+  // Guarda a última versão numa propriedade JS do próprio elemento, e
+  // não em data-* : um data-* vira atributo de verdade no HTML, e uma
+  // conversa longa colocaria centenas de KB visíveis no DOM à toa.
+  function _pintarSeMudou(elemento, html) {
+    if (elemento._htmlPintado === html) return false;
+    elemento._htmlPintado = html;
+    elemento.innerHTML = html;
+    return true;
+  }
+
   function _queryChatInterno() {
     if (state.chatInternoEscopo === "encerradas") return "?encerradas=1";
     if (state.chatInternoEscopo === "todas") return "?todas=1";
@@ -1230,7 +1247,7 @@
     if (!lista) return;
     const conversas = await chamarApi(`/chat-interno/conversas${_queryChatInterno()}`);
     const conversaAtivaId = Number(location.hash.split("/")[2]) || null;
-    lista.innerHTML = htmlListaConversasInternas(conversas, conversaAtivaId);
+    _pintarSeMudou(lista, htmlListaConversasInternas(conversas, conversaAtivaId));
   }
 
   async function atualizarMensagensInternasNoDom(conversaId) {
@@ -1240,16 +1257,13 @@
     const conversa = conversas.find((c) => c.id === conversaId);
     if (!conversa) return;
     const mensagens = await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`);
-    // Redesenha quando muda o número de mensagens OU quando o outro lado
-    // acabou de ler. Antes só olhava a contagem — e como "visualizar"
-    // não cria mensagem nenhuma, o ✓✓ só aparecia na próxima mensagem
-    // que chegasse. Era esse o atraso.
-    const assinatura = `${mensagens.length}|${conversa.visto_criador_em || ""}|${conversa.visto_participante_em || ""}`;
-    if (assinatura === painel.dataset.assinatura) return;
-    painel.dataset.assinatura = assinatura;
+    // Compara o HTML pronto: pega mensagem nova, mensagem apagada E o
+    // ✓✓ do outro lado (que não cria mensagem nenhuma, e por isso
+    // aparecia só na mensagem seguinte quando a checagem era só a
+    // contagem).
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
-    painel.innerHTML = mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("");
-    if (estavaNoFim) painel.scrollTop = painel.scrollHeight;
+    const mudou = _pintarSeMudou(painel, mensagens.map((m) => htmlBolhaInterna(m, conversa)).join(""));
+    if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 
   let timerStatusWhatsapp = null;
@@ -1633,17 +1647,16 @@
     if (state.buscaConversas) return; // não sobrescreve um resultado de busca ativo
     const conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
     const conversaAtivaId = Number(location.hash.split("/")[2]) || null;
-    lista.innerHTML = htmlListaConversas(conversas, conversaAtivaId);
+    _pintarSeMudou(lista, htmlListaConversas(conversas, conversaAtivaId));
   }
 
   async function atualizarMensagensNoDom(conversaId) {
     const painel = document.querySelector("[data-wpp-mensagens]");
     if (!painel) return;
     const mensagens = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`);
-    if (mensagens.length === painel.children.length) return;
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
-    painel.innerHTML = mensagens.map(htmlBolha).join("");
-    if (estavaNoFim) painel.scrollTop = painel.scrollHeight;
+    const mudou = _pintarSeMudou(painel, mensagens.map(htmlBolha).join(""));
+    if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 
   function modalEncaminhar(conversaId, usuarios) {
