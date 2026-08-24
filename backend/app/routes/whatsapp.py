@@ -298,6 +298,17 @@ def listar_conversas():
     condicoes.append("c.excluida_em IS NULL")
     condicoes.append("c.arquivada = 1" if incluir_arquivadas else "c.arquivada = 0")
 
+    # Filtro por etiqueta. Vale junto com a aba escolhida (dá pra ver só
+    # os "Orçamento enviado" que estão na fila, por exemplo).
+    tag_id = request.args.get("tag_id")
+    if tag_id:
+        condicoes.append(
+            "EXISTS (SELECT 1 FROM whatsapp_conversa_tags ct2 "
+            "JOIN whatsapp_tags t2 ON t2.id = ct2.tag_id "
+            "WHERE ct2.conversa_id = c.id AND ct2.tag_id = ? AND t2.empresa_id = ?)"
+        )
+        params.extend([tag_id, g.empresa_id])
+
     where = "WHERE " + " AND ".join(condicoes)
     rows = conn.execute(
         f"{base} {where} ORDER BY COALESCE(c.ultima_mensagem_em, c.criado_em) DESC LIMIT 300", params
@@ -979,6 +990,58 @@ def criar_tag():
         raise ApiError("Informe o nome da etiqueta.", status=400)
     conn = get_db()
     return jsonify(whatsapp_service.criar_tag(conn, g.empresa_id, nome, dados.get("cor"))), 201
+
+
+@bp.put("/tags/<int:tag_id>")
+@requires_auth
+@requires_admin
+def editar_tag(tag_id):
+    """Renomeia a etiqueta e/ou troca a cor. Como a conversa guarda o ID
+    da etiqueta (e não uma cópia do nome), renomear aqui muda o nome em
+    todas as conversas de uma vez — ninguém precisa reetiquetar nada."""
+    conn = get_db()
+    dados = request.get_json(silent=True) or {}
+    nome = (dados.get("nome") or "").strip()
+    cor = (dados.get("cor") or "").strip()
+    if not nome:
+        raise ApiError("Informe o nome da etiqueta.", status=400)
+    existe = conn.execute(
+        "SELECT 1 FROM whatsapp_tags WHERE id = ? AND empresa_id = ?", (tag_id, g.empresa_id)
+    ).fetchone()
+    if existe is None:
+        raise ApiError("Etiqueta não encontrada.", status=404, codigo="nao_encontrado")
+    duplicada = conn.execute(
+        "SELECT 1 FROM whatsapp_tags WHERE empresa_id = ? AND lower(nome) = lower(?) AND id != ?",
+        (g.empresa_id, nome, tag_id),
+    ).fetchone()
+    if duplicada:
+        raise ApiError("Já existe uma etiqueta com esse nome.", status=409, codigo="nome_duplicado")
+    if cor:
+        conn.execute("UPDATE whatsapp_tags SET nome = ?, cor = ? WHERE id = ?", (nome, cor, tag_id))
+    else:
+        conn.execute("UPDATE whatsapp_tags SET nome = ? WHERE id = ?", (nome, tag_id))
+    return jsonify(dict(conn.execute("SELECT * FROM whatsapp_tags WHERE id = ?", (tag_id,)).fetchone()))
+
+
+@bp.get("/tags/contagem")
+@requires_auth
+def contar_por_tag():
+    """Quantas conversas ativas cada etiqueta tem — é o número que
+    aparece ao lado dela no filtro, pra dar noção antes de clicar."""
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT t.id, COUNT(c.id) AS total
+        FROM whatsapp_tags t
+        LEFT JOIN whatsapp_conversa_tags ct2 ON ct2.tag_id = t.id
+        LEFT JOIN whatsapp_conversas c ON c.id = ct2.conversa_id
+             AND c.excluida_em IS NULL AND c.arquivada = 0
+        WHERE t.empresa_id = ?
+        GROUP BY t.id
+        """,
+        (g.empresa_id,),
+    ).fetchall()
+    return jsonify({str(r["id"]): r["total"] for r in rows})
 
 
 @bp.delete("/tags/<int:tag_id>")

@@ -959,3 +959,46 @@ nav { perspective: 800px; }
   background: none; border: none; padding: 0; cursor: pointer;
   color: var(--primaria); font: inherit; font-size: 11.5px; text-decoration: underline;
 }
+
+/* =====================================================================
+   Filtro por etiqueta, na lista de conversas
+   Cada botão usa a cor da própria etiqueta: apagado quando desligado,
+   pintado quando é ele que está filtrando.
+   ===================================================================== */
+.wpp-tags-filtro {
+  display: flex; flex-wrap: wrap; gap: 5px; padding: 0 4px 8px;
+}
+.wpp-tag-filtro {
+  cursor: pointer; font: inherit; font-size: 11px; font-weight: 600;
+  padding: 3px 9px; border-radius: 999px; line-height: 1.5;
+  border: 1px solid var(--cor-etiqueta); background: transparent;
+  color: var(--texto); transition: background 0.14s ease, color 0.14s ease;
+}
+.wpp-tag-filtro::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--cor-etiqueta); margin-right: 5px; vertical-align: middle;
+}
+.wpp-tag-filtro:hover { background: color-mix(in srgb, var(--cor-etiqueta) 20%, transparent); }
+.wpp-tag-filtro.ativa { background: var(--cor-etiqueta); color: #fff; }
+.wpp-tag-filtro.ativa::before { background: rgba(255,255,255,0.9); }
+.wpp-tag-filtro-n { opacity: 0.75; font-weight: 700; }
+.wpp-tag-filtro-limpar {
+  cursor: pointer; font: inherit; font-size: 11px; padding: 3px 9px;
+  border-radius: 999px; border: 1px dashed var(--borda);
+  background: transparent; color: var(--texto-suave);
+}
+.wpp-tag-filtro-limpar:hover { color: var(--texto); border-style: solid; }
+
+/* Conversa ainda sem etiqueta: o botão fica visível de verdade, porque
+   é ali que a pessoa etiqueta o cliente — pontilhado e cinza passava
+   despercebido no meio do cabeçalho. Com etiqueta já posta, ele volta a
+   ser discreto pra não competir com as etiquetas em si. */
+.wpp-tag-adicionar-vazio {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--primaria) 45%, transparent);
+  color: var(--primaria); font-weight: 700;
+}
+.wpp-tag-adicionar-vazio:hover {
+  background: color-mix(in srgb, var(--primaria) 12%, transparent);
+  color: var(--primaria); border-color: var(--primaria);
+}

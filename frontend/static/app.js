@@ -1781,7 +1781,7 @@
       </div>
       <div class="wpp-tags-linha">
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}
-        <button type="button" class="wpp-tag-adicionar" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}'>+ etiqueta</button>
+        <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta — depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
       ${htmlNotas(conversa.id, notas || [])}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
@@ -1821,10 +1821,32 @@
     return `<div class="wpp-abas">${abas.map((a) => `<button type="button" class="wpp-aba ${state.escopoConversas === a.chave ? "ativa" : ""}" data-acao="trocar-escopo-conversas" data-escopo="${a.chave}"${a.dica ? ` title="${escapeHtml(a.dica)}"` : ""}>${a.label}</button>`).join("")}</div>`;
   }
 
+  // Barra de etiquetas: clicar filtra a lista, clicar de novo tira o
+  // filtro. Fica escondida se a empresa ainda não criou nenhuma — sem
+  // etiqueta cadastrada a barra seria só um espaço vazio ocupando lugar.
+  function htmlFiltroEtiquetas(etiquetas, contagem) {
+    if (!etiquetas || !etiquetas.length) return "";
+    const chips = etiquetas.map((t) => {
+      const total = (contagem || {})[String(t.id)] || 0;
+      const ativa = String(state.tagFiltro) === String(t.id);
+      return `<button type="button" class="wpp-tag-filtro ${ativa ? "ativa" : ""}"
+                data-acao="filtrar-por-etiqueta" data-id="${t.id}"
+                style="--cor-etiqueta:${escapeHtml(t.cor || "#6b7280")};"
+                title="${ativa ? "Clique de novo pra tirar o filtro" : `Ver só as conversas com a etiqueta ${escapeHtml(t.nome)}`}">
+        ${escapeHtml(t.nome)}${total ? ` <span class="wpp-tag-filtro-n">${total}</span>` : ""}
+      </button>`;
+    }).join("");
+    return `<div class="wpp-tags-filtro">
+      ${chips}
+      ${state.tagFiltro ? `<button type="button" class="wpp-tag-filtro-limpar" data-acao="filtrar-por-etiqueta" data-id="">✕ limpar</button>` : ""}
+    </div>`;
+  }
+
   function _queryConversas() {
     const arquivadas = state.escopoConversas === "arquivadas";
     const escopoQuery = arquivadas ? (state.usuarioAtual.admin ? "todas" : "minhas") : state.escopoConversas;
-    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}`;
+    const etiqueta = state.tagFiltro ? `&tag_id=${state.tagFiltro}` : "";
+    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}`;
   }
 
   async function renderWhatsapp(conversaId) {
@@ -1846,6 +1868,13 @@
     } else {
       conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
     }
+
+    // Etiquetas e a contagem de cada uma alimentam a barra de filtro.
+    // Falhar aqui não pode derrubar a tela de conversas inteira.
+    const [etiquetas, contagemEtiquetas] = await Promise.all([
+      chamarApi("/whatsapp/tags").catch(() => []),
+      chamarApi("/whatsapp/tags/contagem").catch(() => ({})),
+    ]);
 
     let conversaAtual = null, mensagens = [], agendadas = [], respostasProntas = [], notas = [];
     let emojisSalvos = [], figurinhas = [];
@@ -1886,7 +1915,7 @@
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${state.buscaConversas ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
-           ${state.buscaConversas ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados para "${escapeHtml(state.buscaConversas)}"</p>` : htmlAbasConversas()}
+           ${state.buscaConversas ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados para "${escapeHtml(state.buscaConversas)}"</p>` : htmlAbasConversas() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas)}</div>
@@ -2558,6 +2587,7 @@
 
   async function renderWhatsappConfiguracao() {
     _carregandoSeTrocouDeTela("configuracao");
+    const etiquetas = await chamarApi("/whatsapp/tags").catch(() => []);
     // Backup é do banco inteiro (todas as empresas), então só quem opera
     // a plataforma tem acesso — o servidor barra de qualquer jeito, aqui
     // é só pra não mostrar uma seção que daria erro ao usar.
@@ -2626,6 +2656,26 @@
          <form data-form="criar-setor" style="display:flex; gap:8px;">
            <input name="nome" placeholder="Nome do novo setor" required style="flex:1;">
            <button type="submit" class="botao secundario">Adicionar setor</button>
+         </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">Etiquetas dos clientes</h3>
+         <p class="dica">Marque conversas por assunto ou fase — "Orçamento enviado", "Cliente novo", "Urgente" — e depois filtre a lista de Conversas por elas. Renomear ou trocar a cor aqui vale para <strong>todas</strong> as conversas já etiquetadas de uma vez.</p>
+         <ul style="list-style:none; padding:0; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
+           ${etiquetas.map((t) => `
+             <li style="display:flex; align-items:center; gap:8px;">
+               <input type="color" value="${escapeHtml(t.cor || "#6b7280")}" data-acao-change="recolorir-etiqueta" data-tag-id="${t.id}" style="width:44px; padding:2px; flex-shrink:0;" title="Cor da etiqueta">
+               <input value="${escapeHtml(t.nome)}" data-acao-change="renomear-etiqueta" data-tag-id="${t.id}" style="flex:1;">
+               <span class="wpp-tag-chip" style="background:${escapeHtml(t.cor || "#6b7280")};">${escapeHtml(t.nome)}</span>
+               <button type="button" class="botao-icone" data-acao="excluir-etiqueta" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" title="Excluir etiqueta">🗑️</button>
+             </li>`).join("")}
+           ${etiquetas.length ? "" : '<li class="texto-suave" style="font-size:13px;">Nenhuma etiqueta criada ainda.</li>'}
+         </ul>
+         <form data-form="criar-etiqueta" style="display:flex; gap:8px;">
+           <input type="color" name="cor" value="#0a7d67" style="width:44px; padding:2px;" title="Cor">
+           <input name="nome" placeholder="Nome da nova etiqueta" required style="flex:1;">
+           <button type="submit" class="botao secundario">Adicionar etiqueta</button>
          </form>
        </div>
 
@@ -3389,6 +3439,11 @@
         definirFlash("ok", "Conversa reaberta.");
         return renderChatInterno(id);
       }
+      case "filtrar-por-etiqueta": {
+        const id = alvo.dataset.id || null;
+        state.tagFiltro = String(state.tagFiltro) === String(id) ? null : id;
+        return renderWhatsapp(null);
+      }
       case "trocar-escopo-conversas": {
         state.escopoConversas = alvo.dataset.escopo;
         return renderWhatsapp(null);
@@ -3585,6 +3640,26 @@
           fecharModais();
           await atualizarMensagensInternasNoDom(conversaId);
         });
+      }
+      case "renomear-etiqueta": {
+        const nome = alvo.value.trim();
+        if (!nome) { definirFlash("erro", "A etiqueta precisa de um nome."); return renderWhatsappConfiguracao(); }
+        await chamarApi(`/whatsapp/tags/${alvo.dataset.tagId}`, { method: "PUT", body: { nome } });
+        definirFlash("ok", "Etiqueta renomeada em todas as conversas.");
+        return renderWhatsappConfiguracao();
+      }
+      case "recolorir-etiqueta": {
+        const linha = alvo.closest("li");
+        const nome = linha.querySelector('input[data-acao-change="renomear-etiqueta"]').value.trim();
+        await chamarApi(`/whatsapp/tags/${alvo.dataset.tagId}`, { method: "PUT", body: { nome, cor: alvo.value } });
+        return renderWhatsappConfiguracao();
+      }
+      case "excluir-etiqueta": {
+        if (!confirm(`Excluir a etiqueta "${alvo.dataset.nome}"? Ela sai de todas as conversas que a usam. As conversas em si não são apagadas.`)) return;
+        await chamarApi(`/whatsapp/tags/${alvo.dataset.id}`, { method: "DELETE" });
+        if (String(state.tagFiltro) === String(alvo.dataset.id)) state.tagFiltro = null;
+        definirFlash("ok", "Etiqueta excluída.");
+        return renderWhatsappConfiguracao();
       }
       case "atualizar-fotos-contatos": {
         alvo.disabled = true;
@@ -4371,6 +4446,13 @@
         atualizarContadorFollowup();
         carregarPainelFollowup();
         return;
+      }
+      case "criar-etiqueta": {
+        const nome = (dados.get("nome") || "").trim();
+        if (!nome) return;
+        await chamarApi("/whatsapp/tags", { method: "POST", body: { nome, cor: dados.get("cor") } });
+        definirFlash("ok", `Etiqueta "${nome}" criada.`);
+        return renderWhatsappConfiguracao();
       }
       case "criar-setor": {
         await chamarApi("/usuarios/setores", { method: "POST", body: { nome: dados.get("nome") || "" } });
