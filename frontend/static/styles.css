@@ -932,3 +932,30 @@ nav { perspective: 800px; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .followup-item-acoes { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* =====================================================================
+   Contadores do Follow-up como filtros
+   Cada número mostra exatamente o que ele conta: clicar nele deixa só
+   aquele grupo na tela; clicar de novo volta a mostrar tudo. Por isso
+   eles têm cara de botão, não de rótulo.
+   ===================================================================== */
+.followup-chip {
+  flex: 1; min-width: 0; cursor: pointer; text-align: center;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: 6px 4px; font: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--texto); line-height: 1.25;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.followup-chip:hover { background: color-mix(in srgb, var(--primaria) 12%, transparent); }
+.followup-chip.ativo {
+  background: color-mix(in srgb, var(--primaria) 18%, transparent);
+  border-color: color-mix(in srgb, var(--primaria) 55%, transparent);
+}
+.followup-filtro-aviso {
+  padding: 7px 14px; font-size: 11.5px; color: var(--texto-suave);
+  border-bottom: 1px solid var(--borda);
+}
+.followup-limpar {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--primaria); font: inherit; font-size: 11.5px; text-decoration: underline;
+}

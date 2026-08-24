@@ -996,42 +996,91 @@
       </div>`;
   }
 
+  // Os três números do topo do painel são FILTROS, e cada um mostra
+  // exatamente o que ele conta. Por isso a classificação é feita aqui,
+  // sobre a mesma lista que vai pra tela — se fosse contada no servidor
+  // por outro critério, o número e a lista podiam discordar (era o que
+  // acontecia: "0 agendados" com um agendamento logo abaixo).
+  const FILTROS_FOLLOWUP = {
+    atrasados: { rotulo: "atrasados", bolinha: "🔴", vazio: "Nada atrasado. 👏" },
+    hoje: { rotulo: "pra hoje", bolinha: "🟠", vazio: "Nada marcado para hoje." },
+    agendados: { rotulo: "agendados", bolinha: "🟢", vazio: "Nada agendado pra frente." },
+  };
+
+  function _quandoDoItem(x) {
+    return x.quando || x.agendado_para || x.lembrar_em || null;
+  }
+
+  // atrasado = a hora já passou. hoje = ainda vai acontecer, mas hoje.
+  // agendado = de amanhã em diante.
+  function _faixaDoItem(x) {
+    if (x.situacao === "atrasado" || x.situacao === "agendado_vencido") return "atrasados";
+    if (x.situacao === "proximo_do_vencimento") return "hoje";
+    const quando = _quandoDoItem(x);
+    if (!quando) return "hoje";
+    const d = new Date(quando.endsWith("Z") ? quando : quando + "Z");
+    if (d < new Date()) return "atrasados";
+    return d.toDateString() === new Date().toDateString() ? "hoje" : "agendados";
+  }
+
   async function carregarPainelFollowup() {
     const alvo = document.querySelector("[data-followup-conteudo]");
     if (!alvo) return;
     try {
-      // Três coisas diferentes, juntas no mesmo painel porque a pergunta
-      // é a mesma ("o que eu tenho pra fazer?"), mas cada uma com seu
-      // rótulo, porque funcionam de jeitos diferentes:
+      // Três coisas diferentes, no mesmo painel porque a pergunta é a
+      // mesma ("o que eu tenho pra fazer?"), mas cada uma com seu rótulo
+      // porque funcionam de jeitos diferentes:
       //  - Follow-up: cliente sem retorno há tempo demais (o sistema
       //    descobre sozinho).
-      //  - Agendamento: mensagem escrita agora que o sistema ENVIA ao
-      //    contato na hora marcada, e some daqui depois de enviada.
+      //  - Agendamento: mensagem que o sistema ENVIA ao contato na hora
+      //    marcada, e some daqui depois de enviada.
       //  - Lembrete: aviso só pra você, não vai pra ninguém.
-      const [resumo, itens, agendadas, lembretes] = await Promise.all([
-        chamarApi("/followup/resumo"),
+      const [itens, agendadas, lembretes] = await Promise.all([
         chamarApi("/followup"),
         chamarApi("/whatsapp/agendadas").catch(() => []),
         chamarApi("/whatsapp/lembretes").catch(() => []),
       ]);
-      const pendentes = itens.filter((i) => ["atrasado", "agendado_vencido"].includes(i.situacao));
-      const proximos = itens.filter((i) => ["proximo_do_vencimento", "agendado"].includes(i.situacao));
+      const followups = itens.filter((i) => i.situacao !== "adiado");
+      const tudo = [
+        ...followups.map((x) => ({ tipo: "followup", dado: x, faixa: _faixaDoItem(x) })),
+        ...agendadas.map((x) => ({ tipo: "agendada", dado: x, faixa: _faixaDoItem(x) })),
+        ...lembretes.map((x) => ({ tipo: "lembrete", dado: x, faixa: _faixaDoItem(x) })),
+      ];
+      const conta = (faixa) => tudo.filter((x) => x.faixa === faixa).length;
+      const filtro = state.followupFiltro || null;
+      const mostrados = filtro ? tudo.filter((x) => x.faixa === filtro) : tudo;
+
+      const grupo = (tipo) => mostrados.filter((x) => x.tipo === tipo).map((x) => x.dado);
+      const doFollowup = grupo("followup");
+      const dasAgendadas = grupo("agendada");
+      const dosLembretes = grupo("lembrete");
+
+      const chips = Object.entries(FILTROS_FOLLOWUP).map(([chave, cfg]) => `
+        <button type="button" class="followup-chip ${filtro === chave ? "ativo" : ""}"
+                data-acao="filtrar-followup" data-filtro="${chave}"
+                title="${filtro === chave ? "Clique de novo pra ver tudo" : `Ver só o que está ${cfg.rotulo}`}">
+          ${cfg.bolinha} ${conta(chave)} ${cfg.rotulo}
+        </button>`).join("");
+
+      const secao = (titulo, dica, lista, desenha, vazio) => {
+        // Com um filtro ligado, seção sem nada some — senão o painel
+        // vira uma lista de "nenhum, nenhum, nenhum".
+        if (filtro && !lista.length) return "";
+        return `<div class="followup-secao">${titulo} <span class="followup-secao-dica">${dica}</span></div>` +
+          (lista.length ? lista.map(desenha).join("")
+                        : `<p class="texto-suave" style="padding:10px 12px; font-size:12.5px;">${vazio}</p>`);
+      };
+
       alvo.innerHTML = `
-        <div class="followup-resumo">
-          <span>🔴 ${resumo.atrasados + resumo.agendados_vencidos} atrasados</span>
-          <span>🟠 ${resumo.para_hoje} pra hoje</span>
-          <span>🟢 ${resumo.agendados} agendados</span>
-        </div>
-        ${pendentes.length ? pendentes.map(htmlItemFollowup).join("") : '<p class="texto-suave" style="padding:12px;">Nada atrasado. 👏<br><br>Esta lista se preenche <strong>sozinha</strong> conforme os clientes ficam sem retorno. Pra marcar um retorno, abra a conversa e clique no 📞 no topo.</p>'}
-        ${proximos.length ? `<div class="followup-secao">Próximos</div>${proximos.map(htmlItemFollowup).join("")}` : ""}
-        <div class="followup-secao">🕒 Mensagens agendadas <span class="followup-secao-dica">o sistema envia sozinho na hora marcada</span></div>
-        ${agendadas.length
-          ? agendadas.map(htmlItemAgendadaFollowup).join("")
-          : '<p class="texto-suave" style="padding:10px 12px; font-size:12.5px;">Nenhuma mensagem agendada.</p>'}
-        <div class="followup-secao">🔔 Meus lembretes <span class="followup-secao-dica">aviso só pra você, não vai pra ninguém</span></div>
-        ${lembretes.length
-          ? lembretes.map(htmlItemLembreteFollowup).join("")
-          : '<p class="texto-suave" style="padding:10px 12px; font-size:12.5px;">Nenhum lembrete marcado.</p>'}`;
+        <div class="followup-resumo">${chips}</div>
+        ${filtro ? `<div class="followup-filtro-aviso">Mostrando só <strong>${FILTROS_FOLLOWUP[filtro].rotulo}</strong> · <button type="button" class="followup-limpar" data-acao="filtrar-followup" data-filtro="">ver tudo</button></div>` : ""}
+        ${filtro && !mostrados.length ? `<p class="texto-suave" style="padding:12px;">${FILTROS_FOLLOWUP[filtro].vazio}</p>` : ""}
+        ${secao("📞 Clientes sem retorno", "o sistema descobre sozinho", doFollowup, htmlItemFollowup,
+                "Nada atrasado. 👏 Esta lista se preenche sozinha conforme os clientes ficam sem retorno — pra marcar um retorno, abra a conversa e clique no 📞 no topo.")}
+        ${secao("🕒 Mensagens agendadas", "o sistema envia sozinho na hora marcada", dasAgendadas, htmlItemAgendadaFollowup,
+                "Nenhuma mensagem agendada.")}
+        ${secao("🔔 Meus lembretes", "aviso só pra você, não vai pra ninguém", dosLembretes, htmlItemLembreteFollowup,
+                "Nenhum lembrete marcado.")}`;
     } catch (e) {
       alvo.innerHTML = `<p class="texto-suave" style="padding:12px;">Não consegui carregar agora.</p>`;
     }
@@ -3446,6 +3495,11 @@
         const usuarios = await chamarApi("/usuarios");
         modalEncaminhar(Number(alvo.dataset.id), usuarios);
         return;
+      }
+      case "filtrar-followup": {
+        const escolhido = alvo.dataset.filtro || null;
+        state.followupFiltro = state.followupFiltro === escolhido ? null : escolhido;
+        return carregarPainelFollowup();
       }
       case "prorrogar-rapido": {
         // Botões de atalho ("+1 hora", "amanhã") só preenchem o campo —
