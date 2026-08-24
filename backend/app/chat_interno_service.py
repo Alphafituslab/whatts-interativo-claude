@@ -47,14 +47,14 @@ def iniciar_conversa(conn, criado_por_id: int, participante_id: int, setor_desti
     return conversa_id
 
 
-def _inserir_mensagem(conn, conversa_id, usuario_id, texto, tipo="texto", midia_url=None, nome_arquivo=None):
+def _inserir_mensagem(conn, conversa_id, usuario_id, texto, tipo="texto", midia_url=None, nome_arquivo=None, responde_a=None):
     agora = _now_iso()
     conn.execute(
         """
-        INSERT INTO chat_interno_mensagens (conversa_id, usuario_id, texto, tipo, midia_url, nome_arquivo, criado_em)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO chat_interno_mensagens (conversa_id, usuario_id, texto, tipo, midia_url, nome_arquivo, criado_em, responde_a)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (conversa_id, usuario_id, texto, tipo, midia_url, nome_arquivo, agora),
+        (conversa_id, usuario_id, texto, tipo, midia_url, nome_arquivo, agora, responde_a),
     )
     return agora
 
@@ -76,9 +76,9 @@ def marcar_digitando(conn, conversa_id: int, lado: str):
     conn.execute(f"UPDATE chat_interno_conversas SET {campo} = ? WHERE id = ?", (ate, conversa_id))
 
 
-def enviar_mensagem(conn, conversa_id: int, usuario_id: int, texto: str, tipo="texto", midia_url=None, nome_arquivo=None):
+def enviar_mensagem(conn, conversa_id: int, usuario_id: int, texto: str, tipo="texto", midia_url=None, nome_arquivo=None, responde_a=None):
     conversa = conn.execute("SELECT * FROM chat_interno_conversas WHERE id = ?", (conversa_id,)).fetchone()
-    agora = _inserir_mensagem(conn, conversa_id, usuario_id, texto, tipo, midia_url, nome_arquivo)
+    agora = _inserir_mensagem(conn, conversa_id, usuario_id, texto, tipo, midia_url, nome_arquivo, responde_a)
     _atualizar_preview(conn, conversa_id, texto if tipo == "texto" else {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento", "audio": "🎵 Áudio"}.get(tipo, "📎 Anexo"), agora)
     # Quem mandou não soma não-lida pra si mesmo — só pro outro lado.
     campo = "nao_lidas_participante" if usuario_id == conversa["criado_por_id"] else "nao_lidas_criador"
@@ -197,8 +197,13 @@ def listar_mensagens(conn, conversa_id: int, lado: str = None, incluir_excluidas
     # e por quem, em vez de a mensagem sumir sem deixar rastro.
     filtro = "" if incluir_excluidas else " AND m.excluida_em IS NULL"
     rows = conn.execute(
-        f"SELECT m.*, ue.nome AS excluida_por_nome FROM chat_interno_mensagens m "
+        f"SELECT m.*, ue.nome AS excluida_por_nome, "
+        f"cit.texto AS citada_texto, cit.tipo AS citada_tipo, "
+        f"cit.excluida_em AS citada_excluida_em, uc.nome AS citada_autor "
+        f"FROM chat_interno_mensagens m "
         f"LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
+        f"LEFT JOIN chat_interno_mensagens cit ON cit.id = m.responde_a "
+        f"LEFT JOIN usuarios uc ON uc.id = cit.usuario_id "
         f"WHERE m.conversa_id = ?{filtro} ORDER BY m.criado_em, m.id",
         (conversa_id,),
     ).fetchall()
@@ -253,3 +258,28 @@ def fechar_conversa(conn, conversa_id: int):
 
 def reabrir_conversa(conn, conversa_id: int):
     conn.execute("UPDATE chat_interno_conversas SET status = 'aberta', fechada_em = NULL WHERE id = ?", (conversa_id,))
+
+
+def editar_mensagem(conn, mensagem_id: int, texto: str):
+    """Guarda a edição e marca a mensagem como editada — o "(editada)" na
+    bolha existe pra ninguém trocar o que disse sem que o outro perceba."""
+    agora = _now_iso()
+    conn.execute(
+        "UPDATE chat_interno_mensagens SET texto = ?, editada_em = ? WHERE id = ?", (texto, agora, mensagem_id)
+    )
+    linha = conn.execute("SELECT conversa_id FROM chat_interno_mensagens WHERE id = ?", (mensagem_id,)).fetchone()
+    if linha is None:
+        return
+    ultima = conn.execute(
+        "SELECT id FROM chat_interno_mensagens WHERE conversa_id = ? AND excluida_em IS NULL "
+        "ORDER BY criado_em DESC, id DESC LIMIT 1",
+        (linha["conversa_id"],),
+    ).fetchone()
+    # Só mexe na prévia da lista se a editada for mesmo a última. E só na
+    # prévia: editar não é mensagem nova, então a conversa não deve
+    # pular pro topo da lista como se alguém tivesse acabado de falar.
+    if ultima and ultima["id"] == mensagem_id:
+        conn.execute(
+            "UPDATE chat_interno_conversas SET ultima_mensagem_preview = ? WHERE id = ?",
+            ((texto or "")[:120], linha["conversa_id"]),
+        )

@@ -511,16 +511,21 @@ def listar_mensagens(conversa_id):
     # Mensagem apagada some pro usuário comum, mas o ADMIN continua vendo
     # (marcada, com quem apagou) — sem isso alguém podia apagar algo e não
     # sobrar registro nenhum pra supervisão.
+    # citada_*: trecho da mensagem que esta responde, pra desenhar a
+    # citação sem uma segunda ida ao servidor por mensagem.
+    campos = (
+        "SELECT m.*, ue.nome AS excluida_por_nome, "
+        "cit.texto AS citada_texto, cit.direcao AS citada_direcao, "
+        "cit.tipo AS citada_tipo, cit.excluida_em AS citada_excluida_em "
+        "FROM whatsapp_mensagens m "
+        "LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
+        "LEFT JOIN whatsapp_mensagens cit ON cit.id = m.responde_a "
+    )
     if usuario["admin"]:
-        rows = conn.execute(
-            "SELECT m.*, ue.nome AS excluida_por_nome FROM whatsapp_mensagens m "
-            "LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
-            "WHERE m.conversa_id = ? ORDER BY m.criado_em, m.id",
-            (conversa_id,),
-        ).fetchall()
+        rows = conn.execute(campos + "WHERE m.conversa_id = ? ORDER BY m.criado_em, m.id", (conversa_id,)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM whatsapp_mensagens WHERE conversa_id = ? AND excluida_em IS NULL ORDER BY criado_em, id",
+            campos + "WHERE m.conversa_id = ? AND m.excluida_em IS NULL ORDER BY m.criado_em, m.id",
             (conversa_id,),
         ).fetchall()
 
@@ -542,6 +547,7 @@ def enviar_mensagem(conversa_id):
     texto = (dados.get("texto") or "").strip()
     if not texto:
         raise ApiError("Informe o texto da mensagem.", status=400)
+    responde_a = dados.get("responde_a")
 
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
@@ -555,10 +561,25 @@ def enviar_mensagem(conversa_id):
     if conversa["atribuida_usuario_id"] is None:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
+    # Citada precisa ser desta MESMA conversa: sem conferir, dava pra
+    # citar por id uma mensagem de outro cliente e o trecho citado
+    # apareceria aqui.
+    citada = None
+    if responde_a:
+        citada = conn.execute(
+            "SELECT id, externo_id FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?",
+            (responde_a, conversa_id),
+        ).fetchone()
+        if citada is None:
+            raise ApiError("A mensagem citada não é desta conversa.", status=400)
+
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
     agora = _now_iso()
     try:
-        externo_id = whatsapp_service.enviar_texto(config, conversa["telefone"], texto)
+        externo_id = whatsapp_service.enviar_texto(
+            config, conversa["telefone"], texto,
+            citar_externo_id=citada["externo_id"] if citada else None,
+        )
         status_msg = "enviada"
         erro = None
     except ApiError as e:
@@ -568,10 +589,10 @@ def enviar_mensagem(conversa_id):
 
     cur = conn.execute(
         """
-        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, usuario_id, status, erro, criado_em)
-        VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?, ?)
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, usuario_id, status, erro, criado_em, responde_a)
+        VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?, ?, ?)
         """,
-        (conversa_id, texto, externo_id, usuario["id"], status_msg, erro, agora),
+        (conversa_id, texto, externo_id, usuario["id"], status_msg, erro, agora, citada["id"] if citada else None),
     )
     conn.execute(
         "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "
@@ -609,6 +630,47 @@ def excluir_mensagem(conversa_id, mensagem_id):
     apagada_no_whatsapp = whatsapp_service.excluir_mensagem(conn, config, dict(mensagem), usuario["id"])
     whatsapp_service.registrar_atividade(conn, usuario["id"], "mensagem_excluida", conversa["telefone"], conversa_id)
     return jsonify({"ok": True, "apagada_no_whatsapp": apagada_no_whatsapp})
+
+
+@bp.put("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>")
+@requires_auth
+def editar_mensagem(conversa_id, mensagem_id):
+    """Corrige o texto de uma mensagem NOSSA. Fica marcada como editada —
+    ninguém muda o que disse sem deixar rastro na conversa.
+
+    Só vale aqui dentro: o WhatsApp do cliente continua com o texto
+    original, porque a Evolution API não expõe edição de mensagem já
+    entregue. A tela avisa isso antes de salvar."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+    mensagem = conn.execute(
+        "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    if mensagem["direcao"] != "saida":
+        raise ApiError("Só dá pra editar mensagem enviada por você — o que o cliente escreveu fica como está.", status=400)
+    if mensagem["excluida_em"]:
+        raise ApiError("Essa mensagem foi apagada.", status=400)
+    texto = (request.get_json(silent=True) or {}).get("texto", "").strip()
+    if not texto:
+        raise ApiError("Escreva o novo texto.", status=400)
+    agora = _now_iso()
+    conn.execute(
+        "UPDATE whatsapp_mensagens SET texto = ?, editada_em = ? WHERE id = ?", (texto, agora, mensagem_id)
+    )
+    # Se era a última da conversa, a prévia da lista tem que acompanhar.
+    ultima = conn.execute(
+        "SELECT id FROM whatsapp_mensagens WHERE conversa_id = ? AND excluida_em IS NULL ORDER BY criado_em DESC, id DESC LIMIT 1",
+        (conversa_id,),
+    ).fetchone()
+    if ultima and ultima["id"] == mensagem_id:
+        conn.execute("UPDATE whatsapp_conversas SET ultima_mensagem_preview = ? WHERE id = ?", (texto[:120], conversa_id))
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "mensagem_editada", texto[:120], conversa_id)
+    return jsonify(dict(conn.execute("SELECT * FROM whatsapp_mensagens WHERE id = ?", (mensagem_id,)).fetchone()))
 
 
 @bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/reenviar")

@@ -41,6 +41,7 @@ SCHEMA_FILES = [
     "schema_026_visto_chat_interno.sql",
     "schema_027_agendar_chat_interno.sql",
     "schema_028_quem_apagou.sql",
+    "schema_029_citar_editar.sql",
 ]
 
 

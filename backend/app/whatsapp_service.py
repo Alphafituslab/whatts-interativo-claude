@@ -563,14 +563,21 @@ def verificar_repeticao_mensagem(conn, empresa_id: int, texto: str):
         )
 
 
-def enviar_texto(config, telefone: str, texto: str) -> str:
+def enviar_texto(config, telefone: str, texto: str, citar_externo_id: str = None) -> str:
+    """citar_externo_id: id da mensagem que está sendo respondida. Vai no
+    campo `quoted` da Evolution API pra que, no celular do cliente, a
+    resposta apareça grudada na mensagem certa — do mesmo jeito que
+    acontece quando ele responde pelo WhatsApp dele."""
     _exigir_configurado(config)
     if config.get("status_conexao") != "conectado":
         raise ApiError("O WhatsApp não está conectado no momento. Peça a um administrador para reconectar em Configurações.", status=400)
     requests = _requests()
+    corpo_envio = {"number": normalizar_telefone(telefone), "text": texto}
+    if citar_externo_id:
+        corpo_envio["quoted"] = {"key": {"id": citar_externo_id}}
     resp = requests.post(
         f"{config['evolution_url']}/message/sendText/{config['instancia_nome']}",
-        json={"number": normalizar_telefone(telefone), "text": texto},
+        json=corpo_envio,
         headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
     )
     corpo = _tratar_resposta(resp)

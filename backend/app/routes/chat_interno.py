@@ -132,8 +132,45 @@ def enviar_mensagem(conversa_id):
     conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
     if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
-    chat_interno_service.enviar_mensagem(conn, conversa_id, usuario["id"], texto)
+    # A mensagem citada tem que ser desta conversa — senão daria pra
+    # citar por id um trecho de uma conversa privada de outras pessoas.
+    responde_a = dados.get("responde_a")
+    if responde_a:
+        existe = conn.execute(
+            "SELECT 1 FROM chat_interno_mensagens WHERE id = ? AND conversa_id = ?", (responde_a, conversa_id)
+        ).fetchone()
+        if existe is None:
+            raise ApiError("A mensagem citada não é desta conversa.", status=400)
+        responde_a = int(responde_a)
+    else:
+        responde_a = None
+    chat_interno_service.enviar_mensagem(conn, conversa_id, usuario["id"], texto, responde_a=responde_a)
     return jsonify({"ok": True}), 201
+
+
+@bp.put("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>")
+@requires_auth
+def editar_mensagem(conversa_id, mensagem_id):
+    """Corrige o que você escreveu. Só o autor edita — nem o admin
+    reescreve a fala de outra pessoa — e a bolha passa a mostrar
+    "editada", pra ninguém mudar o que disse sem deixar rastro."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    mensagem = conn.execute(
+        "SELECT * FROM chat_interno_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    if mensagem["usuario_id"] != usuario["id"]:
+        raise ApiError("Só quem escreveu pode editar a própria mensagem.", status=403, codigo="sem_permissao")
+    if mensagem["excluida_em"]:
+        raise ApiError("Essa mensagem foi apagada.", status=400)
+    texto = ((request.get_json(silent=True) or {}).get("texto") or "").strip()
+    if not texto:
+        raise ApiError("Escreva o novo texto.", status=400)
+    chat_interno_service.editar_mensagem(conn, mensagem_id, texto)
+    return jsonify({"ok": True})
 
 
 @bp.post("/conversas/<int:conversa_id>/lembretes")

@@ -1457,6 +1457,51 @@
   // Só o administrador recebe mensagens apagadas do servidor. Pra ele, em
   // vez de a mensagem sumir sem rastro, ela fica visível numa cor
   // diferente com quem apagou — é o que permite conferir depois.
+  // Trecho citado, desenhado dentro da bolha que responde. Mostra só o
+  // começo: é referência ("estou falando disto"), não uma segunda cópia
+  // da mensagem.
+  function htmlCitacao(m) {
+    if (!m.responde_a) return "";
+    if (m.citada_texto === null || m.citada_texto === undefined) {
+      if (!m.citada_tipo) return `<div class="wpp-citacao wpp-citacao-sumiu">Mensagem citada não está mais disponível</div>`;
+    }
+    if (m.citada_excluida_em) {
+      return `<div class="wpp-citacao wpp-citacao-sumiu">🗑️ A mensagem citada foi apagada</div>`;
+    }
+    const autor = m.citada_autor
+      || (m.citada_direcao === "entrada" ? "Cliente" : m.citada_direcao === "saida" ? "Você" : "");
+    const previa = (m.citada_texto || {
+      imagem: "📷 Imagem", video: "🎥 Vídeo", documento: "📄 Documento",
+      audio: "🎵 Áudio", figurinha: "🩹 Figurinha",
+    }[m.citada_tipo] || "📎 Anexo").slice(0, 140);
+    return `<div class="wpp-citacao" data-acao="ir-para-citada" data-id="${m.responde_a}" title="Ir até a mensagem citada">
+      ${autor ? `<span class="wpp-citacao-autor">${escapeHtml(autor)}</span>` : ""}
+      <span class="wpp-citacao-texto">${escapeHtml(previa)}</span>
+    </div>`;
+  }
+
+  // Barra "respondendo a ..." em cima do campo de digitar. Fica fora do
+  // <form> num espaço próprio, porque mandar mensagem não redesenha a
+  // tela — quem pinta/apaga é esta função.
+  function _desenharBarraCitacao() {
+    const espaco = document.querySelector("[data-wpp-citando]");
+    if (!espaco) return;
+    const c = state.citando;
+    if (!c) { espaco.innerHTML = ""; return; }
+    espaco.innerHTML = `
+      <div class="wpp-citando-barra">
+        <div class="wpp-citacao" style="margin:0; flex:1; min-width:0;">
+          ${c.autor ? `<span class="wpp-citacao-autor">${escapeHtml(c.autor)}</span>` : ""}
+          <span class="wpp-citacao-texto">${escapeHtml((c.texto || "📎 Anexo").slice(0, 140))}</span>
+        </div>
+        <button type="button" class="botao-icone" data-acao="cancelar-citacao" title="Não citar">✕</button>
+      </div>`;
+  }
+
+  function htmlEditada(m) {
+    return m.editada_em ? `<span class="wpp-bolha-editada" title="Editada em ${fmtData(m.editada_em)}">editada</span>` : "";
+  }
+
   function htmlSeloApagada(m) {
     if (!m.excluida_em) return "";
     const quem = m.excluida_por_nome ? ` por ${escapeHtml(m.excluida_por_nome)}` : "";
@@ -1468,9 +1513,13 @@
     const iconeStatus = { pendente: "🕓", enviada: "✓", entregue: "✓✓", lida: "✓✓", falhou: "⚠️", recebida: "" }[m.status] || "";
     return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.status === "falhou" ? "wpp-bolha-falhou" : ""} ${m.excluida_em ? "wpp-bolha-apagada" : ""}" data-wpp-bolha-id="${m.id}">
       ${htmlSeloApagada(m)}
+      ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
       ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
       <div class="wpp-bolha-rodape">
+        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="0" title="Responder citando esta mensagem">↩️</button>` : ""}
+        ${saida && !m.excluida_em && m.tipo === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem" data-id="${m.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
+        ${htmlEditada(m)}
         ${saida && m.status === "falhou" ? `<button type="button" class="wpp-bolha-excluir" data-acao="reenviar-mensagem" data-id="${m.id}" title="Tentar enviar de novo">🔄</button>` : ""}
         ${saida && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem" data-id="${m.id}" title="Excluir mensagem (ex.: enviada por engano)">🗑️</button>` : ""}
         <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
@@ -1611,6 +1660,7 @@
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens>${mensagens.map(htmlBolha).join("")}</div>
       ${htmlAgendadas(agendadas)}
+      <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem" data-conversa-id="${conversa.id}">
         <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo" data-conversa-id="${conversa.id}" hidden>
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
@@ -1651,6 +1701,7 @@
   }
 
   async function renderWhatsapp(conversaId) {
+    _limparCitacaoSeTrocou(`cliente:${conversaId}`);
     _carregandoSeTrocouDeTela("whatsapp");
     let conversas;
     let contatosSemConversa = [];
@@ -1739,6 +1790,26 @@
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
     const mudou = _sincronizarLista(painel, mensagens, (m) => m.id, htmlBolha);
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
+  }
+
+  function modalEditarMensagem(textoAtual, ehCliente, aoSalvar) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">✏️ Editar mensagem</h3>
+      ${ehCliente ? `<p class="dica"><strong>Atenção:</strong> a correção vale aqui dentro do sistema. No celular do cliente a mensagem continua como foi enviada — o WhatsApp não permite reescrever o que já chegou. Para o cliente ver o texto certo, apague e mande de novo.</p>` : `<p class="dica">A mensagem passa a mostrar "editada", pra outra pessoa saber que o texto mudou.</p>`}
+      <div class="campo"><label>Texto</label><textarea name="texto" rows="4" required></textarea></div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-wpp-salvar-edicao>Salvar</button>
+      </div>`);
+    const campo = wrap.querySelector('textarea[name="texto"]');
+    campo.value = textoAtual;
+    campo.focus();
+    campo.setSelectionRange(campo.value.length, campo.value.length);
+    wrap.querySelector("[data-wpp-salvar-edicao]").addEventListener("click", async () => {
+      const texto = campo.value.trim();
+      if (!texto) { campo.focus(); return; }
+      await aoSalvar(texto);
+    });
   }
 
   function modalEncaminhar(conversaId, usuarios) {
@@ -1839,9 +1910,13 @@
     return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.excluida_em ? "wpp-bolha-apagada" : ""}">
       ${!saida || souAlheio ? `<div class="texto-suave" style="font-size:11px; font-weight:700; margin-bottom:2px;">${escapeHtml(nomeAutor)}</div>` : ""}
       ${htmlSeloApagada(m)}
+      ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
       ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
       <div class="wpp-bolha-rodape">
+        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="1" title="Responder citando esta mensagem">↩️</button>` : ""}
+        ${m.usuario_id === eu && !m.excluida_em && (m.tipo || "texto") === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
+        ${htmlEditada(m)}
         ${m.usuario_id === eu && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" title="Apagar (mandei por engano)">🗑️</button>` : ""}
         <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
         ${m.usuario_id === eu ? htmlVistoInterno(m, conversa, eu) : ""}
@@ -1880,6 +1955,7 @@
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens-interno>${mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("")}</div>
+      <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
         <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" hidden>
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
@@ -1893,7 +1969,14 @@
       </form>`;
   }
 
+  // Trocar de conversa/tela descarta a citação pendente — citar algo numa
+  // conversa e mandar em outra seria confuso (e o servidor recusaria).
+  function _limparCitacaoSeTrocou(chave) {
+    if (state._citandoDe !== chave) { state.citando = null; state._citandoDe = chave; }
+  }
+
   async function renderChatInterno(conversaId) {
+    _limparCitacaoSeTrocou(`interno:${conversaId}`);
     _carregandoSeTrocouDeTela("chat-interno");
     const usuario = state.usuarioAtual;
     const escopo = state.chatInternoEscopo;
@@ -3225,6 +3308,53 @@
         modalEncaminhar(Number(alvo.dataset.id), usuarios);
         return;
       }
+      case "citar-mensagem": {
+        const bolha = alvo.closest(".wpp-bolha");
+        const corpo = bolha ? bolha.querySelector(".wpp-bolha-texto") : null;
+        const autorEl = bolha ? bolha.querySelector('div[style*="font-weight:700"]') : null;
+        state.citando = {
+          id: Number(alvo.dataset.id),
+          interna: alvo.dataset.interna === "1",
+          texto: corpo ? corpo.textContent : "📎 Anexo",
+          autor: autorEl ? autorEl.textContent : (bolha && bolha.classList.contains("wpp-bolha-saida") ? "Você" : ""),
+        };
+        _desenharBarraCitacao();
+        const campo = document.querySelector('form.wpp-chat-input textarea[name="texto"]');
+        if (campo) campo.focus();
+        return;
+      }
+      case "cancelar-citacao": {
+        state.citando = null;
+        _desenharBarraCitacao();
+        return;
+      }
+      case "ir-para-citada": {
+        const alvoBolha = document.querySelector(`[data-wpp-bolha-id="${alvo.dataset.id}"]`)
+          || document.querySelector(`[data-chave-sync="${alvo.dataset.id}"]`);
+        if (!alvoBolha) { definirFlash("erro", "A mensagem citada não está nesta parte da conversa."); return montarRota(); }
+        alvoBolha.scrollIntoView({ behavior: "smooth", block: "center" });
+        alvoBolha.classList.add("wpp-bolha-realce");
+        setTimeout(() => alvoBolha.classList.remove("wpp-bolha-realce"), 1600);
+        return;
+      }
+      case "editar-mensagem": {
+        const id = Number(alvo.dataset.id);
+        const conversaId = Number(location.hash.split("/")[2]);
+        return modalEditarMensagem(alvo.dataset.texto || "", true, async (texto) => {
+          await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens/${id}`, { method: "PUT", body: { texto } });
+          fecharModais();
+          await atualizarMensagensNoDom(conversaId);
+        });
+      }
+      case "editar-mensagem-interna": {
+        const id = Number(alvo.dataset.id);
+        const conversaId = Number(alvo.dataset.conversaId);
+        return modalEditarMensagem(alvo.dataset.texto || "", false, async (texto) => {
+          await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens/${id}`, { method: "PUT", body: { texto } });
+          fecharModais();
+          await atualizarMensagensInternasNoDom(conversaId);
+        });
+      }
       case "atualizar-fotos-contatos": {
         alvo.disabled = true;
         alvo.textContent = "Buscando…";
@@ -3830,7 +3960,10 @@
         // routes/whatsapp.py::enviar_mensagem).
         form.reset();
         textarea.focus();
-        await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto } });
+        const citada = state.citando && !state.citando.interna ? state.citando.id : null;
+        state.citando = null;
+        _desenharBarraCitacao();
+        await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto, responde_a: citada } });
         // Atualização leve — só a lista de mensagens e a prévia na lista
         // de conversas, sem reconstruir a tela inteira (cabeçalho,
         // respostas prontas, notas, agendadas...) que é o que deixava
@@ -3854,7 +3987,13 @@
         const textarea = form.querySelector("textarea");
         form.reset();
         textarea.focus();
-        await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto } });
+        // Pega e já limpa a citação: se o envio falhar, a pessoa reescreve
+        // e cita de novo — pior seria a citação ficar grudada e a próxima
+        // mensagem sair respondendo algo que ela nem quis citar.
+        const citada = state.citando && state.citando.interna ? state.citando.id : null;
+        state.citando = null;
+        _desenharBarraCitacao();
+        await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto, responde_a: citada } });
         await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
         return;
       }
