@@ -831,7 +831,7 @@
           <span>🟠 ${resumo.para_hoje} pra hoje</span>
           <span>🟢 ${resumo.agendados} agendados</span>
         </div>
-        ${pendentes.length ? pendentes.map(htmlItemFollowup).join("") : '<p class="texto-suave" style="padding:12px;">Nada atrasado. 👏</p>'}
+        ${pendentes.length ? pendentes.map(htmlItemFollowup).join("") : '<p class="texto-suave" style="padding:12px;">Nada atrasado. 👏<br><br>Esta lista se preenche <strong>sozinha</strong> conforme os clientes ficam sem retorno. Pra marcar um retorno, abra a conversa e clique no 📞 no topo.</p>'}
         ${proximos.length ? `<div class="followup-secao">Próximos</div>${proximos.map(htmlItemFollowup).join("")}` : ""}`;
     } catch (e) {
       alvo.innerHTML = `<p class="texto-suave" style="padding:12px;">Não consegui carregar agora.</p>`;
@@ -2166,7 +2166,8 @@
          ${lembretes.length ? `<table>
            <thead><tr><th>Quando</th><th>Cliente</th><th>Anotação</th>${verTodos ? "<th>Responsável</th>" : ""}<th></th></tr></thead>
            <tbody>${linhas}</tbody>
-         </table>` : `<p class="texto-suave">Nenhum lembrete pendente.</p>`}
+         </table>` : `<p class="texto-suave">Nenhum lembrete pendente.</p>
+           <p class="dica">Lembretes são criados <strong>dentro da conversa</strong>: abra o cliente em <a href="#/whatsapp">Conversas</a> e clique no 🔔 no topo. Serve pra você não esquecer de algo — só você é avisado.</p>`}
        </div>`,
       "lembretes"
     );
