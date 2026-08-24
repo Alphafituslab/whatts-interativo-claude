@@ -1247,27 +1247,68 @@ def agendar_mensagem(conversa_id):
     return jsonify(agendada), 201
 
 
+def _agendada_da_empresa(conn, agendada_id, empresa_id):
+    """Confirma que o agendamento é desta empresa antes de deixar mexer
+    nele — senão dava pra cancelar/editar por ID o agendamento de outra.
+
+    LEFT JOIN nos dois lados de propósito: o agendamento aponta pra uma
+    conversa de cliente OU pra uma interna, nunca as duas. Com JOIN
+    comum, todo agendamento do chat interno dava "não encontrado" — era
+    impossível cancelá-los.
+    """
+    return conn.execute(
+        """
+        SELECT a.* FROM whatsapp_mensagens_agendadas a
+        LEFT JOIN whatsapp_conversas c ON c.id = a.conversa_id
+        LEFT JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN chat_interno_conversas ci ON ci.id = a.chat_interno_conversa_id
+        JOIN usuarios u ON u.id = a.criado_por
+        WHERE a.id = ? AND (ct.empresa_id = ? OR (ci.id IS NOT NULL AND u.empresa_id = ?))
+        """,
+        (agendada_id, empresa_id, empresa_id),
+    ).fetchone()
+
+
 @bp.delete("/agendadas/<int:agendada_id>")
 @requires_auth
 def cancelar_agendada(agendada_id):
     usuario = g.usuario_atual
     conn = get_db()
-    # Confirma que o agendamento é de uma conversa desta empresa antes de
-    # mexer — sem isso, dava pra cancelar por ID um agendamento de
-    # qualquer outra empresa (ou de qualquer outro usuário).
-    valido = conn.execute(
-        """
-        SELECT 1 FROM whatsapp_mensagens_agendadas a
-        JOIN whatsapp_conversas c ON c.id = a.conversa_id
-        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
-        WHERE a.id = ? AND ct.empresa_id = ?
-        """,
-        (agendada_id, g.empresa_id),
-    ).fetchone()
-    if valido is None:
+    if _agendada_da_empresa(conn, agendada_id, g.empresa_id) is None:
         raise ApiError("Agendamento não encontrado.", status=404, codigo="nao_encontrado")
     whatsapp_service.cancelar_agendada(conn, agendada_id)
     whatsapp_service.registrar_atividade(conn, usuario["id"], "agendamento_cancelado")
+    return jsonify({"ok": True})
+
+
+@bp.put("/agendadas/<int:agendada_id>")
+@requires_auth
+def editar_agendada(agendada_id):
+    """Muda o texto e/ou a hora de um agendamento que ainda não saiu.
+    Depois de enviado não tem o que editar — a mensagem já está no
+    celular de quem recebeu."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    agendada = _agendada_da_empresa(conn, agendada_id, g.empresa_id)
+    if agendada is None:
+        raise ApiError("Agendamento não encontrado.", status=404, codigo="nao_encontrado")
+    if agendada["status"] != "pendente":
+        raise ApiError("Esse agendamento já foi enviado — não dá mais pra editar.", status=400)
+    if agendada["criado_por"] != usuario["id"] and not usuario["admin"]:
+        raise ApiError("Só quem agendou (ou um administrador) pode editar.", status=403, codigo="sem_permissao")
+    dados = request.get_json(silent=True) or {}
+    texto = (dados.get("texto") or "").strip()
+    quando = (dados.get("agendado_para") or "").strip()
+    if not quando:
+        raise ApiError("Informe a data e a hora.", status=400)
+    # Anexo agendado não exige texto — ali o texto é só legenda.
+    if not texto and agendada["tipo"] == "texto":
+        raise ApiError("Escreva a mensagem.", status=400)
+    conn.execute(
+        "UPDATE whatsapp_mensagens_agendadas SET texto = ?, agendado_para = ? WHERE id = ?",
+        (texto or None, quando, agendada_id),
+    )
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "agendamento_editado", (texto or "")[:120])
     return jsonify({"ok": True})
 
 
@@ -1311,24 +1352,60 @@ def criar_lembrete(conversa_id):
     return jsonify(lembrete), 201
 
 
+def _lembrete_da_empresa(conn, lembrete_id, empresa_id):
+    """Mesmo cuidado (e mesma correção) de _agendada_da_empresa: com JOIN
+    comum, lembrete de conversa interna nunca era encontrado, e por isso
+    não dava pra concluí-lo."""
+    return conn.execute(
+        """
+        SELECT l.* FROM whatsapp_lembretes l
+        LEFT JOIN whatsapp_conversas c ON c.id = l.conversa_id
+        LEFT JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN chat_interno_conversas ci ON ci.id = l.chat_interno_conversa_id
+        JOIN usuarios u ON u.id = l.usuario_id
+        WHERE l.id = ? AND (ct.empresa_id = ? OR (ci.id IS NOT NULL AND u.empresa_id = ?))
+        """,
+        (lembrete_id, empresa_id, empresa_id),
+    ).fetchone()
+
+
 @bp.post("/lembretes/<int:lembrete_id>/concluir")
 @requires_auth
 def concluir_lembrete(lembrete_id):
     usuario = g.usuario_atual
     conn = get_db()
-    valido = conn.execute(
-        """
-        SELECT 1 FROM whatsapp_lembretes l
-        JOIN whatsapp_conversas c ON c.id = l.conversa_id
-        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
-        WHERE l.id = ? AND ct.empresa_id = ?
-        """,
-        (lembrete_id, g.empresa_id),
-    ).fetchone()
-    if valido is None:
+    if _lembrete_da_empresa(conn, lembrete_id, g.empresa_id) is None:
         raise ApiError("Lembrete não encontrado.", status=404, codigo="nao_encontrado")
     whatsapp_service.concluir_lembrete(conn, lembrete_id)
     whatsapp_service.registrar_atividade(conn, usuario["id"], "lembrete_concluido")
+    return jsonify({"ok": True})
+
+
+@bp.put("/lembretes/<int:lembrete_id>")
+@requires_auth
+def adiar_lembrete(lembrete_id):
+    """Prorroga o lembrete pra outra hora. Ele continua pendente até
+    alguém concluir — adiar nunca faz um lembrete sumir sozinho."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    lembrete = _lembrete_da_empresa(conn, lembrete_id, g.empresa_id)
+    if lembrete is None:
+        raise ApiError("Lembrete não encontrado.", status=404, codigo="nao_encontrado")
+    if lembrete["usuario_id"] != usuario["id"] and not usuario["admin"]:
+        raise ApiError("Esse lembrete é de outra pessoa.", status=403, codigo="sem_permissao")
+    dados = request.get_json(silent=True) or {}
+    quando = (dados.get("lembrar_em") or "").strip()
+    if not quando:
+        raise ApiError("Informe a nova data e hora.", status=400)
+    texto = dados.get("texto")
+    if texto is None:
+        conn.execute("UPDATE whatsapp_lembretes SET lembrar_em = ? WHERE id = ?", (quando, lembrete_id))
+    else:
+        conn.execute(
+            "UPDATE whatsapp_lembretes SET lembrar_em = ?, texto = ? WHERE id = ?",
+            (quando, (texto or "").strip() or None, lembrete_id),
+        )
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "lembrete_adiado", quando)
     return jsonify({"ok": True})
 
 

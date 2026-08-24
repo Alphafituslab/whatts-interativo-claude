@@ -1000,9 +1000,19 @@
     const alvo = document.querySelector("[data-followup-conteudo]");
     if (!alvo) return;
     try {
-      const [resumo, itens] = await Promise.all([
+      // Três coisas diferentes, juntas no mesmo painel porque a pergunta
+      // é a mesma ("o que eu tenho pra fazer?"), mas cada uma com seu
+      // rótulo, porque funcionam de jeitos diferentes:
+      //  - Follow-up: cliente sem retorno há tempo demais (o sistema
+      //    descobre sozinho).
+      //  - Agendamento: mensagem escrita agora que o sistema ENVIA ao
+      //    contato na hora marcada, e some daqui depois de enviada.
+      //  - Lembrete: aviso só pra você, não vai pra ninguém.
+      const [resumo, itens, agendadas, lembretes] = await Promise.all([
         chamarApi("/followup/resumo"),
         chamarApi("/followup"),
+        chamarApi("/whatsapp/agendadas").catch(() => []),
+        chamarApi("/whatsapp/lembretes").catch(() => []),
       ]);
       const pendentes = itens.filter((i) => ["atrasado", "agendado_vencido"].includes(i.situacao));
       const proximos = itens.filter((i) => ["proximo_do_vencimento", "agendado"].includes(i.situacao));
@@ -1013,10 +1023,67 @@
           <span>🟢 ${resumo.agendados} agendados</span>
         </div>
         ${pendentes.length ? pendentes.map(htmlItemFollowup).join("") : '<p class="texto-suave" style="padding:12px;">Nada atrasado. 👏<br><br>Esta lista se preenche <strong>sozinha</strong> conforme os clientes ficam sem retorno. Pra marcar um retorno, abra a conversa e clique no 📞 no topo.</p>'}
-        ${proximos.length ? `<div class="followup-secao">Próximos</div>${proximos.map(htmlItemFollowup).join("")}` : ""}`;
+        ${proximos.length ? `<div class="followup-secao">Próximos</div>${proximos.map(htmlItemFollowup).join("")}` : ""}
+        <div class="followup-secao">🕒 Mensagens agendadas <span class="followup-secao-dica">o sistema envia sozinho na hora marcada</span></div>
+        ${agendadas.length
+          ? agendadas.map(htmlItemAgendadaFollowup).join("")
+          : '<p class="texto-suave" style="padding:10px 12px; font-size:12.5px;">Nenhuma mensagem agendada.</p>'}
+        <div class="followup-secao">🔔 Meus lembretes <span class="followup-secao-dica">aviso só pra você, não vai pra ninguém</span></div>
+        ${lembretes.length
+          ? lembretes.map(htmlItemLembreteFollowup).join("")
+          : '<p class="texto-suave" style="padding:10px 12px; font-size:12.5px;">Nenhum lembrete marcado.</p>'}`;
     } catch (e) {
       alvo.innerHTML = `<p class="texto-suave" style="padding:12px;">Não consegui carregar agora.</p>`;
     }
+  }
+
+  function _quemFollowup(item) {
+    if (item.origem === "interno") {
+      const eu = state.usuarioAtual.id;
+      const outro = item.interna_criador_id === eu ? item.interna_participante : item.interna_criador;
+      return `💬 ${escapeHtml(outro || item.interna_criador || "colega")}`;
+    }
+    return escapeHtml(item.contato_nome || item.telefone || "—");
+  }
+
+  function _linkFollowup(item) {
+    return item.origem === "interno"
+      ? `#/chat-interno/${item.chat_interno_conversa_id || item.interna_id || ""}`
+      : `#/whatsapp/${item.conversa_id}`;
+  }
+
+  function _atrasado(quando) {
+    return !!quando && new Date(quando.endsWith("Z") ? quando : quando + "Z") < new Date();
+  }
+
+  function htmlItemAgendadaFollowup(a) {
+    const vencida = _atrasado(a.agendado_para);
+    return `<div class="followup-item">
+      <a class="followup-item-topo" href="${_linkFollowup(a)}" data-acao="fechar-followup">
+        <strong>${_quemFollowup(a)}</strong>
+        <span class="followup-quando ${vencida ? "followup-vencido" : ""}">${fmtData(a.agendado_para)}</span>
+      </a>
+      <div class="followup-item-texto">${escapeHtml((a.texto || "📎 Anexo").slice(0, 120))}</div>
+      <div class="followup-item-acoes">
+        <button type="button" class="botao secundario pequeno" data-acao="editar-agendada" data-id="${a.id}" data-texto="${escapeHtml(a.texto || "")}" data-quando="${escapeHtml(a.agendado_para || "")}">Editar</button>
+        <button type="button" class="botao secundario pequeno" data-acao="cancelar-agendada-followup" data-id="${a.id}">Cancelar</button>
+      </div>
+    </div>`;
+  }
+
+  function htmlItemLembreteFollowup(l) {
+    const vencido = _atrasado(l.lembrar_em);
+    return `<div class="followup-item">
+      <a class="followup-item-topo" href="${_linkFollowup(l)}" data-acao="fechar-followup">
+        <strong>${_quemFollowup(l)}</strong>
+        <span class="followup-quando ${vencido ? "followup-vencido" : ""}">${fmtData(l.lembrar_em)}</span>
+      </a>
+      <div class="followup-item-texto">${escapeHtml((l.texto || "Retomar o contato").slice(0, 120))}</div>
+      <div class="followup-item-acoes">
+        <button type="button" class="botao secundario pequeno" data-acao="prorrogar-lembrete-followup" data-id="${l.id}">Prorrogar</button>
+        <button type="button" class="botao secundario pequeno" data-acao="concluir-lembrete-followup" data-id="${l.id}">Concluir</button>
+      </div>
+    </div>`;
   }
 
   async function atualizarBadgesNaoLidos() {
@@ -1176,9 +1243,20 @@
       <h3 style="margin-top:0;">🔔 Lembrete: hora de retornar!</h3>
       <p>${l.texto ? escapeHtml(l.texto) : "Você marcou pra falar com este cliente de novo agora."}</p>
       <p class="texto-suave">${l.origem === "interno" ? "Conversa interna com" : "Cliente"}: ${_alvoDoItem(l).rotulo} — previsto para ${fmtData(l.lembrar_em)}</p>
+      <p class="dica"><strong>Concluir</strong> apaga o lembrete de vez. <strong>Prorrogar</strong> só empurra pra frente — ele continua aqui até você concluir.</p>
+      <div class="campo">
+        <label>Prorrogar para</label>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+          <button type="button" class="botao secundario pequeno" data-acao="prorrogar-rapido" data-minutos="60">+1 hora</button>
+          <button type="button" class="botao secundario pequeno" data-acao="prorrogar-rapido" data-minutos="180">+3 horas</button>
+          <button type="button" class="botao secundario pequeno" data-acao="prorrogar-rapido" data-minutos="1440">Amanhã</button>
+          <button type="button" class="botao secundario pequeno" data-acao="prorrogar-rapido" data-minutos="10080">Semana que vem</button>
+        </div>
+        <input type="datetime-local" data-wpp-prorrogar-quando value="${_valorDataHoraPadrao(1)}">
+      </div>
       <div class="rodape-modal">
-        <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
         <a class="botao secundario" href="${_alvoDoItem(l).href}" data-acao="fechar-modal">Ver conversa</a>
+        <button type="button" class="botao secundario" data-acao="prorrogar-lembrete" data-id="${l.id}">Prorrogar</button>
         <button type="button" class="botao" data-acao="concluir-lembrete-alerta" data-id="${l.id}">Concluir</button>
       </div>`);
   }
@@ -1790,6 +1868,67 @@
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
     const mudou = _sincronizarLista(painel, mensagens, (m) => m.id, htmlBolha);
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
+  }
+
+  // "2026-08-24T15:30:00.000Z" -> "2026-08-24T15:30", que é o formato
+  // que o <input type="datetime-local"> aceita.
+  function _paraCampoDataHora(iso) {
+    if (!iso) return _valorDataHoraPadrao(1);
+    try {
+      const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0, 16);
+    } catch (e) { return _valorDataHoraPadrao(1); }
+  }
+
+  function modalEditarAgendada(id, textoAtual, quandoAtual) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🕒 Editar agendamento</h3>
+      <p class="dica">Esta mensagem ainda não saiu. Na hora marcada o sistema envia sozinho para o contato e ela some desta lista.</p>
+      <div class="campo"><label>Mensagem</label><textarea name="texto" rows="4"></textarea></div>
+      <div class="campo"><label>Enviar em</label><input type="datetime-local" name="quando" required></div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-wpp-salvar-agendada>Salvar</button>
+      </div>`);
+    const campoTexto = wrap.querySelector('textarea[name="texto"]');
+    const campoQuando = wrap.querySelector('input[name="quando"]');
+    campoTexto.value = textoAtual;
+    campoQuando.value = _paraCampoDataHora(quandoAtual);
+    campoTexto.focus();
+    wrap.querySelector("[data-wpp-salvar-agendada]").addEventListener("click", async () => {
+      if (!campoQuando.value) { campoQuando.focus(); return; }
+      await chamarApi(`/whatsapp/agendadas/${id}`, {
+        method: "PUT",
+        body: { texto: campoTexto.value.trim(), agendado_para: `${campoQuando.value}:00` },
+      });
+      fecharModais();
+      definirFlash("ok", "Agendamento atualizado.");
+      carregarPainelFollowup();
+      montarRota();
+    });
+  }
+
+  function modalProrrogarLembrete(id) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🔔 Prorrogar lembrete</h3>
+      <p class="dica">Ele continua na lista até você concluir — prorrogar só muda a hora do aviso.</p>
+      <div class="campo"><label>Avisar de novo em</label><input type="datetime-local" name="quando" required></div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-wpp-salvar-prorrogar>Prorrogar</button>
+      </div>`);
+    const campo = wrap.querySelector('input[name="quando"]');
+    campo.value = _valorDataHoraPadrao(24);
+    wrap.querySelector("[data-wpp-salvar-prorrogar]").addEventListener("click", async () => {
+      if (!campo.value) { campo.focus(); return; }
+      await chamarApi(`/whatsapp/lembretes/${id}`, { method: "PUT", body: { lembrar_em: `${campo.value}:00` } });
+      state.lembretesAlertados.delete(id);
+      fecharModais();
+      definirFlash("ok", "Lembrete prorrogado.");
+      carregarPainelFollowup();
+      montarRota();
+    });
   }
 
   function modalEditarMensagem(textoAtual, ehCliente, aoSalvar) {
@@ -3307,6 +3446,44 @@
         const usuarios = await chamarApi("/usuarios");
         modalEncaminhar(Number(alvo.dataset.id), usuarios);
         return;
+      }
+      case "prorrogar-rapido": {
+        // Botões de atalho ("+1 hora", "amanhã") só preenchem o campo —
+        // quem confirma é o botão Prorrogar, pra dar chance de ajustar.
+        const campo = document.querySelector("[data-wpp-prorrogar-quando]");
+        if (campo) campo.value = _valorDataHoraPadrao(Number(alvo.dataset.minutos) / 60);
+        return;
+      }
+      case "prorrogar-lembrete": {
+        const campo = document.querySelector("[data-wpp-prorrogar-quando]");
+        const quando = campo && campo.value;
+        if (!quando) { definirFlash("erro", "Escolha a nova data e hora."); return montarRota(); }
+        await chamarApi(`/whatsapp/lembretes/${alvo.dataset.id}`, { method: "PUT", body: { lembrar_em: `${quando}:00` } });
+        // Sai da lista de "já avisei" pra voltar a alertar na hora nova.
+        state.lembretesAlertados.delete(Number(alvo.dataset.id));
+        fecharModais();
+        definirFlash("ok", "Lembrete prorrogado — ele continua aqui até você concluir.");
+        carregarPainelFollowup();
+        return montarRota();
+      }
+      case "prorrogar-lembrete-followup": {
+        return modalProrrogarLembrete(Number(alvo.dataset.id));
+      }
+      case "concluir-lembrete-followup": {
+        await chamarApi(`/whatsapp/lembretes/${alvo.dataset.id}/concluir`, { method: "POST" });
+        definirFlash("ok", "Lembrete concluído.");
+        carregarPainelFollowup();
+        return;
+      }
+      case "cancelar-agendada-followup": {
+        if (!confirm("Cancelar este agendamento? A mensagem não será enviada.")) return;
+        await chamarApi(`/whatsapp/agendadas/${alvo.dataset.id}`, { method: "DELETE" });
+        definirFlash("ok", "Agendamento cancelado.");
+        carregarPainelFollowup();
+        return;
+      }
+      case "editar-agendada": {
+        return modalEditarAgendada(Number(alvo.dataset.id), alvo.dataset.texto || "", alvo.dataset.quando || "");
       }
       case "citar-mensagem": {
         const bolha = alvo.closest(".wpp-bolha");
