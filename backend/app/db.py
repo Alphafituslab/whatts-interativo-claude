@@ -39,6 +39,7 @@ SCHEMA_FILES = [
     "schema_024_excluir_mensagem_interna.sql",
     "schema_025_followup.sql",
     "schema_026_visto_chat_interno.sql",
+    "schema_027_agendar_chat_interno.sql",
 ]
 
 

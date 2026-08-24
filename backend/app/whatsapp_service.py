@@ -667,17 +667,22 @@ def listar_todas_agendadas(conn, empresa_id: int, usuario_id=None):
     (só admin deveria pedir isso) devolve as de todo mundo NA EMPRESA —
     mesma régua de 'admin vê tudo' já usada em listar_lembretes."""
     base = """
-        SELECT a.*, ct.nome AS contato_nome, ct.telefone, u.nome AS criado_por_nome
+        SELECT a.*, ct.nome AS contato_nome, ct.telefone, u.nome AS criado_por_nome,
+               CASE WHEN a.chat_interno_conversa_id IS NOT NULL THEN 'interno' ELSE 'cliente' END AS origem,
+               COALESCE(uc.nome, up.nome) AS interna_com
         FROM whatsapp_mensagens_agendadas a
-        JOIN whatsapp_conversas c ON c.id = a.conversa_id
-        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN whatsapp_conversas c ON c.id = a.conversa_id
+        LEFT JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN chat_interno_conversas ci ON ci.id = a.chat_interno_conversa_id
+        LEFT JOIN usuarios uc ON uc.id = ci.criado_por_id
+        LEFT JOIN usuarios up ON up.id = ci.participante_id
         JOIN usuarios u ON u.id = a.criado_por
-        WHERE a.status = 'pendente' AND ct.empresa_id = ?
+        WHERE a.status = 'pendente' AND (ct.empresa_id = ? OR (ci.id IS NOT NULL AND u.empresa_id = ?))
     """
     if usuario_id is not None:
-        rows = conn.execute(base + " AND a.criado_por = ? ORDER BY a.agendado_para", (empresa_id, usuario_id)).fetchall()
+        rows = conn.execute(base + " AND a.criado_por = ? ORDER BY a.agendado_para", (empresa_id, empresa_id, usuario_id)).fetchall()
     else:
-        rows = conn.execute(base + " ORDER BY a.agendado_para", (empresa_id,)).fetchall()
+        rows = conn.execute(base + " ORDER BY a.agendado_para", (empresa_id, empresa_id)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -704,6 +709,27 @@ def processar_agendadas_vencidas(conn):
 
     processadas = 0
     for agendada in vencidas:
+        # Mensagem agendada pro CHAT INTERNO: entrega direto no banco,
+        # sem passar pela Evolution API. De propósito — o chat interno
+        # tem que funcionar mesmo com o WhatsApp desconectado.
+        interna_id = agendada["chat_interno_conversa_id"] if "chat_interno_conversa_id" in agendada.keys() else None
+        if interna_id:
+            from . import chat_interno_service
+            existe = conn.execute("SELECT 1 FROM chat_interno_conversas WHERE id = ?", (interna_id,)).fetchone()
+            if existe is None:
+                conn.execute("UPDATE whatsapp_mensagens_agendadas SET status = 'falhou', erro = ? WHERE id = ?",
+                             ("Conversa interna não existe mais.", agendada["id"]))
+            else:
+                chat_interno_service.enviar_mensagem(
+                    conn, interna_id, agendada["criado_por"], agendada["texto"],
+                    tipo=agendada["tipo"] if "tipo" in agendada.keys() else "texto",
+                    midia_url=agendada["midia_url"] if "midia_url" in agendada.keys() else None,
+                    nome_arquivo=agendada["nome_arquivo"] if "nome_arquivo" in agendada.keys() else None,
+                )
+                conn.execute("UPDATE whatsapp_mensagens_agendadas SET status = 'enviada' WHERE id = ?", (agendada["id"],))
+            processadas += 1
+            continue
+
         # Cada conversa pode ser de uma empresa diferente (o agendador
         # roda uma vez só pra todo mundo em segundo plano) — resolve a
         # config (URL/apikey da Evolution API) certa por empresa aqui
@@ -769,18 +795,27 @@ def criar_lembrete(conn, conversa_id: int, usuario_id: int, texto: str, lembrar_
 def listar_lembretes(conn, empresa_id: int, usuario_id=None):
     """usuario_id=None (só admin deveria pedir isso) devolve os lembretes
     de TODO MUNDO NA EMPRESA — mesma régua de 'admin vê tudo' do resto do sistema."""
+    # LEFT JOIN nos dois lados: o lembrete aponta pra uma conversa de
+    # cliente OU pra uma interna, nunca as duas. Com JOIN comum, os
+    # internos sumiriam da lista.
     base = """
-        SELECT l.*, c.contato_id, ct.nome AS contato_nome, ct.telefone, u.nome AS usuario_nome
+        SELECT l.*, c.contato_id, ct.nome AS contato_nome, ct.telefone, u.nome AS usuario_nome,
+               ci.id AS interna_id,
+               CASE WHEN l.chat_interno_conversa_id IS NOT NULL THEN 'interno' ELSE 'cliente' END AS origem,
+               COALESCE(uc.nome, up.nome) AS interna_com
         FROM whatsapp_lembretes l
-        JOIN whatsapp_conversas c ON c.id = l.conversa_id
-        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN whatsapp_conversas c ON c.id = l.conversa_id
+        LEFT JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN chat_interno_conversas ci ON ci.id = l.chat_interno_conversa_id
+        LEFT JOIN usuarios uc ON uc.id = ci.criado_por_id
+        LEFT JOIN usuarios up ON up.id = ci.participante_id
         JOIN usuarios u ON u.id = l.usuario_id
-        WHERE l.concluido = 0 AND ct.empresa_id = ?
+        WHERE l.concluido = 0 AND (ct.empresa_id = ? OR (ci.id IS NOT NULL AND u.empresa_id = ?))
     """
     if usuario_id is not None:
-        rows = conn.execute(base + " AND l.usuario_id = ? ORDER BY l.lembrar_em", (empresa_id, usuario_id)).fetchall()
+        rows = conn.execute(base + " AND l.usuario_id = ? ORDER BY l.lembrar_em", (empresa_id, empresa_id, usuario_id)).fetchall()
     else:
-        rows = conn.execute(base + " ORDER BY l.lembrar_em", (empresa_id,)).fetchall()
+        rows = conn.execute(base + " ORDER BY l.lembrar_em", (empresa_id, empresa_id)).fetchall()
     return [dict(r) for r in rows]
 
 

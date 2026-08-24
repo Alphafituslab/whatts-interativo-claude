@@ -509,6 +509,41 @@
 
   // Prévia da gravação: ouvir antes de mandar evita o clássico "mandei
   // um áudio sem querer / falei errado". Enter manda, Esc descarta.
+  function _valorDataHoraPadrao(horasNaFrente) {
+    const d = new Date(Date.now() + horasNaFrente * 3600 * 1000);
+    // input datetime-local espera hora LOCAL, sem fuso no texto
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function modalLembreteInterno(conversaId) {
+    abrirModal(`
+      <h3 style="margin-top:0;">🔔 Lembrete</h3>
+      <p class="dica">Fica atrelado a esta conversa interna e avisa <strong>só você</strong> na hora marcada.</p>
+      <form data-form="lembrete-interno" data-conversa-id="${conversaId}">
+        <div class="campo"><label>Quando me avisar</label><input type="datetime-local" name="quando" value="${_valorDataHoraPadrao(24)}" required></div>
+        <div class="campo"><label>Sobre o quê (opcional)</label><textarea name="texto" rows="2" placeholder="Ex.: cobrar a resposta do orçamento"></textarea></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Criar lembrete</button>
+        </div>
+      </form>`);
+  }
+
+  function modalAgendarInterno(conversaId) {
+    abrirModal(`
+      <h3 style="margin-top:0;">🕒 Agendar mensagem</h3>
+      <p class="dica">Escreva agora e o colega recebe na hora marcada. Funciona mesmo com o WhatsApp desconectado — é entrega interna.</p>
+      <form data-form="agendar-interno" data-conversa-id="${conversaId}">
+        <div class="campo"><label>Enviar em</label><input type="datetime-local" name="quando" value="${_valorDataHoraPadrao(24)}" required></div>
+        <div class="campo"><label>Mensagem</label><textarea name="texto" rows="3" required></textarea></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Agendar</button>
+        </div>
+      </form>`);
+  }
+
   function modalAgendarContato(conversaId) {
     // Sugere amanhã às 10h: é o caso mais comum e evita digitação.
     const amanha = new Date(Date.now() + 24 * 3600 * 1000);
@@ -1531,6 +1566,8 @@
           <div class="texto-suave wpp-chat-telefone">${souAlheio ? "👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${conversa.setor_destino ? `${souAlheio ? " · " : ""}🏷️ ${escapeHtml(conversa.setor_destino)}` : (souAlheio ? "" : "Chat interno")}</div>
         </div>
         <div class="wpp-chat-acoes">
+          <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
+          <button type="button" class="botao-icone" data-acao="abrir-agendar-interno" data-id="${conversa.id}" title="Agendar mensagem pro colega">🕒</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar-interno" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-interno" data-id="${conversa.id}">Reabrir</button>`
@@ -2947,6 +2984,14 @@
         if (painel) painel.hidden = true;
         return; // o href do link segue normalmente
       }
+      case "abrir-lembrete-interno": {
+        modalLembreteInterno(Number(alvo.dataset.id));
+        return;
+      }
+      case "abrir-agendar-interno": {
+        modalAgendarInterno(Number(alvo.dataset.id));
+        return;
+      }
       case "abrir-agendar-contato": {
         modalAgendarContato(Number(alvo.dataset.id));
         return;
@@ -3574,6 +3619,26 @@
         await chamarApi(`/chat-interno/conversas/${conversaId}/apelido`, { method: "PUT", body: { apelido: dados.get("apelido") || "" } });
         fecharModais();
         definirFlash("ok", "Apelido salvo.");
+        return renderChatInterno(conversaId);
+      }
+      case "lembrete-interno": {
+        const conversaId = Number(form.dataset.conversaId);
+        await chamarApi(`/chat-interno/conversas/${conversaId}/lembretes`, {
+          method: "POST",
+          body: { lembrar_em: new Date(dados.get("quando")).toISOString(), texto: dados.get("texto") || "" },
+        });
+        fecharModais();
+        definirFlash("ok", "Lembrete criado — aparece em Lembretes.");
+        return renderChatInterno(conversaId);
+      }
+      case "agendar-interno": {
+        const conversaId = Number(form.dataset.conversaId);
+        await chamarApi(`/chat-interno/conversas/${conversaId}/agendar`, {
+          method: "POST",
+          body: { agendado_para: new Date(dados.get("quando")).toISOString(), texto: dados.get("texto") },
+        });
+        fecharModais();
+        definirFlash("ok", "Mensagem agendada — aparece em Agendamentos.");
         return renderChatInterno(conversaId);
       }
       case "agendar-contato": {

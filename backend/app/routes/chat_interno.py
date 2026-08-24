@@ -136,6 +136,56 @@ def enviar_mensagem(conversa_id):
     return jsonify({"ok": True}), 201
 
 
+@bp.post("/conversas/<int:conversa_id>/lembretes")
+@requires_auth
+def criar_lembrete(conversa_id):
+    """Lembrete pessoal atrelado a uma conversa interna — avisa só quem
+    pediu, na hora marcada. Mesma tabela dos lembretes de cliente, então
+    aparece junto na tela de Lembretes."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if not _pode_ver(usuario, conversa):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    dados = request.get_json(silent=True) or {}
+    lembrar_em = (dados.get("lembrar_em") or "").strip()
+    if not lembrar_em:
+        raise ApiError("Informe quando quer ser lembrado.", status=400)
+    conn.execute(
+        """INSERT INTO whatsapp_lembretes (chat_interno_conversa_id, usuario_id, texto, lembrar_em, criado_por, criado_em)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (conversa_id, usuario["id"], (dados.get("texto") or "").strip() or None,
+         lembrar_em, usuario["id"], whatsapp_service._now_iso()),
+    )
+    return jsonify({"ok": True}), 201
+
+
+@bp.post("/conversas/<int:conversa_id>/agendar")
+@requires_auth
+def agendar_mensagem(conversa_id):
+    """Escreve agora, o colega recebe na hora marcada. Não depende do
+    WhatsApp estar conectado — a entrega é interna (ver
+    whatsapp_service.processar_agendadas_vencidas)."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    dados = request.get_json(silent=True) or {}
+    texto = (dados.get("texto") or "").strip()
+    agendado_para = (dados.get("agendado_para") or "").strip()
+    if not texto:
+        raise ApiError("Escreva a mensagem que será enviada.", status=400)
+    if not agendado_para:
+        raise ApiError("Informe quando enviar.", status=400)
+    cur = conn.execute(
+        """INSERT INTO whatsapp_mensagens_agendadas (chat_interno_conversa_id, texto, agendado_para, criado_por, criado_em)
+           VALUES (?, ?, ?, ?, ?)""",
+        (conversa_id, texto, agendado_para, usuario["id"], whatsapp_service._now_iso()),
+    )
+    return jsonify({"ok": True, "id": cur.lastrowid}), 201
+
+
 @bp.delete("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>")
 @requires_auth
 def excluir_mensagem(conversa_id, mensagem_id):
