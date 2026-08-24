@@ -403,6 +403,65 @@ def definir_apelido_contato(contato_id):
     return jsonify({"ok": True})
 
 
+@bp.put("/contatos/<int:contato_id>")
+@requires_auth
+def editar_contato(contato_id):
+    """Corrige o cadastro do contato — o nome escrito errado na hora de
+    adicionar, por exemplo.
+
+    Diferente do apelido (PUT /contatos/<id>/apelido), que é uma
+    preferência individual: aqui é o nome de cadastro, e a correção vale
+    para a empresa inteira. Quem tiver apelido próprio continua vendo o
+    apelido dele.
+
+    O telefone só pode ser trocado enquanto o contato não tem conversa
+    nenhuma: ele é o que liga a conversa ao cliente no WhatsApp, e mudar
+    depois faria as mensagens já trocadas apontarem para outro número.
+    """
+    conn = get_db()
+    contato = conn.execute(
+        "SELECT * FROM whatsapp_contatos WHERE id = ? AND empresa_id = ?", (contato_id, g.empresa_id)
+    ).fetchone()
+    if contato is None:
+        raise ApiError("Contato não encontrado.", status=404, codigo="nao_encontrado")
+
+    dados = request.get_json(silent=True) or {}
+    nome = (dados.get("nome") or "").strip()
+    if not nome:
+        raise ApiError("Informe o nome do contato.", status=400)
+
+    telefone = (dados.get("telefone") or "").strip()
+    if telefone:
+        telefone = whatsapp_service.normalizar_telefone(telefone)
+    if telefone and telefone != contato["telefone"]:
+        tem_conversa = conn.execute(
+            "SELECT 1 FROM whatsapp_conversas WHERE contato_id = ?", (contato_id,)
+        ).fetchone()
+        if tem_conversa:
+            raise ApiError(
+                "Este contato já tem conversa, então o telefone não pode ser trocado — "
+                "as mensagens já trocadas ficariam ligadas ao número errado. Cadastre o número certo como um novo contato.",
+                status=400,
+            )
+        duplicado = conn.execute(
+            "SELECT 1 FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ? AND id != ?",
+            (g.empresa_id, telefone, contato_id),
+        ).fetchone()
+        if duplicado:
+            raise ApiError("Já existe outro contato com esse telefone.", status=409, codigo="telefone_duplicado")
+        conn.execute(
+            "UPDATE whatsapp_contatos SET nome = ?, telefone = ?, atualizado_em = ? WHERE id = ?",
+            (nome, telefone, _now_iso(), contato_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE whatsapp_contatos SET nome = ?, atualizado_em = ? WHERE id = ?",
+            (nome, _now_iso(), contato_id),
+        )
+    whatsapp_service.registrar_atividade(conn, g.usuario_atual["id"], "contato_editado", nome)
+    return jsonify(dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (contato_id,)).fetchone()))
+
+
 @bp.post("/contatos")
 @requires_auth
 def criar_contato():

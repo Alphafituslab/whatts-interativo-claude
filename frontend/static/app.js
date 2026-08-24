@@ -2399,8 +2399,38 @@
       <div class="wpp-contato-linha">
         ${htmlAvatarContato(c.foto_url, c.nome, c.telefone, 32)}
         <div style="flex:1; min-width:0;"><strong>${escapeHtml(c.nome || c.telefone)}</strong>${c.nome ? `<div class="texto-suave">${escapeHtml(c.telefone)}</div>` : ""}</div>
+        <button type="button" class="botao-icone" data-acao="editar-contato" data-id="${c.id}" data-nome="${escapeHtml(c.nome || "")}" data-telefone="${escapeHtml(c.telefone)}" title="Corrigir o nome deste contato">✏️</button>
         <button type="button" class="botao secundario pequeno" data-acao="iniciar-conversa-contato" data-telefone="${escapeHtml(c.telefone)}" data-nome="${escapeHtml(c.nome || "")}">Conversar</button>
       </div>`).join("");
+  }
+
+  function modalEditarContato(id, nomeAtual, telefoneAtual) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">✏️ Editar contato</h3>
+      <p class="dica">Corrige o <strong>nome de cadastro</strong>, que vale para a empresa inteira. Se alguém tiver definido um apelido próprio para este contato, o apelido dele continua valendo na tela dele.</p>
+      <div class="campo"><label>Nome</label><input name="nome" required maxlength="80"></div>
+      <div class="campo"><label>Telefone</label><input name="telefone" type="tel"></div>
+      <p class="dica">O telefone só pode ser corrigido enquanto o contato ainda não tem conversa — depois disso, as mensagens já trocadas ficariam ligadas ao número errado.</p>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-wpp-salvar-contato>Salvar</button>
+      </div>`);
+    const campoNome = wrap.querySelector('input[name="nome"]');
+    const campoTel = wrap.querySelector('input[name="telefone"]');
+    campoNome.value = nomeAtual;
+    campoTel.value = telefoneAtual;
+    campoNome.focus();
+    campoNome.setSelectionRange(campoNome.value.length, campoNome.value.length);
+    const salvar = async () => {
+      const nome = campoNome.value.trim();
+      if (!nome) { campoNome.focus(); return; }
+      await chamarApi(`/whatsapp/contatos/${id}`, { method: "PUT", body: { nome, telefone: campoTel.value.trim() } });
+      fecharModais();
+      definirFlash("ok", "Contato atualizado.");
+      await modalContatos();
+    };
+    wrap.querySelector("[data-wpp-salvar-contato]").addEventListener("click", salvar);
+    campoNome.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); salvar(); } });
   }
 
   async function modalContatos() {
@@ -3641,6 +3671,9 @@
         return renderWhatsapp(null);
       }
       case "abrir-nova-conversa": modalNovaConversa(); return;
+      case "editar-contato": {
+        return modalEditarContato(Number(alvo.dataset.id), alvo.dataset.nome || "", alvo.dataset.telefone || "");
+      }
       case "abrir-contatos": {
         fecharModais();
         await modalContatos();
