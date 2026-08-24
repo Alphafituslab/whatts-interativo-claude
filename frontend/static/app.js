@@ -1219,6 +1219,20 @@
     }, 1200);
   }
 
+  // Placa de "Carregando…" só quando a pessoa está TROCANDO de tela.
+  //
+  // Antes, toda re-renderização apagava o <div id="app"> inteiro — e
+  // várias ações redesenham a mesma tela (mandar mensagem, anexar,
+  // apagar). O resultado era a tela inteira sumir e voltar a cada envio:
+  // o "piscar" que incomodava. Voltando pra mesma tela, o conteúdo antigo
+  // fica no lugar até o novo estar pronto.
+  function _carregandoSeTrocouDeTela(tela) {
+    if (state._telaAtual !== tela) {
+      app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    }
+    state._telaAtual = tela;
+  }
+
   // Só troca o conteúdo quando ele REALMENTE mudou.
   //
   // O polling roda a cada 1,2s. Reescrever innerHTML sempre destrói e
@@ -1229,11 +1243,71 @@
   // Guarda a última versão numa propriedade JS do próprio elemento, e
   // não em data-* : um data-* vira atributo de verdade no HTML, e uma
   // conversa longa colocaria centenas de KB visíveis no DOM à toa.
+  // Enquanto o botão do mouse/dedo está pressionado, nada é
+  // reconstruído. Sem isso o polling podia trocar o item da lista entre
+  // o "apertar" e o "soltar" — o navegador perdia o clique e a pessoa
+  // precisava clicar duas vezes pra abrir a conversa.
+  let _apertando = false;
+  document.addEventListener("pointerdown", () => { _apertando = true; }, true);
+  document.addEventListener("pointerup", () => { setTimeout(() => { _apertando = false; }, 60); }, true);
+  document.addEventListener("pointercancel", () => { _apertando = false; }, true);
+
   function _pintarSeMudou(elemento, html) {
+    if (_apertando) return false;
     if (elemento._htmlPintado === html) return false;
     elemento._htmlPintado = html;
     elemento.innerHTML = html;
     return true;
+  }
+
+  // Atualiza uma lista MEXENDO SÓ NO QUE MUDOU.
+  //
+  // Trocar o innerHTML inteiro a cada 1,2s destrói e recria todos os
+  // itens — as fotos recarregam, a animação do badge recomeça, o hover
+  // se perde e o clique some se cair entre o apertar e o soltar. Aqui,
+  // cada item tem uma chave (o id): item igual não é tocado, item que
+  // mudou é trocado sozinho, item novo entra, item que saiu é removido.
+  // Com ninguém conversando, nada acontece na tela — nem um pixel.
+  function _sincronizarLista(container, itens, chaveDe, htmlDe) {
+    if (_apertando) return false;
+    const antigos = new Map();
+    for (const el of Array.from(container.children)) {
+      if (el.dataset.chaveSync) antigos.set(el.dataset.chaveSync, el);
+    }
+    const desejados = [];
+    let mudou = false;
+    for (const item of itens) {
+      const chave = String(chaveDe(item));
+      const html = htmlDe(item);
+      const existente = antigos.get(chave);
+      if (existente && existente._htmlSync === html) {
+        desejados.push(existente);
+        antigos.delete(chave);
+        continue;
+      }
+      const molde = document.createElement("div");
+      molde.innerHTML = html;
+      const el = molde.firstElementChild;
+      if (!el) continue;
+      el.dataset.chaveSync = chave;
+      el._htmlSync = html;
+      desejados.push(el);
+      antigos.delete(chave);
+      mudou = true;
+    }
+    // Põe na ordem certa sem recriar o que já estava certo. insertBefore
+    // move um elemento que já está no container, não duplica.
+    desejados.forEach((el, i) => {
+      if (container.children[i] !== el) {
+        container.insertBefore(el, container.children[i] || null);
+        mudou = true;
+      }
+    });
+    while (container.children.length > desejados.length) {
+      container.lastElementChild.remove();
+      mudou = true;
+    }
+    return mudou;
   }
 
   function _queryChatInterno() {
@@ -1247,7 +1321,9 @@
     if (!lista) return;
     const conversas = await chamarApi(`/chat-interno/conversas${_queryChatInterno()}`);
     const conversaAtivaId = Number(location.hash.split("/")[2]) || null;
-    _pintarSeMudou(lista, htmlListaConversasInternas(conversas, conversaAtivaId));
+    if (!conversas.length) { _pintarSeMudou(lista, htmlListaConversasInternas(conversas, conversaAtivaId)); return; }
+    lista._htmlPintado = null;
+    _sincronizarLista(lista, conversas, (c) => c.id, (c) => htmlItemConversaInterna(c, conversaAtivaId));
   }
 
   async function atualizarMensagensInternasNoDom(conversaId) {
@@ -1262,7 +1338,7 @@
     // aparecia só na mensagem seguinte quando a checagem era só a
     // contagem).
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
-    const mudou = _pintarSeMudou(painel, mensagens.map((m) => htmlBolhaInterna(m, conversa)).join(""));
+    const mudou = _sincronizarLista(painel, mensagens, (m) => m.id, (m) => htmlBolhaInterna(m, conversa));
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 
@@ -1308,7 +1384,11 @@
       };
       return `<div class="wpp-lista-vazia"><div class="wpp-lista-vazia-icone">📭</div><p class="texto-suave">${msgs[state.escopoConversas]}</p></div>`;
     }
-    return conversas.map((c) => {
+    return conversas.map((c) => htmlItemConversa(c, conversaAtivaId)).join("");
+  }
+
+  function htmlItemConversa(c, conversaAtivaId) {
+    {
       const nome = c.contato_nome || c.telefone;
       const naFila = !c.atribuida_usuario_id;
       const slaEstourado = state.slaAlertasIds.has(c.id);
@@ -1339,7 +1419,7 @@
         </div>
         ${naFila ? `<button type="button" class="botao pequeno wpp-botao-assumir" data-acao="assumir-conversa" data-id="${c.id}">Assumir</button>` : ""}
       </a>`;
-    }).join("");
+    }
   }
 
   function htmlAnexoBolha(m) {
@@ -1571,7 +1651,7 @@
   }
 
   async function renderWhatsapp(conversaId) {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("whatsapp");
     let conversas;
     let contatosSemConversa = [];
     if (state.buscaConversas) {
@@ -1647,7 +1727,9 @@
     if (state.buscaConversas) return; // não sobrescreve um resultado de busca ativo
     const conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
     const conversaAtivaId = Number(location.hash.split("/")[2]) || null;
-    _pintarSeMudou(lista, htmlListaConversas(conversas, conversaAtivaId));
+    if (!conversas.length) { _pintarSeMudou(lista, htmlListaConversas(conversas, conversaAtivaId)); return; }
+    lista._htmlPintado = null;
+    _sincronizarLista(lista, conversas, (c) => c.id, (c) => htmlItemConversa(c, conversaAtivaId));
   }
 
   async function atualizarMensagensNoDom(conversaId) {
@@ -1655,7 +1737,7 @@
     if (!painel) return;
     const mensagens = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`);
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
-    const mudou = _pintarSeMudou(painel, mensagens.map(htmlBolha).join(""));
+    const mudou = _sincronizarLista(painel, mensagens, (m) => m.id, htmlBolha);
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 
@@ -1690,8 +1772,12 @@
     if (!conversas.length) {
       return `<div class="wpp-lista-vazia"><div class="wpp-lista-vazia-icone">🗨️</div><p class="texto-suave">Nenhuma conversa interna ainda — clique em "+ Nova conversa" pra chamar alguém de um setor.</p></div>`;
     }
-    const eu = state.usuarioAtual.id;
-    return conversas.map((c) => {
+    return conversas.map((c) => htmlItemConversaInterna(c, ativaId)).join("");
+  }
+
+  function htmlItemConversaInterna(c, ativaId) {
+    {
+      const eu = state.usuarioAtual.id;
       const souCriador = c.criado_por_id === eu;
       const souParticipante = c.participante_id === eu;
       // Admin espiando pela aba "Todas" uma conversa que não é dele: mostra
@@ -1726,7 +1812,7 @@
           ${c.setor_destino || c.status === "fechada" ? `<div class="wpp-conversa-dono">${c.setor_destino ? `🏷️ ${escapeHtml(c.setor_destino)}` : ""}${c.status === "fechada" ? ' · <span class="selo inativo">Fechada</span>' : ""}</div>` : ""}
         </div>
       </a>`;
-    }).join("");
+    }
   }
 
   // Visto no chat interno: em vez de marcar mensagem por mensagem, o
@@ -1808,7 +1894,7 @@
   }
 
   async function renderChatInterno(conversaId) {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("chat-interno");
     const usuario = state.usuarioAtual;
     const escopo = state.chatInternoEscopo;
     const conversas = await chamarApi(`/chat-interno/conversas${_queryChatInterno()}`);
@@ -2200,7 +2286,7 @@
   }
 
   async function renderWhatsappConfiguracao() {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("configuracao");
     // Backup é do banco inteiro (todas as empresas), então só quem opera
     // a plataforma tem acesso — o servidor barra de qualquer jeito, aqui
     // é só pra não mostrar uma seção que daria erro ao usar.
@@ -2366,7 +2452,7 @@
   // de todo mundo), sem precisar entrar em cada conversa.
   // =======================================================================
   async function renderAgendamentos() {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("agendamentos");
     const usuario = state.usuarioAtual;
     const verTodos = usuario.admin && state.agendamentosTodos;
     const agendadas = await chamarApi(`/whatsapp/agendadas${verTodos ? "?todos=1" : ""}`);
@@ -2400,7 +2486,7 @@
   // LEMBRETES — meus pendentes (admin pode ver de todo mundo)
   // =======================================================================
   async function renderLembretes() {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("lembretes");
     const usuario = state.usuarioAtual;
     const verTodos = usuario.admin && state.lembretesTodos;
     const lembretes = await chamarApi(`/whatsapp/lembretes${verTodos ? "?todos=1" : ""}`);
@@ -2525,7 +2611,7 @@
   }
 
   async function renderDashboard() {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("dashboard");
     const [painel, mapa] = await Promise.all([
       chamarApi("/whatsapp/dashboard"),
       chamarApi("/whatsapp/dashboard/mapa"),
@@ -2660,7 +2746,7 @@
   // duas etapas (2FA/TOTP)
   // =======================================================================
   async function renderSeguranca() {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("seguranca");
     const usuario = await chamarApi("/auth/me");
     state.usuarioAtual = usuario;
 
@@ -2763,7 +2849,7 @@
   };
 
   async function renderAtividades() {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("atividades");
     const [usuarios, atividades] = await Promise.all([
       chamarApi("/usuarios"),
       chamarApi(`/whatsapp/atividades${state.filtroAtividadesUsuarioId ? `?usuario_id=${state.filtroAtividadesUsuarioId}` : ""}`),
@@ -2803,7 +2889,7 @@
   // USUÁRIOS (admin) — quem pode fazer login
   // =======================================================================
   async function renderUsuarios() {
-    app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
+    _carregandoSeTrocouDeTela("usuarios");
     const [usuarios, setores] = await Promise.all([chamarApi("/usuarios"), chamarApi("/usuarios/setores")]);
     const linhas = usuarios.map((u) => `
       <tr>

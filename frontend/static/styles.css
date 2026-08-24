@@ -364,10 +364,14 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-badge-nav { margin-left: auto; }
 .wpp-badge-nav[hidden] { display: none; }
 
-/* Aviso de mensagem nova piscando — usado no badge do menu lateral e no
-   badge de não-lidas de cada item da lista, pra chamar atenção mesmo
-   com a tela cheia de coisas. */
-.piscando { animation: piscar-aviso 1.1s ease-in-out infinite; }
+/* Aviso de mensagem nova — usado no badge do menu lateral e no badge de
+   não-lidas de cada item da lista.
+   Pisca 6 vezes e PARA, em vez de piscar pra sempre: chamar atenção é o
+   objetivo, mas um aviso pulsando sem parar deixa a tela inteira
+   inquieta enquanto a pessoa tenta trabalhar. Depois de parar, o badge
+   continua lá, sólido — a informação não se perde. Uma mensagem nova
+   redesenha o badge e recomeça a piscada. */
+.piscando { animation: piscar-aviso 1.1s ease-in-out 6 both; }
 @keyframes piscar-aviso {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(1.18); }
