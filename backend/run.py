@@ -38,5 +38,5 @@ if __name__ == "__main__":
     from waitress import serve
     host = os.environ.get("WPP_HOST", "0.0.0.0")
     porta = int(os.environ.get("WPP_PORT", "5050"))
-    print(f"Whatts Inbox rodando em http://{host}:{porta}")
+    print(f"Seja Alpha rodando em http://{host}:{porta}")
     serve(app, host=host, port=porta)

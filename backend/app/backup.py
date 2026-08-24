@@ -180,7 +180,7 @@ def importar_e_restaurar(origem_zip):
         with zipfile.ZipFile(origem_zip, "r") as zf:
             zf.extractall(pasta_temp)
         if not os.path.isfile(os.path.join(pasta_temp, NOME_ARQUIVO_DB)):
-            raise ValueError("Esse arquivo não parece ser um backup válido do Whatts Inbox (faltando whatsapp.db).")
+            raise ValueError("Esse arquivo não parece ser um backup válido do Seja Alpha (faltando whatsapp.db).")
         _restaurar_pasta(pasta_temp)
     finally:
         shutil.rmtree(pasta_temp, ignore_errors=True)

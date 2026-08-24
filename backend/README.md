@@ -1,4 +1,4 @@
-# Whatts Inbox
+# Seja Alpha
 
 Caixa de entrada de WhatsApp compartilhada: vários usuários fazem login (cada um com sua conta) e todos veem/respondem através de **um único número de WhatsApp** conectado ao sistema. Projeto independente — não depende do Alphafitus OS.
 

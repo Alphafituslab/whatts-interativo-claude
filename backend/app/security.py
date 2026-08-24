@@ -83,7 +83,7 @@ def gerar_totp_secreto() -> str:
     return pyotp.random_base32()
 
 
-def gerar_totp_uri(secreto: str, email: str, emissor: str = "Whatts Inbox") -> str:
+def gerar_totp_uri(secreto: str, email: str, emissor: str = "Seja Alpha") -> str:
     return pyotp.TOTP(secreto).provisioning_uri(name=email, issuer_name=emissor)
 
 

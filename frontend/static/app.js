@@ -1,5 +1,5 @@
 /*
- * Whatts Inbox — frontend em JavaScript puro (sem build step/CDN),
+ * Seja Alpha — frontend em JavaScript puro (sem build step/CDN),
  * independente do Alphafitus OS: login/senha próprios, caixa de entrada
  * de WhatsApp compartilhada entre os usuários cadastrados.
  */
@@ -257,7 +257,7 @@
       <div class="layout">
         <div class="fundo-menu-mobile" data-acao="alternar-menu-mobile"></div>
         <aside class="barra-lateral">
-          <div class="marca"><img class="marca-icone marca-logo" src="${state.logoUrl || "/static/img/logo_alphafitus.png"}" alt="" data-wpp-logo> Whatts Inbox</div>
+          <div class="marca"><img class="marca-icone marca-logo" src="${state.logoUrl || "/static/img/logo_alphafitus.png"}" alt="" data-wpp-logo> Seja Alpha</div>
           <div class="wpp-status-linha" data-wpp-status-linha>
             <span class="wpp-status-bolinha wpp-status-desconhecido" data-wpp-status-bolinha></span>
             <span data-wpp-status-texto>Verificando…</span>
@@ -284,7 +284,7 @@
         <div class="conteudo-principal">
           <div class="barra-superior-mobile">
             <button class="botao-icone botao-menu-mobile" data-acao="alternar-menu-mobile" title="Abrir menu">☰</button>
-            <strong>💬 Whatts Inbox</strong>
+            <strong>💬 Seja Alpha</strong>
           </div>
           <div class="pagina">${flashHtml}${conteudoHtml}</div>
         </div>
@@ -468,7 +468,7 @@
       <div class="tela-login">
         <div class="cartao-login">
           <div class="logo-3d-wrap"><img class="logo-3d" src="${state.logoUrl || "/static/img/logo_alphafitus.png"}" alt="" data-wpp-logo></div>
-          <h1>Whatts Inbox</h1>
+          <h1>Seja Alpha</h1>
           <p class="subtitulo">Caixa de entrada compartilhada de WhatsApp</p>
           ${flashHtml}
           ${corpo}
@@ -1169,7 +1169,7 @@
   function dispararAlertaLembrete(l) {
     tocarBeepLembrete();
     if (window.Notification && Notification.permission === "granted") {
-      try { new Notification("🔔 Lembrete — Whatts Inbox", { body: l.texto || `Hora de falar com ${l.origem === "interno" ? (l.interna_participante || l.interna_criador) : (l.contato_nome || l.telefone)} de novo` }); }
+      try { new Notification("🔔 Lembrete — Seja Alpha", { body: l.texto || `Hora de falar com ${l.origem === "interno" ? (l.interna_participante || l.interna_criador) : (l.contato_nome || l.telefone)} de novo` }); }
       catch (e) { /* ignora — o modal já avisa */ }
     }
     abrirModal(`
@@ -2939,7 +2939,7 @@
         const escolha = await evt.userChoice;
         state._promptInstalar = null;
         state.podeInstalarApp = false;
-        if (escolha && escolha.outcome === "accepted") definirFlash("ok", "Pronto — o ícone do Whatts Inbox foi criado no aparelho.");
+        if (escolha && escolha.outcome === "accepted") definirFlash("ok", "Pronto — o ícone do Seja Alpha foi criado no aparelho.");
         return montarRota();
       }
       case "alternar-menu-mobile":

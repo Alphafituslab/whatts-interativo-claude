@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  Whatts Inbox - instalador do atalho na area de trabalho
+REM  Seja Alpha - instalador do atalho na area de trabalho
 REM
 REM  Nao instala programa nenhum: so cria o atalho que abre o
 REM  sistema em modo aplicativo (sem barra de endereco), ja com a
@@ -8,7 +8,7 @@ REM  logo da empresa. Nao precisa ser administrador.
 REM
 REM  E so dar dois cliques neste arquivo.
 REM ============================================================
-title Instalar Whatts Inbox
+title Instalar Seja Alpha
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0instalar.ps1"
 

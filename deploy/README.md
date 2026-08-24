@@ -2,7 +2,7 @@
 
 ## `downloads/index.html`
 
-Página central de downloads da Alphafitus (Alphafitus OS + Whatts Inbox +
+Página central de downloads da Alphafitus (Alphafitus OS + Seja Alpha +
 ferramenta de banco). Não é servida pelo Flask: o Caddy entrega ela direto
 do disco, de `/opt/alphafitus-downloads`, e exige senha (basic auth).
 

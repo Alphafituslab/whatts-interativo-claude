@@ -73,5 +73,5 @@ def importar_backup():
     try:
         backup.importar_e_restaurar(arquivo.stream)
     except (ValueError, KeyError):
-        raise ApiError("Esse arquivo não parece ser um backup válido do Whatts Inbox.", status=400)
+        raise ApiError("Esse arquivo não parece ser um backup válido do Seja Alpha.", status=400)
     return jsonify({"ok": True})

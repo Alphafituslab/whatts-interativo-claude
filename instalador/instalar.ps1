@@ -1,5 +1,5 @@
 # ============================================================
-#  Whatts Inbox - cria o atalho da area de trabalho
+#  Seja Alpha - cria o atalho da area de trabalho
 #
 #  Nao instala programa nenhum e nao precisa de administrador:
 #  so cria um atalho que abre o sistema em modo aplicativo
@@ -13,13 +13,13 @@
 $ErrorActionPreference = 'Stop'
 $SISTEMA_URL = 'https://whatts.alphafitus.com.br'
 $ICONE_URL   = "$SISTEMA_URL/static/img/whatts_inbox.ico"
-$NOME_ATALHO = 'Whatts Inbox'
+$NOME_ATALHO = 'Seja Alpha'
 
 function Escrever($texto, $cor = 'White') { Write-Host $texto -ForegroundColor $cor }
 
 Escrever ''
 Escrever '  ============================================' Cyan
-Escrever '   Whatts Inbox - instalando o atalho' Cyan
+Escrever '   Seja Alpha - instalando o atalho' Cyan
 Escrever '  ============================================' Cyan
 Escrever ''
 
@@ -76,7 +76,7 @@ $shell = New-Object -ComObject WScript.Shell
 $atalho = $shell.CreateShortcut($caminhoAtalho)
 $atalho.TargetPath  = $navegador
 $atalho.Arguments   = "--app=$SISTEMA_URL"
-$atalho.Description = 'Whatts Inbox - atendimento de WhatsApp'
+$atalho.Description = 'Seja Alpha - atendimento de WhatsApp'
 if ($temIcone) { $atalho.IconLocation = "$caminhoIcone,0" }
 $atalho.Save()
 

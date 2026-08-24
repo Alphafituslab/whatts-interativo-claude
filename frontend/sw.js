@@ -1,5 +1,5 @@
 /*
- * Service worker do Whatts Inbox.
+ * Service worker do Seja Alpha.
  *
  * Existe por dois motivos: (1) é o que torna o site instalável como app
  * no celular, e (2) dá uma tela decente quando o celular fica sem
