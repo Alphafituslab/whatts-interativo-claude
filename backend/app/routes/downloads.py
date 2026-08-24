@@ -13,6 +13,7 @@ próprio, curto, separado do token do app.
 """
 import io
 import os
+import re
 import time
 import zipfile
 
@@ -77,6 +78,12 @@ def _tela_login(erro: str = None):
     return resposta, (401 if erro else 200)
 
 
+# Arquivos que só administrador pode baixar. O instalador do atalho é
+# pra equipe inteira; a ferramenta de banco não — ela vem junto com o
+# endereço do servidor e o caminho do arquivo do banco.
+SO_ADMIN = ("DBBrowserForSQLite-instalador.msi",)
+
+
 @bp.get("/")
 @bp.get("")
 def pagina():
@@ -84,7 +91,13 @@ def pagina():
     if usuario is None:
         html, status = _tela_login()
         return html, status
-    return _pagina("index.html")
+    html = _pagina("index.html")
+    if not usuario["admin"]:
+        # O bloco de ferramentas técnicas mostra IP do servidor, usuário
+        # root e onde fica o arquivo do banco. Colaborador entra pra
+        # pegar o instalador; nada disso precisa aparecer pra ele.
+        html = re.sub(r"<!--ADMIN-->.*?<!--/ADMIN-->", "", html, flags=re.S)
+    return html
 
 
 @bp.post("/entrar")
@@ -137,7 +150,10 @@ def instalador_whatts():
 
 @bp.get("/<path:arquivo>")
 def baixar(arquivo):
-    if _usuario_logado() is None:
+    usuario = _usuario_logado()
+    if usuario is None:
+        return redirect("/downloads/")
+    if arquivo in SO_ADMIN and not usuario["admin"]:
         return redirect("/downloads/")
     # send_from_directory já barra "..", mas a checagem explícita deixa
     # claro que nada fora desta pasta pode ser servido.
