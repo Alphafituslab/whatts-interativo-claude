@@ -758,6 +758,67 @@ def enviar_figurinha(config, telefone: str, midia_url: str) -> str:
     return (corpo.get("key") or {}).get("id")
 
 
+def _caminho_local_da_midia(midia_url: str):
+    """Do endereço servido pelo Flask de volta pro arquivo no disco."""
+    if not midia_url:
+        return None
+    nome = midia_url.split("?")[0].rsplit("/", 1)[-1]
+    if not nome:
+        return None
+    caminho = os.path.join(PASTA_UPLOADS, nome)
+    return caminho if os.path.exists(caminho) else None
+
+
+def _converter_audio_para_ogg(midia_url: str):
+    """Devolve o endereço de uma versão OGG/Opus do áudio, convertendo na
+    hora se ainda não existir.
+
+    Guarda o resultado ao lado do original (mesmo nome, extensão .ogg) e
+    reaproveita nas próximas vezes — reencaminhar o mesmo áudio dez vezes
+    não converte dez vezes.
+
+    Se o ffmpeg não estiver disponível ou a conversão falhar, devolve
+    None e o envio segue com o arquivo original: melhor tentar e talvez
+    falhar do que recusar o envio."""
+    origem = _caminho_local_da_midia(midia_url)
+    if not origem:
+        return None
+    if origem.lower().endswith(".ogg"):
+        return midia_url
+    destino = os.path.splitext(origem)[0] + ".ogg"
+    if not os.path.exists(destino) or os.path.getsize(destino) == 0:
+        import subprocess
+        try:
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", origem,
+                 "-vn", "-c:a", "libopus", "-b:a", "32k", "-ar", "48000", "-ac", "1", destino],
+                check=True, timeout=180, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning("Não consegui converter o áudio %s: %s", midia_url, e)
+            return None
+    if not os.path.exists(destino) or os.path.getsize(destino) == 0:
+        return None
+    return midia_url.rsplit("/", 1)[0] + "/" + os.path.basename(destino)
+
+
+def enviar_audio(config, telefone: str, midia_url: str) -> str:
+    """Manda um áudio como MENSAGEM DE VOZ, pela rota própria da Evolution
+    API. Pelo sendMedia o arquivo ia com o mimetype do contêiner original
+    e o WhatsApp não conseguia tocar."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento. Peça a um administrador para reconectar em Configurações.", status=400)
+    requests = _requests()
+    resp = requests.post(
+        f"{config['evolution_url']}/message/sendWhatsAppAudio/{config['instancia_nome']}",
+        json={"number": destino_whatsapp(telefone), "audio": midia_url},
+        headers=_cabecalhos(config), timeout=180,
+    )
+    corpo = _tratar_resposta(resp)
+    return (corpo.get("key") or {}).get("id")
+
+
 def enviar_midia(config, telefone: str, tipo: str, midia_url: str, nome_arquivo: str, legenda: str = None) -> str:
     """Envia uma mídia (imagem/vídeo/documento/áudio) passando uma URL
     (não o conteúdo em base64 embutido no corpo da requisição) — a
@@ -771,6 +832,19 @@ def enviar_midia(config, telefone: str, tipo: str, midia_url: str, nome_arquivo:
     _exigir_configurado(config)
     if config.get("status_conexao") != "conectado":
         raise ApiError("O WhatsApp não está conectado no momento. Peça a um administrador para reconectar em Configurações.", status=400)
+
+    # Áudio tem caminho próprio: converte pra OGG/Opus e vai pela rota de
+    # mensagem de voz. Fica aqui dentro (e não em cada chamador) pra que
+    # TODO envio de áudio se corrija de uma vez — o anexo da conversa, o
+    # agendamento e o encaminhamento passam todos por aqui.
+    if tipo == "audio":
+        from urllib.parse import urlsplit
+        caminho = urlsplit(midia_url).path or midia_url
+        convertido = _converter_audio_para_ogg(caminho)
+        if convertido and convertido != caminho:
+            midia_url = midia_url.replace(caminho, convertido, 1)
+        return enviar_audio(config, telefone, midia_url)
+
     requests = _requests()
     resp = requests.post(
         f"{config['evolution_url']}/message/sendMedia/{config['instancia_nome']}",
