@@ -1044,3 +1044,29 @@ nav { perspective: 800px; }
 /* Com o selo de presença na linha do nome, o nome precisa ser o que
    encolhe: senão "Daiana meu Amor" empurraria o selo e a hora pra fora. */
 .wpp-conversa-linha1 .wpp-conversa-nome { flex: 1; min-width: 0; }
+
+/* =====================================================================
+   Foto de perfil ampliada
+   O avatar de 32px não serve pra reconhecer ninguém; clicar nele abre a
+   foto grande. A moldura some quase toda de propósito — o assunto aqui
+   é a imagem, não a janela.
+   ===================================================================== */
+.wpp-avatar-ampliavel { cursor: zoom-in; }
+.wpp-avatar-ampliavel:hover { filter: brightness(1.08); }
+
+.fundo-modal-foto .modal {
+  padding: 0; overflow: hidden; background: var(--superficie);
+  max-width: min(560px, 92vw);
+}
+.wpp-foto-ampliada { display: flex; flex-direction: column; }
+.wpp-foto-ampliada img {
+  display: block; width: 100%; height: auto;
+  max-height: 72vh; object-fit: contain; background: var(--superficie-2, var(--fundo));
+}
+.wpp-foto-ampliada-rodape {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-top: 1px solid var(--borda);
+}
+.wpp-foto-ampliada-rodape strong {
+  font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

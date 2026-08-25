@@ -93,7 +93,13 @@
   function htmlAvatarContato(fotoUrl, nome, telefone, tamanho = 40) {
     const estilo = `width:${tamanho}px;height:${tamanho}px;font-size:${Math.round(tamanho * 0.35)}px;`;
     const src = urlImagemSegura(fotoUrl);
-    if (src) return `<img class="wpp-avatar wpp-avatar-foto" style="${estilo}" src="${src}" alt="" referrerpolicy="no-referrer">`;
+    // Com foto, o avatar abre em tamanho grande no clique. Sem foto são
+    // só as iniciais — não há nada pra ampliar, então nem vira botão.
+    if (src) {
+      return `<img class="wpp-avatar wpp-avatar-foto wpp-avatar-ampliavel" style="${estilo}" src="${src}" alt=""
+        referrerpolicy="no-referrer" data-acao="ampliar-foto" data-url="${src}"
+        data-nome="${escapeHtml(nome || telefone || "")}" title="Ver a foto maior">`;
+    }
     return `<div class="wpp-avatar" style="${estilo}background:${corAvatar(telefone)};">${escapeHtml(iniciaisContato(nome, telefone))}</div>`;
   }
 
@@ -2061,6 +2067,41 @@
 
   // Nome é obrigatório de propósito: etiqueta sem nome vira uma bolinha
   // colorida que ninguém lembra o que significa.
+  // Foto de perfil em tamanho grande. Serve pra conferir quem é a pessoa
+  // (o avatar de 32px não ajuda muito), então o foco é a imagem: nada de
+  // moldura pesada em volta. Clicar fora ou apertar Esc fecha.
+  function modalFotoAmpliada(url, nome) {
+    const wrap = abrirModal(`
+      <div class="wpp-foto-ampliada">
+        <img src="${escapeHtml(url)}" alt="Foto de ${escapeHtml(nome)}" referrerpolicy="no-referrer" data-wpp-foto-grande>
+        <div class="wpp-foto-ampliada-rodape">
+          <strong>${escapeHtml(nome || "")}</strong>
+          <button type="button" class="botao secundario pequeno" data-acao="fechar-foto-ampliada">Fechar</button>
+        </div>
+      </div>`);
+    wrap.classList.add("fundo-modal-foto");
+    // A URL da foto vem do WhatsApp e expira depois de um tempo. Se ela
+    // já morreu, é melhor dizer isso do que deixar um quadrado quebrado.
+    const img = wrap.querySelector("[data-wpp-foto-grande]");
+    img.addEventListener("error", () => {
+      img.replaceWith(Object.assign(document.createElement("p"), {
+        className: "texto-suave",
+        style: "padding:28px; text-align:center;",
+        textContent: "Não consegui carregar esta foto agora — o link dela pode ter expirado. Use o 🔄 ao lado do nome, dentro da conversa, pra buscar de novo.",
+      }));
+    });
+    // Solta o listener quando a janela sai por qualquer caminho (Esc,
+    // botão ou clique fora), pra não deixar tecla presa no documento.
+    const aoTeclar = (e) => {
+      if (!wrap.isConnected) { document.removeEventListener("keydown", aoTeclar); return; }
+      if (e.key !== "Escape") return;
+      document.removeEventListener("keydown", aoTeclar);
+      wrap.remove();
+    };
+    document.addEventListener("keydown", aoTeclar);
+    return wrap;
+  }
+
   function modalNovaEtiqueta(aoCriar) {
     const wrap = abrirModal(`
       <h3 style="margin-top:0;">🏷️ Nova etiqueta</h3>
@@ -3642,6 +3683,15 @@
       case "renomear-contato-menu": {
         const botao = document.querySelector('[data-acao="renomear-contato"]');
         if (botao) botao.click();
+        return;
+      }
+      case "fechar-foto-ampliada": {
+        const janela = alvo.closest(".fundo-modal-foto");
+        if (janela) janela.remove();
+        return;
+      }
+      case "ampliar-foto": {
+        modalFotoAmpliada(alvo.dataset.url, alvo.dataset.nome || "");
         return;
       }
       case "filtrar-por-etiqueta-interno": {
