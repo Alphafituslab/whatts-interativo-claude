@@ -246,8 +246,10 @@
         <p class="dica">Nenhum setor cadastrado ainda — crie em <strong>Configuração → Setores</strong>.</p>`;
     }
     return `
-      <label class="rotulo-forte">Setores que esta pessoa atende</label>
-      <p class="dica" style="margin-top:0;">Pode marcar mais de um. Quando o cliente escolher um desses números no menu do WhatsApp, a conversa cai para ela.</p>
+      <label class="rotulo-forte">Setores desta pessoa</label>
+      <p class="dica" style="margin-top:0;">Pode marcar mais de um — quem faz Televendas e Financeiro marca os dois.
+      O setor vale sempre: é como a pessoa aparece para os colegas no chat interno, onde ela fala com <strong>qualquer setor</strong>.
+      E, para quem atende clientes, é por ele que a conversa chega: o cliente escolhe o número no menu do WhatsApp e ela cai aqui.</p>
       <div class="escolha-lista">
         ${todos.map((s, i) => `
           <label class="escolha-item">
@@ -2498,13 +2500,24 @@
     iniciarPollingChatInterno(conversaId);
   }
 
+  // Todos os setores da pessoa, pra rótulo e filtro. Uma pessoa pode
+  // atender mais de um (ex.: Televendas e Financeiro), e olhar só o
+  // principal a faria sumir da lista ao filtrar pelo segundo.
+  function _setoresDoColega(u) {
+    if (u.setores && u.setores.length) return u.setores;
+    return u.setor ? [u.setor] : [];
+  }
+
   function modalNovaConversaInterna(usuarios, setores) {
     const eu = state.usuarioAtual.id;
+    // No chat interno se fala com QUALQUER pessoa da empresa, de
+    // qualquer setor — o campo de setor abaixo é só um filtro pra achar
+    // mais rápido, nunca uma restrição.
     const disponiveis = usuarios.filter((u) => u.ativo && u.id !== eu);
     abrirModal(`
       <h3 style="margin-top:0;">Nova conversa interna</h3>
       <form data-form="iniciar-conversa-interna">
-        <div class="campo"><label>Setor</label>
+        <div class="campo"><label>Filtrar por setor <span class="texto-suave" style="font-weight:400;">(opcional — dá pra falar com qualquer setor)</span></label>
           <select name="setor_filtro" data-acao-change="filtrar-participantes-interno">
             <option value="">Todos os setores</option>
             ${setores.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("")}
@@ -2513,7 +2526,10 @@
         <div class="campo"><label>Falar com</label>
           <select name="participante_id" required data-lista-participantes>
             <option value="">Selecione…</option>
-            ${disponiveis.map((u) => `<option value="${u.id}" data-setor="${escapeHtml(u.setor || "")}">${u.online ? "🟢" : "🔴"} ${escapeHtml(u.nome)}${u.setor ? " — " + escapeHtml(u.setor) : ""}${u.admin ? " (Admin)" : ""}</option>`).join("")}
+            ${disponiveis.map((u) => {
+              const seus = _setoresDoColega(u);
+              return `<option value="${u.id}" data-setores="${escapeHtml(seus.join("|"))}">${u.online ? "🟢" : "🔴"} ${escapeHtml(u.nome)}${seus.length ? " — " + escapeHtml(seus.join(", ")) : ""}${u.admin ? " (Admin)" : ""}</option>`;
+            }).join("")}
           </select>
         </div>
         <div class="campo"><label>Mensagem (opcional)</label><textarea name="texto" rows="3" placeholder="Pode já escrever a primeira mensagem, ou deixar em branco e só abrir a conversa"></textarea></div>
@@ -2527,7 +2543,10 @@
   function modalEncaminharInterno(conversaId, usuarios, criadoPorId) {
     const eu = state.usuarioAtual.id;
     const opcoes = usuarios.filter((u) => u.ativo && u.id !== eu && u.id !== criadoPorId)
-      .map((u) => `<option value="${u.id}">${u.online ? "🟢" : "🔴"} ${escapeHtml(u.nome)}${u.setor ? " — " + escapeHtml(u.setor) : ""}</option>`).join("");
+      .map((u) => {
+        const seus = _setoresDoColega(u);
+        return `<option value="${u.id}">${u.online ? "🟢" : "🔴"} ${escapeHtml(u.nome)}${seus.length ? " — " + escapeHtml(seus.join(", ")) : ""}</option>`;
+      }).join("");
     abrirModal(`
       <h3 style="margin-top:0;">Encaminhar conversa interna</h3>
       <p class="dica">A pessoa escolhida passa a fazer parte da conversa no seu lugar — o histórico inteiro continua lá, ninguém perde nada.</p>
@@ -3687,7 +3706,8 @@
         const select = document.querySelector("[data-lista-participantes]");
         for (const opt of select.options) {
           if (!opt.value) continue;
-          opt.hidden = !!setor && opt.dataset.setor !== setor;
+          const seus = (opt.dataset.setores || "").split("|").filter(Boolean);
+          opt.hidden = !!setor && !seus.includes(setor);
         }
         select.value = "";
         return;
