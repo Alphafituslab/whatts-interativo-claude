@@ -58,6 +58,7 @@ SCHEMA_FILES = [
     "schema_043_nome_do_whatsapp.sql",
     "schema_044_encaminhada.sql",
     "schema_045_chat_interno_reacao.sql",
+    "schema_046_grupo_participantes.sql",
 ]
 
 

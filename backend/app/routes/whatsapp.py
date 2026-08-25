@@ -249,6 +249,8 @@ def _conversa_para_json(row, tags=None):
     d["nao_lidas"] = int(d.get("nao_lidas") or 0)
     d["tags"] = tags or []
     d["sugerir_encerrar"] = _sugerir_encerrar(row)
+    if d.get("eh_grupo"):
+        d["participantes"] = _participantes_do_grupo(get_db(), row["id"])
     d["horas_sugerir_encerrar"] = HORAS_SUGERIR_ENCERRAR
     # Nome que ESTE usuário deu pro contato ganha da versão compartilhada
     # (o nome de cadastro segue guardado, só não é o que ele vê).
@@ -370,6 +372,30 @@ def _esperou_demais_sem_menu(conn, conversa):
     return bool(quando) and quando <= _limite_sem_menu(conn)
 
 
+def _participa_do_grupo(conn, conversa_id, usuario_id) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM whatsapp_conversa_usuarios WHERE conversa_id = ? AND usuario_id = ?",
+        (conversa_id, usuario_id),
+    ).fetchone() is not None
+
+
+def _entrar_no_grupo(conn, conversa_id, usuario_id, adicionado_por=None):
+    conn.execute(
+        "INSERT OR IGNORE INTO whatsapp_conversa_usuarios (conversa_id, usuario_id, adicionado_por, criado_em) "
+        "VALUES (?, ?, ?, ?)",
+        (conversa_id, usuario_id, adicionado_por or usuario_id, _now_iso()),
+    )
+
+
+def _participantes_do_grupo(conn, conversa_id):
+    return [dict(r) for r in conn.execute(
+        "SELECT u.id, u.nome, u.setor FROM whatsapp_conversa_usuarios cu "
+        "JOIN usuarios u ON u.id = cu.usuario_id "
+        "WHERE cu.conversa_id = ? AND u.ativo = 1 ORDER BY u.nome",
+        (conversa_id,),
+    ).fetchall()]
+
+
 def _pode_visualizar(usuario, conversa, conn=None):
     """Atribuída: só o dono (e o admin). Sem dono (na fila): só quem
     atende o setor pra onde o cliente foi direcionado — mesma régua do
@@ -380,10 +406,11 @@ def _pode_visualizar(usuario, conversa, conn=None):
     a lista dela, não contra um valor único."""
     if usuario["admin"]:
         return True
-    # Grupo não tem dono. Ele é um lugar onde várias pessoas conversam —
-    # dar dono a um grupo é o mesmo que tirar o grupo de todo mundo.
+    # Grupo: vale a lista de participantes, não o dono único. Um grupo
+    # comporta várias pessoas daqui — mas só elas.
     if "eh_grupo" in conversa.keys() and conversa["eh_grupo"]:
-        return True
+        conn = conn or get_db()
+        return _participa_do_grupo(conn, conversa["id"], usuario["id"])
     if conversa["atribuida_usuario_id"] is not None:
         return conversa["atribuida_usuario_id"] == usuario["id"]
     conn = conn or get_db()
@@ -418,8 +445,9 @@ def _sql_visivel_nao_admin(conn, usuario):
     # Mesma regra do _pode_visualizar: setor do menu sem ninguém
     # cadastrado é fila de todos, e na hora — não adianta esperar, não
     # existe ninguém pra quem esperar.
-    # Grupo aparece pra todo mundo, sempre — ver _pode_visualizar.
-    grupo = " OR ct.eh_grupo = 1"
+    # Grupo: só pra quem está nele (ver _pode_visualizar).
+    grupo = (" OR (ct.eh_grupo = 1 AND EXISTS (SELECT 1 FROM whatsapp_conversa_usuarios cu "
+             "WHERE cu.conversa_id = c.id AND cu.usuario_id = ?))")
     orfaos = _setores_orfaos(conn)
     if orfaos:
         marcadores_orfaos = ",".join("?" * len(orfaos))
@@ -428,14 +456,14 @@ def _sql_visivel_nao_admin(conn, usuario):
         sem_dono, orfaos = "", []
     if not setores:
         return (f"(c.atribuida_usuario_id = ? OR {sem_menu}{sem_dono}{grupo})",
-                [usuario["id"], limite, *orfaos])
+                [usuario["id"], limite, *orfaos, usuario["id"]])
     marcadores = ",".join("?" * len(setores))
     sql = (
         f"(c.atribuida_usuario_id = ? "
         f"OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IN ({marcadores})) "
         f"OR {sem_menu}{sem_dono}{grupo})"
     )
-    return sql, [usuario["id"], *setores, limite, *orfaos]
+    return sql, [usuario["id"], *setores, limite, *orfaos, usuario["id"]]
 
 
 # Direção da última mensagem da conversa: 'entrada' = o cliente falou por
@@ -489,7 +517,12 @@ def listar_conversas():
             sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
             condicoes = [sql_visivel]
         condicoes.append("c.atribuida_usuario_id IS NULL")
-        condicoes.append("ct.eh_grupo = 0")
+        # Grupo só entra na fila enquanto ninguém daqui está nele — é o
+        # grupo novo, que alguém precisa pegar. Assim que a primeira
+        # pessoa entra, ele sai da fila e vira conversa dela (e de quem
+        # ela chamar).
+        condicoes.append("(ct.eh_grupo = 0 OR NOT EXISTS ("
+                         "SELECT 1 FROM whatsapp_conversa_usuarios cu WHERE cu.conversa_id = c.id))")
     elif escopo == "sem_menu":
         # Quem entrou em contato e não escolheu nenhum número do menu.
         # Aba própria pra dar pra ver de uma vez quem está travado aí —
@@ -516,8 +549,10 @@ def listar_conversas():
         # não é "fila esperando alguém pegar" — é um lugar onde a equipe
         # conversa, e some da vista se não ficar em nenhuma aba. É onde o
         # WhatsApp também põe: junto das suas conversas.
-        condicoes = ["(c.atribuida_usuario_id = ? OR ct.eh_grupo = 1)"]
-        params = [usuario["id"]]
+        condicoes = ["(c.atribuida_usuario_id = ? OR (ct.eh_grupo = 1 AND EXISTS ("
+                     "SELECT 1 FROM whatsapp_conversa_usuarios cu "
+                     "WHERE cu.conversa_id = c.id AND cu.usuario_id = ?)))"]
+        params = [usuario["id"], usuario["id"]]
     condicoes.append("ct.empresa_id = ?")
     params.append(g.empresa_id)
 
@@ -610,19 +645,45 @@ def pulso():
             (conversa_id,),
         ).fetchone()["v"]
         status = f"{linha['total']}.{linha['lidas'] or 0}.{linha['entregues'] or 0}.{reagidas}"
-    # Não-lidas DESTA pessoa, somando as duas telas. Vai no pulso (e não
+    # O que espera resposta, na visão DESTA pessoa. Vai no pulso (e não
     # numa consulta à parte) porque é a única chamada que já roda sempre:
     # um número a mais aqui é de graça, uma requisição a mais não seria.
+    #
+    # Conta duas coisas, porque as duas exigem alguém: o que já é meu e
+    # tem mensagem não lida, MAIS quem está na fila esperando ser pego.
+    # Só o primeiro seria enganoso — o ícone ficaria limpo com cinco
+    # clientes esperando na fila.
+    # Administrador enxerga a empresa: pra ele o número é tudo o que está
+    # sem resposta, de quem quer que seja. Pro atendente é o que está com
+    # ELE — o alheio não é problema dele e só faria barulho.
+    if usuario["admin"]:
+        dono = ""
+        params_dono = (g.empresa_id,)
+    else:
+        dono = "AND c.atribuida_usuario_id = ?"
+        params_dono = (g.empresa_id, usuario["id"])
     nao_lidas_cliente = conn.execute(
         f"""
         SELECT COALESCE(SUM(c.nao_lidas), 0) AS v
         FROM whatsapp_conversas c
         JOIN whatsapp_contatos ct ON ct.id = c.contato_id
         WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0
-          AND c.atribuida_usuario_id = ?
+          {dono}
         """,
-        (g.empresa_id, usuario["id"]),
+        params_dono,
     ).fetchone()["v"]
+
+    base_fila = ("FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+                 "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0 "
+                 "AND c.atribuida_usuario_id IS NULL "
+                 "AND (ct.eh_grupo = 0 OR NOT EXISTS (SELECT 1 FROM whatsapp_conversa_usuarios cu "
+                 "WHERE cu.conversa_id = c.id))")
+    if usuario["admin"]:
+        na_fila = conn.execute(f"SELECT COUNT(*) AS v {base_fila}", (g.empresa_id,)).fetchone()["v"]
+    else:
+        sql_v, pv = _sql_visivel_nao_admin(conn, usuario)
+        na_fila = conn.execute(f"SELECT COUNT(*) AS v {base_fila} AND {sql_v}",
+                               (g.empresa_id, *pv)).fetchone()["v"]
     nao_lidas_interna = conn.execute(
         """
         SELECT COALESCE(SUM(CASE WHEN c.criado_por_id = ? THEN c.nao_lidas_criador
@@ -634,8 +695,9 @@ def pulso():
     ).fetchone()["v"]
 
     return jsonify({"c": ultima_cliente, "i": ultima_interna, "v": vistos, "s": status,
-                    "n": int(nao_lidas_cliente) + int(nao_lidas_interna),
-                    "nc": int(nao_lidas_cliente), "ni": int(nao_lidas_interna)})
+                    "n": int(nao_lidas_cliente) + int(nao_lidas_interna) + int(na_fila),
+                    "nc": int(nao_lidas_cliente), "ni": int(nao_lidas_interna),
+                    "nf": int(na_fila)})
 
 
 @bp.get("/conversas/<int:conversa_id>")
@@ -682,15 +744,17 @@ def contagem_abas():
 
     # Mesmo critério da lista de "Minhas": o que é meu MAIS os grupos,
     # que são de todo mundo.
-    meu_ou_grupo = "AND (c.atribuida_usuario_id = ? OR ct.eh_grupo = 1)"
+    meu_ou_grupo = ("AND (c.atribuida_usuario_id = ? OR (ct.eh_grupo = 1 AND EXISTS ("
+                    "SELECT 1 FROM whatsapp_conversa_usuarios cu "
+                    "WHERE cu.conversa_id = c.id AND cu.usuario_id = ?)))")
     minhas = conn.execute(
         f"SELECT COUNT(*) AS n {base} {meu_ou_grupo}",
-        (g.empresa_id, usuario["id"]),
+        (g.empresa_id, usuario["id"], usuario["id"]),
     ).fetchone()["n"]
     # Não lidas: é o que de fato pede atenção agora.
     nao_lidas_minhas = conn.execute(
         f"SELECT COALESCE(SUM(c.nao_lidas), 0) AS n {base} {meu_ou_grupo}",
-        (g.empresa_id, usuario["id"]),
+        (g.empresa_id, usuario["id"], usuario["id"]),
     ).fetchone()["n"]
     return jsonify({
         "minhas": minhas,
@@ -1130,9 +1194,11 @@ def enviar_mensagem(conversa_id):
 
     # Responder uma conversa da fila assume ela automaticamente — evita
     # a etapa extra de "Assumir" antes de simplesmente responder.
-    # Num grupo, ninguém assume nada ao responder: o grupo continua de
-    # todos. Só a conversa um a um ganha dono na primeira resposta.
-    if conversa["atribuida_usuario_id"] is None and not conversa["eh_grupo"]:
+    # Num grupo ninguém vira dono: quem responde só entra na lista de quem
+    # participa. Só a conversa um a um ganha dono na primeira resposta.
+    if conversa["eh_grupo"]:
+        _entrar_no_grupo(conn, conversa_id, usuario["id"])
+    elif conversa["atribuida_usuario_id"] is None:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
     # Citada precisa ser desta MESMA conversa: sem conferir, dava pra
@@ -1511,7 +1577,9 @@ def _encaminhar_para_clientes(conn, usuario, destinos_conversas, telefones, mens
                                "nome": destino["contato_nome"] or destino["telefone"],
                                "motivo": _recusa_atribuida(destino)})
             continue
-        if destino["atribuida_usuario_id"] is None and not destino["eh_grupo"]:
+        if destino["eh_grupo"]:
+            _entrar_no_grupo(conn, destino_id, usuario["id"])
+        elif destino["atribuida_usuario_id"] is None:
             whatsapp_service.atribuir_conversa(conn, destino_id, usuario["id"], usuario["id"])
 
         # O comentário vai ANTES do encaminhamento, como mensagem própria:
@@ -1619,6 +1687,72 @@ def _mandar_texto_simples(conn, config, conversa, usuario, texto, agora):
     )
 
 
+@bp.get("/conversas/<int:conversa_id>/participantes")
+@requires_auth
+def listar_participantes_grupo(conversa_id):
+    """Quem da equipe está neste grupo."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_visualizar(usuario, conversa, conn):
+        raise ApiError("Você não participa deste grupo.", status=403, codigo="sem_permissao")
+    return jsonify(_participantes_do_grupo(conn, conversa_id))
+
+
+@bp.post("/conversas/<int:conversa_id>/participantes")
+@requires_auth
+def adicionar_participante_grupo(conversa_id):
+    """Chama um colega pra dentro do grupo.
+
+    Só quem já está no grupo pode chamar alguém — é a mesma lógica do
+    WhatsApp, e evita que alguém de fora se convide."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not conversa["eh_grupo"]:
+        raise ApiError("Esta conversa não é um grupo.", status=400)
+    if not _pode_visualizar(usuario, conversa, conn):
+        raise ApiError("Você não participa deste grupo.", status=403, codigo="sem_permissao")
+
+    ids = [int(x) for x in ((request.get_json(silent=True) or {}).get("usuarios") or [])]
+    if not ids:
+        raise ApiError("Escolha quem você quer chamar pro grupo.", status=400)
+    entraram = []
+    for uid in dict.fromkeys(ids):
+        alvo = conn.execute(
+            "SELECT id, nome FROM usuarios WHERE id = ? AND ativo = 1 AND empresa_id = ? AND acesso_conversas = 1",
+            (uid, g.empresa_id),
+        ).fetchone()
+        if alvo is None:
+            continue
+        _entrar_no_grupo(conn, conversa_id, uid, usuario["id"])
+        entraram.append(alvo["nome"])
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "grupo_participante_adicionado", ", ".join(entraram), conversa_id)
+    return jsonify({"ok": True, "entraram": entraram,
+                    "participantes": _participantes_do_grupo(conn, conversa_id)})
+
+
+@bp.delete("/conversas/<int:conversa_id>/participantes/<int:usuario_id>")
+@requires_auth
+def remover_participante_grupo(conversa_id, usuario_id):
+    """Sai do grupo, ou tira um colega dele."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not conversa["eh_grupo"]:
+        raise ApiError("Esta conversa não é um grupo.", status=400)
+    if not _pode_visualizar(usuario, conversa, conn):
+        raise ApiError("Você não participa deste grupo.", status=403, codigo="sem_permissao")
+    conn.execute(
+        "DELETE FROM whatsapp_conversa_usuarios WHERE conversa_id = ? AND usuario_id = ?",
+        (conversa_id, usuario_id),
+    )
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "grupo_participante_removido", str(usuario_id), conversa_id)
+    return jsonify({"ok": True, "participantes": _participantes_do_grupo(conn, conversa_id)})
+
+
 @bp.post("/conversas/<int:conversa_id>/pedir-liberacao")
 @requires_auth
 def pedir_liberacao(conversa_id):
@@ -1682,9 +1816,25 @@ def assumir_conversa(conversa_id):
     usuario = g.usuario_atual
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    # Assumir um grupo é ENTRAR nele. Não vira dono (grupo comporta várias
+    # pessoas daqui), mas passa a ver e escrever — e some da fila.
+    #
+    # Só dá pra entrar sozinho enquanto o grupo não tem NINGUÉM da equipe
+    # dentro: é o grupo novo, que ainda está na fila esperando alguém.
+    # Depois que a primeira pessoa entra, o grupo é dela e de quem ela
+    # chamar — quem está de fora só entra por convite, nunca por conta
+    # própria. Sem esta trava, qualquer atendente entrava em qualquer
+    # grupo sabendo só o número dele.
     if conversa["eh_grupo"]:
-        raise ApiError("Grupo não tem responsável — todo mundo da equipe já pode ler e escrever nele.",
-                       status=400, codigo="grupo_sem_dono")
+        ja_tem_gente = _participantes_do_grupo(conn, conversa_id)
+        if ja_tem_gente and not _participa_do_grupo(conn, conversa_id, usuario["id"]) and not usuario["admin"]:
+            raise ApiError(
+                "Este grupo já está sendo atendido por " + ", ".join(p["nome"] for p in ja_tem_gente) +
+                ". Peça pra alguém de lá te incluir.",
+                status=403, codigo="grupo_fechado")
+        _entrar_no_grupo(conn, conversa_id, usuario["id"])
+        whatsapp_service.registrar_atividade(conn, usuario["id"], "entrou_no_grupo", conversa["telefone"], conversa_id)
+        return jsonify({"ok": True, "entrou_no_grupo": True})
     if conversa["atribuida_usuario_id"] is not None and not usuario["admin"]:
         raise ApiError(_recusa_atribuida(conversa),
                        status=409, codigo="conversa_atribuida", extra=_dados_do_dono(conversa))
@@ -2123,9 +2273,11 @@ def enviar_figurinha_conversa(conversa_id):
     if figurinha is None:
         raise ApiError("Figurinha não encontrada.", status=404, codigo="nao_encontrado")
 
-    # Num grupo, ninguém assume nada ao responder: o grupo continua de
-    # todos. Só a conversa um a um ganha dono na primeira resposta.
-    if conversa["atribuida_usuario_id"] is None and not conversa["eh_grupo"]:
+    # Num grupo ninguém vira dono: quem responde só entra na lista de quem
+    # participa. Só a conversa um a um ganha dono na primeira resposta.
+    if conversa["eh_grupo"]:
+        _entrar_no_grupo(conn, conversa_id, usuario["id"])
+    elif conversa["atribuida_usuario_id"] is None:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
@@ -2492,9 +2644,11 @@ def enviar_anexo(conversa_id):
         f.write(dados_bytes)
     midia_url = f"/api/v1/whatsapp/uploads/{nome_seguro}"
 
-    # Num grupo, ninguém assume nada ao responder: o grupo continua de
-    # todos. Só a conversa um a um ganha dono na primeira resposta.
-    if conversa["atribuida_usuario_id"] is None and not conversa["eh_grupo"]:
+    # Num grupo ninguém vira dono: quem responde só entra na lista de quem
+    # participa. Só a conversa um a um ganha dono na primeira resposta.
+    if conversa["eh_grupo"]:
+        _entrar_no_grupo(conn, conversa_id, usuario["id"])
+    elif conversa["atribuida_usuario_id"] is None:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)

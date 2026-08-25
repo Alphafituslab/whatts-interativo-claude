@@ -3291,7 +3291,7 @@
          <h2 style="margin:0;">Chat interno</h2>
          <button type="button" class="botao pequeno" data-acao="abrir-nova-conversa-interna">+ Nova conversa</button>
        </div>
-       <p class="dica" style="margin-top:-8px;">Privado — só quem participa da conversa (e admins) consegue ver.</p>
+       <p class="dica" style="margin-top:-8px;">🔒 Privado — só quem participa da conversa pode ver.</p>
        <div class="wpp-abas">
          ${abas.map((a) => `<button type="button" class="wpp-aba ${escopo === a.chave ? "ativa" : ""}" data-acao="chat-interno-trocar-escopo" data-escopo="${a.chave}">${a.label}</button>`).join("")}
        </div>

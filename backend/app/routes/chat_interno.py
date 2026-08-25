@@ -1,8 +1,13 @@
 """
 Chat interno privado entre colaboradores — nada disso passa pelo
-WhatsApp/Evolution API, é 100% interno ao sistema. Mesma régua de
-visibilidade das conversas de clientes: só os dois participantes (mais
-admin, em modo supervisão) veem/agem numa conversa.
+WhatsApp/Evolution API, é 100% interno ao sistema.
+
+Privacidade sem exceção: SÓ os dois participantes veem e agem numa
+conversa. Nem administrador. É de propósito, e é diferente das conversas
+de cliente (essas continuam sob supervisão, porque são trabalho da
+empresa e alguém precisa poder assumir). O registro de atividades
+continua guardando o que aconteceu — quem apagou, quem encaminhou —, só
+não dá pra ler a conversa dos outros.
 """
 import os
 import secrets
@@ -20,12 +25,17 @@ bp = Blueprint("chat_interno", __name__, url_prefix="/api/v1/chat-interno")
 
 
 def _pode_ver(usuario, conversa):
-    # Admin só vê se for admin DA MESMA EMPRESA — sem isso um admin de
-    # outra empresa (mesmo banco compartilhado) conseguiria espiar
-    # conversas internas privadas de outra empresa só por ser admin.
+    """Só as duas pessoas da conversa. Nem administrador.
+
+    Era "os dois participantes OU qualquer admin", e a tela prometia
+    privacidade que não existia. Numa conversa de cliente a supervisão
+    faz sentido: é trabalho da empresa, e alguém precisa poder assumir.
+    Numa conversa entre dois colegas, não — e uma promessa de privacidade
+    ou vale sempre ou não vale nada.
+    """
     if conversa["empresa_id"] != usuario["empresa_id"]:
         return False
-    return usuario["admin"] or usuario["id"] in (conversa["criado_por_id"], conversa["participante_id"])
+    return usuario["id"] in (conversa["criado_por_id"], conversa["participante_id"])
 
 
 def _carregar(conn, empresa_id, conversa_id):
@@ -41,8 +51,10 @@ def listar_conversas():
     usuario = g.usuario_atual
     incluir_encerradas = request.args.get("encerradas") == "1"
     todas = request.args.get("todas") == "1"
-    if todas and not usuario["admin"]:
-        raise ApiError("Só um administrador pode ver todas as conversas internas.", status=403, codigo="sem_permissao")
+    # A aba "Todas" do chat interno acabou: não existe mais ninguém que
+    # veja conversa interna alheia. Pedir por ela não é erro — só devolve
+    # as suas, que é tudo o que existe pra quem pede.
+    todas = False
     conn = get_db()
     return jsonify(chat_interno_service.listar_conversas(
         conn, usuario["id"], incluir_encerradas,
@@ -104,7 +116,10 @@ def listar_mensagens(conversa_id):
     # lado, mas o texto continuava riscado na tela do outro, no meio de
     # uma conversa normal. Supervisão é onde essa informação serve; numa
     # conversa que é dele, só atrapalha.
-    supervisionando = usuario["admin"] and lado is None
+    # Sem supervisão no chat interno, apagada some pra todo mundo. Quem
+    # apagou e quando continua no registro de atividades — o que não
+    # existe mais é ler o conteúdo do que foi apagado entre dois colegas.
+    supervisionando = False
     mensagens = chat_interno_service.listar_mensagens(conn, conversa_id, lado, incluir_excluidas=supervisionando)
     return jsonify(mensagens)
 
@@ -453,7 +468,7 @@ def encaminhar(conversa_id):
         raise ApiError("Escolha pra quem encaminhar.", status=400)
     conn = get_db()
     conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
-    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]) and not usuario["admin"]:
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
     if int(novo_participante_id) == conversa["criado_por_id"]:
         raise ApiError("Não é possível encaminhar para quem iniciou a conversa.", status=400)
