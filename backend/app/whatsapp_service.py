@@ -235,12 +235,18 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
 
 
 def _atualizar_estado_conexao(conn, empresa_id: int, *, status_conexao=None, numero_conectado=None,
-                               qrcode_base64=None, limpar_qrcode=False):
+                               qrcode_base64=None, limpar_qrcode=False, limpar_numero=False):
     campos, valores = [], []
     if status_conexao is not None:
         campos.append("status_conexao = ?")
         valores.append(status_conexao)
-    if numero_conectado is not None:
+    # limpar_numero existe porque numero_conectado=None significa "não
+    # mexe nesse campo". Sem um jeito explícito de apagar, o número de
+    # um WhatsApp que caiu ficava gravado — e o sistema seguia
+    # anunciando um número que não estava mais conectado.
+    if limpar_numero:
+        campos.append("numero_conectado = NULL")
+    elif numero_conectado is not None:
         campos.append("numero_conectado = ?")
         valores.append(numero_conectado)
     if limpar_qrcode:
@@ -363,7 +369,12 @@ def conectar_instancia(conn, config, numero=None):
         time.sleep(1.5)
 
     if qrcode_base64 or codigo_pareamento:
-        _atualizar_estado_conexao(conn, config["empresa_id"], status_conexao="aguardando_qrcode", qrcode_base64=qrcode_base64)
+        # limpar_numero: a partir daqui estamos esperando um APARELHO
+        # NOVO ler o código. Deixar o número anterior na tela enquanto
+        # isso é enganoso — foi o que fez o sistema anunciar o número
+        # velho depois de alguém parear outro aparelho.
+        _atualizar_estado_conexao(conn, config["empresa_id"], status_conexao="aguardando_qrcode",
+                                  qrcode_base64=qrcode_base64, limpar_numero=True)
         _registrar_webhook(config)
     return {"qrcode_base64": qrcode_base64, "codigo_pareamento": codigo_pareamento}
 
@@ -457,14 +468,29 @@ def consultar_status(conn, config):
     # a espera do QR rebaixava pra "desconectado" e o QR sumia da tela.
     if estado == "close" and config.get("status_conexao") == "aguardando_qrcode":
         return "aguardando_qrcode"
-    # Só consulta o número quando ainda não sabe (evita uma chamada extra
-    # à Evolution API em toda consulta de status de rotina).
-    numero_conectado = None
-    if status_conexao == "conectado" and not config.get("numero_conectado"):
-        numero_conectado = _numero_da_instancia(config)
+    # Qual número está conectado.
+    #
+    # Antes só perguntava "quando ainda não sabia", e o número nunca era
+    # apagado ao desconectar. Resultado: quem trocava de aparelho lia o
+    # QR Code com o número novo e a tela continuava mostrando o ANTIGO,
+    # porque o campo estava preenchido e a consulta era pulada.
+    #
+    # Agora: fora do ar, o número é apagado; e a consulta é refeita
+    # sempre que a conexão ACABOU de subir (o estado guardado ainda não
+    # era "conectado"). Em consulta de rotina, com o estado já
+    # "conectado" e o número conhecido, nada é perguntado à Evolution
+    # API — que era o motivo original de pular a chamada.
+    estava_conectado = config.get("status_conexao") == "conectado"
+    numero_conectado, limpar_numero = None, False
+    if status_conexao == "conectado":
+        if not estava_conectado or not config.get("numero_conectado"):
+            numero_conectado = _numero_da_instancia(config)
+    else:
+        limpar_numero = bool(config.get("numero_conectado"))
     _atualizar_estado_conexao(
         conn, config["empresa_id"], status_conexao=status_conexao,
-        numero_conectado=numero_conectado, limpar_qrcode=(status_conexao == "conectado"),
+        numero_conectado=numero_conectado, limpar_numero=limpar_numero,
+        limpar_qrcode=(status_conexao == "conectado"),
     )
     return status_conexao
 
@@ -497,7 +523,8 @@ def desconectar_instancia(conn, config):
         )
     except Exception:
         pass
-    _atualizar_estado_conexao(conn, config["empresa_id"], status_conexao="desconectado", numero_conectado=None, limpar_qrcode=True)
+    _atualizar_estado_conexao(conn, config["empresa_id"], status_conexao="desconectado",
+                              limpar_numero=True, limpar_qrcode=True)
 
 
 def ocultar_todas_conversas(conn, empresa_id: int):
