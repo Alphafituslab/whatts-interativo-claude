@@ -16,7 +16,7 @@ import secrets
 from flask import Blueprint, Response, g, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
-from .. import transcricao, whatsapp_service
+from .. import chat_interno_service, transcricao, whatsapp_service
 from ..context import ApiError, ForbiddenError, get_current_user, get_db, requires_admin, requires_auth
 
 bp = Blueprint("whatsapp", __name__, url_prefix="/api/v1/whatsapp")
@@ -287,6 +287,18 @@ def _conversas_com_tags(conn, rows):
     return [_conversa_para_json(r, mapa_tags.get(r["id"], [])) for r in rows]
 
 
+def _dados_do_dono(conversa):
+    """O que a tela precisa pra oferecer "pedir pra liberar" em vez de só
+    mostrar o erro e deixar a pessoa sem saída."""
+    dados = {"conversa_id": conversa["id"]}
+    chaves = conversa.keys()
+    if "atribuida_usuario_id" in chaves:
+        dados["atribuida_usuario_id"] = conversa["atribuida_usuario_id"]
+    if "atribuida_usuario_nome" in chaves:
+        dados["atribuida_usuario_nome"] = conversa["atribuida_usuario_nome"]
+    return dados
+
+
 def _recusa_atribuida(conversa, complemento=""):
     """Mensagem de recusa dizendo COM QUEM a conversa está.
 
@@ -333,6 +345,17 @@ def _limite_sem_menu(conn):
     return (_dt.datetime.utcnow() - _dt.timedelta(minutes=int(minutos))).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _setores_orfaos(conn):
+    """Setores do menu sem nenhum atendente cadastrado, em cache por
+    requisição (a mesma listagem consulta isso pra dezenas de conversas)."""
+    if not hasattr(g, "_setores_orfaos"):
+        try:
+            g._setores_orfaos = whatsapp_service.setores_sem_ninguem(conn, g.empresa_id)
+        except Exception:
+            g._setores_orfaos = []
+    return g._setores_orfaos
+
+
 def _esperou_demais_sem_menu(conn, conversa):
     if conversa["menu_setor"]:
         return False
@@ -358,7 +381,12 @@ def _pode_visualizar(usuario, conversa, conn=None):
         # cliente que não responde o menu ficava esperando sem ninguém
         # saber. Passado o tempo configurado, vira fila de todos.
         return _esperou_demais_sem_menu(conn, conversa)
-    return conversa["menu_setor"] in whatsapp_service.setores_do_usuario(conn, usuario["id"])
+    if conversa["menu_setor"] in whatsapp_service.setores_do_usuario(conn, usuario["id"]):
+        return True
+    # Setor que existe no menu mas não tem NINGUÉM cadastrado: a conversa
+    # ficava presa numa fila de uma pessoa só — o administrador. Fila sem
+    # dono é fila de todo mundo.
+    return conversa["menu_setor"] in _setores_orfaos(conn)
 
 
 # Mesma regra do _pode_visualizar, em SQL, pra filtrar as listas direto no
@@ -376,15 +404,25 @@ def _sql_visivel_nao_admin(conn, usuario):
     # ficaria invisível pra equipe inteira.
     sem_menu = ("(c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL "
                 "AND COALESCE(c.ultima_mensagem_em, c.criado_em) <= ?)")
+    # Mesma regra do _pode_visualizar: setor do menu sem ninguém
+    # cadastrado é fila de todos, e na hora — não adianta esperar, não
+    # existe ninguém pra quem esperar.
+    orfaos = _setores_orfaos(conn)
+    if orfaos:
+        marcadores_orfaos = ",".join("?" * len(orfaos))
+        sem_dono = (f" OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IN ({marcadores_orfaos}))")
+    else:
+        sem_dono, orfaos = "", []
     if not setores:
-        return f"(c.atribuida_usuario_id = ? OR {sem_menu})", [usuario["id"], limite]
+        return (f"(c.atribuida_usuario_id = ? OR {sem_menu}{sem_dono})",
+                [usuario["id"], limite, *orfaos])
     marcadores = ",".join("?" * len(setores))
     sql = (
         f"(c.atribuida_usuario_id = ? "
         f"OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IN ({marcadores})) "
-        f"OR {sem_menu})"
+        f"OR {sem_menu}{sem_dono})"
     )
-    return sql, [usuario["id"], *setores, limite]
+    return sql, [usuario["id"], *setores, limite, *orfaos]
 
 
 # Direção da última mensagem da conversa: 'entrada' = o cliente falou por
@@ -740,6 +778,10 @@ def editar_contato(contato_id):
     nome = (dados.get("nome") or "").strip()
     if not nome:
         raise ApiError("Informe o nome do contato.", status=400)
+    # Marca que este nome foi escolhido por uma pessoa daqui. A partir
+    # daqui o nome do perfil do WhatsApp não sobrescreve mais — quem
+    # corrigiu tinha motivo (ver obter_ou_criar_contato).
+    conn.execute("UPDATE whatsapp_contatos SET nome_editado = 1 WHERE id = ?", (contato_id,))
 
     telefone = (dados.get("telefone") or "").strip()
     if telefone:
@@ -935,11 +977,11 @@ def iniciar_conversa():
         # quem está esperando e alguém reconhece pelo nome ou telefone.
         # Já atribuída: recusa, dizendo com quem está.
         if conversa["atribuida_usuario_id"] is not None and not _pode_agir(usuario, conversa):
-            raise ApiError(_recusa_atribuida(conversa, " Peça pra ela encaminhar, ou fale com um administrador."),
-                           status=409, codigo="conversa_existente")
+            raise ApiError(_recusa_atribuida(conversa),
+                           status=409, codigo="conversa_atribuida", extra=_dados_do_dono(conversa))
     else:
         nova, _ = whatsapp_service.obter_ou_criar_conversa(conn, contato["id"])
-        conversa = _carregar_conversa(conn, nova["id"])
+        conversa = _carregar_conversa(conn, g.empresa_id, nova["id"])
 
     whatsapp_service.verificar_repeticao_mensagem(conn, g.empresa_id, texto)
 
@@ -1308,6 +1350,52 @@ def marcar_sem_pendencia(conversa_id):
     return jsonify({"ok": True, "sem_pendencia": True})
 
 
+@bp.post("/conversas/<int:conversa_id>/pedir-liberacao")
+@requires_auth
+def pedir_liberacao(conversa_id):
+    """Avisa quem está com a conversa que outra pessoa precisa dela.
+
+    Antes, esbarrar em "esta conversa está com a Andreia" era o fim da
+    linha: ou se levantava da mesa pra pedir, ou se chamava um
+    administrador. O pedido vira uma mensagem no chat interno da pessoa —
+    o mesmo canal onde ela já é avisada de tudo — dizendo qual cliente é e
+    quem precisa. Ela continua decidindo: encerra, encaminha, ou responde
+    que ainda está no meio.
+    """
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    dono_id = conversa["atribuida_usuario_id"]
+    if dono_id is None:
+        raise ApiError("Esta conversa está na fila — não há ninguém pra pedir. Clique em Assumir.", status=400)
+    if dono_id == usuario["id"]:
+        raise ApiError("Esta conversa já é sua.", status=400)
+
+    dono = conn.execute("SELECT * FROM usuarios WHERE id = ? AND empresa_id = ?", (dono_id, g.empresa_id)).fetchone()
+    if dono is None:
+        raise ApiError("Não encontrei o responsável por esta conversa.", status=404, codigo="nao_encontrado")
+
+    quem = conversa["contato_nome"] or conversa["telefone"]
+    motivo = ((request.get_json(silent=True) or {}).get("motivo") or "").strip()
+    texto = (f"🔓 *{usuario['nome']}* precisa falar com *{quem}* ({conversa['telefone']}), "
+             f"que está no seu atendimento.")
+    if motivo:
+        texto += f"\n\nMotivo: {motivo}"
+    texto += "\n\nSe já terminou, é só encerrar o atendimento ou encaminhar a conversa."
+
+    conversa_interna = chat_interno_service.buscar_conversa_existente(conn, usuario["id"], dono_id)
+    if conversa_interna:
+        chat_interno_service.enviar_mensagem(conn, conversa_interna, usuario["id"], texto)
+    else:
+        setor = (dono["setor"] or "").strip() or "Geral"
+        conversa_interna = chat_interno_service.iniciar_conversa(conn, usuario["id"], dono_id, setor, texto)
+
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "liberacao_pedida", f"{conversa['telefone']} -> {dono['nome']}", conversa_id
+    )
+    return jsonify({"ok": True, "avisado": dono["nome"], "chat_interno_id": conversa_interna})
+
+
 @bp.post("/conversas/<int:conversa_id>/assumir")
 @requires_auth
 def assumir_conversa(conversa_id):
@@ -1326,8 +1414,8 @@ def assumir_conversa(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if conversa["atribuida_usuario_id"] is not None and not usuario["admin"]:
-        raise ApiError(_recusa_atribuida(conversa, " Peça pra ela encaminhar, ou fale com um administrador."),
-                       status=409, codigo="ja_atribuida")
+        raise ApiError(_recusa_atribuida(conversa),
+                       status=409, codigo="conversa_atribuida", extra=_dados_do_dono(conversa))
     if not usuario["admin"]:
         if not conversa["menu_setor"] and not _esperou_demais_sem_menu(conn, conversa):
             raise ApiError(
@@ -1337,7 +1425,9 @@ def assumir_conversa(conversa_id):
         # Compara com TODOS os setores da pessoa: quem atende Televendas
         # e Financeiro pode assumir conversa dos dois. Antes olhava só o
         # setor principal e barrava o segundo.
-        if conversa["menu_setor"] and conversa["menu_setor"] not in whatsapp_service.setores_do_usuario(conn, usuario["id"]):
+        if (conversa["menu_setor"]
+                and conversa["menu_setor"] not in whatsapp_service.setores_do_usuario(conn, usuario["id"])
+                and conversa["menu_setor"] not in _setores_orfaos(conn)):
             raise ApiError(
                 f"Essa conversa é do setor {conversa['menu_setor']} — você só pode assumir conversas dos setores que atende.",
                 status=403, codigo="sem_permissao")

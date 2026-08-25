@@ -62,7 +62,9 @@ def create_app(test_config: dict = None) -> Flask:
 
     @app.errorhandler(ApiError)
     def _handle_api_error(err: ApiError):
-        return jsonify({"erro": err.codigo, "mensagem": err.mensagem}), err.status
+        corpo = {"erro": err.codigo, "mensagem": err.mensagem}
+        corpo.update(getattr(err, "extra", None) or {})
+        return jsonify(corpo), err.status
 
     @app.errorhandler(404)
     def _handle_404(err):

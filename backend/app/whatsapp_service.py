@@ -1211,7 +1211,7 @@ def _processar_status_mensagem(conn, empresa_id: int, dados):
     return {"processado": True, "tipo": "status_mensagem", "quantidade": atualizados}
 
 
-def _autor_da_mensagem_de_grupo(dados: dict, chave: dict):
+def _autor_da_mensagem_de_grupo(dados: dict, chave: dict, conn=None, empresa_id=None):
     """Quem falou, numa mensagem de grupo.
 
     A Evolution API não põe isso sempre no mesmo lugar — muda com a
@@ -1252,6 +1252,20 @@ def _autor_da_mensagem_de_grupo(dados: dict, chave: dict):
 
     # pushName, num grupo, é o nome de quem FALOU (não o do grupo).
     nome = dados.get("pushName") or dados.get("notifyName") or dados.get("verifiedBizName") or None
+
+    # Se o WhatsApp não mandou o nome mas mandou o número, e essa pessoa
+    # já é contato conhecido, mostra o nome que a equipe já usa pra ela —
+    # ver "Tabata" no grupo vale muito mais do que ver um número.
+    if telefone and not nome and conn is not None and empresa_id is not None:
+        try:
+            achado = conn.execute(
+                "SELECT nome FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ?",
+                (empresa_id, telefone),
+            ).fetchone()
+            if achado and achado["nome"]:
+                nome = achado["nome"]
+        except Exception:
+            pass
 
     if not telefone and not nome:
         try:
@@ -1460,12 +1474,34 @@ def _precisa_tentar_foto(contato: dict) -> bool:
     return (datetime.datetime.utcnow() - quando).days >= DIAS_RETENTAR_FOTO
 
 
+def _parece_telefone(valor) -> bool:
+    """Nome que na verdade é o número — acontece quando o contato nasceu
+    de um cadastro manual e ninguém digitou o nome."""
+    if not valor:
+        return True
+    limpo = re.sub(r"[^0-9]", "", str(valor))
+    return len(limpo) >= 8 and len(limpo) >= len(str(valor).strip()) - 4
+
+
 def obter_ou_criar_contato(conn, empresa_id: int, telefone: str, nome: str = None):
     row = conn.execute("SELECT * FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ?", (empresa_id, telefone)).fetchone()
     if row:
-        if nome and not row["nome"]:
-            conn.execute("UPDATE whatsapp_contatos SET nome = ?, atualizado_em = ? WHERE id = ?",
-                         (nome, _now_iso(), row["id"]))
+        # O nome que o WhatsApp manda é o que a própria pessoa escolheu no
+        # perfil dela — melhor do que qualquer coisa que a gente adivinhe.
+        # Grava assim que chega, e continua acompanhando se a pessoa mudar
+        # o nome depois.
+        #
+        # A única coisa que NUNCA é sobrescrita é um nome que alguém daqui
+        # digitou (nome_editado = 1): quando o atendente corrige "Zé da
+        # oficina", é porque o nome do perfil não servia — deixar o
+        # WhatsApp desfazer isso na mensagem seguinte seria pior do que
+        # não sincronizar nada.
+        editado = row["nome_editado"] if "nome_editado" in row.keys() else 0
+        atual = row["nome"]
+        if nome and not editado and nome.strip() != (atual or "").strip():
+            if not atual or _parece_telefone(atual) or not _parece_telefone(nome):
+                conn.execute("UPDATE whatsapp_contatos SET nome = ?, atualizado_em = ? WHERE id = ?",
+                             (nome.strip(), _now_iso(), row["id"]))
         return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (row["id"],)).fetchone())
     agora = _now_iso()
     cur = conn.execute(
@@ -1968,7 +2004,7 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     autor_nome, autor_telefone = None, None
     if de_grupo:
         telefone = _somente_digitos(telefone_bruto)
-        autor_nome, autor_telefone = _autor_da_mensagem_de_grupo(dados, chave)
+        autor_nome, autor_telefone = _autor_da_mensagem_de_grupo(dados, chave, conn, empresa_id)
     else:
         # Normaliza pro formato completo com o 9 (ver normalizar_telefone)
         # — sem isso, a mesma pessoa vira dois contatos diferentes
@@ -2263,6 +2299,29 @@ def setores_por_usuario(conn, usuario_ids: list):
     for r in rows:
         mapa.setdefault(r["usuario_id"], []).append(r["setor"])
     return mapa
+
+
+def setores_sem_ninguem(conn, empresa_id: int):
+    """Setores que aparecem no menu do cliente mas não têm NENHUM usuário
+    ativo cadastrado.
+
+    Existe porque o menu é uma lista digitada à mão na configuração: dá
+    pra deixar lá um setor que ninguém atende (alguém saiu da empresa, ou
+    o setor foi criado antes de ter gente). O cliente escolhe esse número,
+    a conversa recebe aquele setor, e a partir daí ela só aparece pra
+    administrador — some da fila de todo mundo sem ninguém perceber."""
+    cadastrados = {
+        r["setor"] for r in conn.execute(
+            """
+            SELECT DISTINCT us.setor AS setor
+            FROM usuario_setores us
+            JOIN usuarios u ON u.id = us.usuario_id
+            WHERE u.ativo = 1 AND u.empresa_id = ? AND u.acesso_conversas = 1
+            """,
+            (empresa_id,),
+        ).fetchall()
+    }
+    return [s for s in obter_setores(conn, empresa_id) if s not in cadastrados]
 
 
 def setores_com_alguem_online(conn, empresa_id: int):

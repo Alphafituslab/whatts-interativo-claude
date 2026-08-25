@@ -12,11 +12,15 @@ from . import security
 
 
 class ApiError(Exception):
-    def __init__(self, mensagem, status=400, codigo="erro"):
+    def __init__(self, mensagem, status=400, codigo="erro", extra=None):
         super().__init__(mensagem)
         self.mensagem = mensagem
         self.status = status
         self.codigo = codigo
+        # Dados que a tela precisa pra oferecer uma saída em vez de só
+        # mostrar o erro. Ex.: "esta conversa está com a Andreia" vira um
+        # botão de pedir pra ela liberar, porque vem junto o id dela.
+        self.extra = extra or {}
 
 
 class AuthError(ApiError):

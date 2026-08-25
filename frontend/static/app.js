@@ -139,6 +139,9 @@
       const erro = new Error(dados.mensagem || `Erro ${resp.status} na requisição.`);
       erro.status = resp.status;
       erro.codigo = dados.erro;
+      // O corpo inteiro, não só a frase: é dele que sai "com quem está a
+      // conversa" pra tela poder oferecer o pedido de liberação.
+      erro.dados = dados;
       throw erro;
     }
     return dados;
@@ -563,6 +566,50 @@
     });
   }
 
+  // Esbarrar em "esta conversa está com outra pessoa" era o fim da linha:
+  // não dava pra saber com quem, nem pedir. Agora diz o nome e oferece
+  // avisar a pessoa pelo chat interno — e, pra administrador, a opção de
+  // devolver a conversa pra fila na hora.
+  function modalConversaPresa(erro) {
+    const d = erro.dados || {};
+    const dono = d.atribuida_usuario_nome || "outra pessoa";
+    const id = d.conversa_id;
+    const souAdmin = !!(state.usuarioAtual && state.usuarioAtual.admin);
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🔒 Atendimento em andamento</h3>
+      <p>Esta conversa está com <strong>${escapeHtml(dono)}</strong>. Enquanto o atendimento não for encerrado ou encaminhado, ela continua sendo dela.</p>
+      <div class="campo">
+        <label class="rotulo-forte">Quer avisar ${escapeHtml(dono)}? (opcional: diga o porquê)</label>
+        <input name="motivo" maxlength="140" placeholder="Ex.: o cliente me ligou pedindo o orçamento" autofocus>
+      </div>
+      <p class="dica">O aviso chega no chat interno de ${escapeHtml(dono)}, com o nome do cliente. Quem decide encerrar continua sendo ela.</p>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Deixar como está</button>
+        ${souAdmin && id ? `<button type="button" class="botao secundario" data-acao="devolver-para-fila" data-id="${id}">Devolver pra fila</button>` : ""}
+        ${id ? `<button type="button" class="botao" data-pedir-liberacao data-id="${id}">Avisar ${escapeHtml(dono)}</button>` : ""}
+      </div>`);
+    const botao = wrap.querySelector("[data-pedir-liberacao]");
+    if (botao) {
+      botao.addEventListener("click", async () => {
+        botao.disabled = true;
+        botao.textContent = "Avisando…";
+        try {
+          const r = await chamarApi(`/whatsapp/conversas/${id}/pedir-liberacao`, {
+            method: "POST", body: { motivo: wrap.querySelector('input[name="motivo"]').value.trim() },
+          });
+          fecharModais();
+          definirFlash("ok", `Avisei ${r.avisado} no chat interno. Assim que ela liberar, a conversa aparece pra você.`);
+        } catch (e2) {
+          botao.disabled = false;
+          botao.textContent = "Avisar";
+          definirFlash("erro", e2.message || "Não consegui avisar agora.");
+        }
+        montarRota();
+      });
+    }
+    return wrap;
+  }
+
   function abrirModal(html) {
     const wrap = document.createElement("div");
     wrap.className = "fundo-modal";
@@ -572,6 +619,16 @@
     return wrap;
   }
   function fecharModais() { document.querySelectorAll(".fundo-modal").forEach((m) => m.remove()); }
+
+  // Fecha só a janela de cima: com duas abertas (uma janela que abriu
+  // outra), Esc deve voltar um passo, não varrer as duas.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const abertas = document.querySelectorAll(".fundo-modal");
+    if (!abertas.length) return;
+    e.preventDefault();
+    abertas[abertas.length - 1].remove();
+  });
 
   // Menu de contexto (botão direito) num item da lista de conversas —
   // atalho pra agendar/lembrar/arquivar/excluir sem abrir a conversa.
@@ -4499,7 +4556,9 @@
         try {
           await chamarApi(`/whatsapp/conversas/${id}/assumir`, { method: "POST" });
         } catch (erro) {
-          if (erro.codigo === "ja_atribuida") { definirFlash("erro", "Essa conversa já foi assumida por outra pessoa."); return renderWhatsapp(null); }
+          if (erro.codigo === "conversa_atribuida" || erro.codigo === "ja_atribuida") {
+            return modalConversaPresa(erro);
+          }
           throw erro;
         }
         state.escopoConversas = "minhas";
@@ -4572,6 +4631,13 @@
       }
       case "limpar-busca-conversas": {
         state.buscaConversas = null;
+        return renderWhatsapp(null);
+      }
+      case "devolver-para-fila": {
+        const id = Number(alvo.dataset.id);
+        await chamarApi(`/whatsapp/conversas/${id}/atribuir`, { method: "PUT", body: { usuario_id: null } });
+        fecharModais();
+        definirFlash("ok", "Conversa devolvida pra fila — qualquer pessoa do setor já pode assumir.");
         return renderWhatsapp(null);
       }
       case "abrir-nova-conversa": modalNovaConversa(); return;
@@ -5526,10 +5592,19 @@
         return renderWhatsappConfiguracao();
       }
       case "iniciar-conversa": {
-        const resp = await chamarApi("/whatsapp/conversas", {
-          method: "POST",
-          body: { telefone: dados.get("telefone"), nome: dados.get("nome") || undefined, texto: dados.get("texto") },
-        });
+        let resp;
+        try {
+          resp = await chamarApi("/whatsapp/conversas", {
+            method: "POST",
+            body: { telefone: dados.get("telefone"), nome: dados.get("nome") || undefined, texto: dados.get("texto") },
+          });
+        } catch (erro) {
+          if (erro.codigo === "conversa_atribuida" || erro.codigo === "conversa_existente") {
+            fecharModais();
+            return modalConversaPresa(erro);
+          }
+          throw erro;
+        }
         fecharModais();
         definirFlash(resp.envio_ok ? "ok" : "erro", resp.envio_ok ? "Conversa iniciada." : `Conversa criada, mas o envio falhou: ${resp.aviso}`);
         state.escopoConversas = "minhas";
