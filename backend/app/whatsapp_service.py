@@ -202,6 +202,13 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     else:
         expediente_mensagem = anterior.get("expediente_mensagem")
     sla_minutos_alerta = int(dados["sla_minutos_alerta"]) if dados.get("sla_minutos_alerta") else (anterior.get("sla_minutos_alerta") or 15)
+    # Quantos minutos esperar antes de jogar na fila de todos um cliente
+    # que não escolheu setor nenhum no menu.
+    if dados.get("minutos_liberar_sem_menu") not in (None, ""):
+        minutos_sem_menu = max(0, min(120, int(dados["minutos_liberar_sem_menu"])))
+    else:
+        atual = anterior.get("minutos_liberar_sem_menu")
+        minutos_sem_menu = 2 if atual is None else atual
     if "saudacao_mensagem" in dados:
         saudacao_mensagem = (dados.get("saudacao_mensagem") or "").strip() or None
     else:
@@ -211,8 +218,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         """
         INSERT INTO configuracoes_whatsapp (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome,
                                               webhook_segredo, webhook_base_url, expediente_ativo, expediente_janelas,
-                                              expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, status_conexao, atualizado_em, atualizado_por)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?)
+                                              expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -225,11 +232,13 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             expediente_mensagem = excluded.expediente_mensagem,
             saudacao_mensagem = excluded.saudacao_mensagem,
             sla_minutos_alerta = excluded.sla_minutos_alerta,
+            minutos_liberar_sem_menu = excluded.minutos_liberar_sem_menu,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
         (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome, webhook_segredo, webhook_base_url,
-         expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, empresa_id, _now_iso(), usuario_id),
+         expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta,
+         minutos_sem_menu, empresa_id, _now_iso(), usuario_id),
     )
     return obter_configuracao(conn, empresa_id)
 

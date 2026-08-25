@@ -1793,6 +1793,7 @@
         todas: "Nenhuma conversa no sistema ainda.",
         minhas: "Nenhuma conversa em andamento — as que estão esperando resposta ficam na aba Fila.",
         arquivadas: "Nenhuma conversa arquivada.",
+        sem_menu: "Ninguém parado no menu agora. 👌 Aqui aparecem os clientes que escreveram e não escolheram nenhum número — passados alguns minutos, eles entram na Fila de todos.",
       };
       return `<div class="wpp-lista-vazia"><div class="wpp-lista-vazia-icone">📭</div><p class="texto-suave">${msgs[state.escopoConversas]}</p></div>`;
     }
@@ -2143,7 +2144,8 @@
     const usuario = state.usuarioAtual;
     const abas = [
       { chave: "minhas", label: "Minhas", dica: "Conversas em andamento — você já respondeu, aguardando o cliente" },
-      { chave: "fila", label: "Fila", dica: "Aguardando resposta sua — inclui as ainda sem dono do seu setor" },
+      { chave: "fila", label: "Fila", dica: "Aguardando resposta sua — inclui as ainda sem dono do seu setor, e as que ninguém escolheu setor e já esperaram demais" },
+      { chave: "sem_menu", label: "Sem escolha", dica: "Clientes que escreveram e não escolheram nenhum número do menu. Passados alguns minutos, eles também entram na Fila de todos, até alguém assumir." },
     ];
     if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
     abas.push({ chave: "arquivadas", label: "Arquivadas" });
@@ -2173,6 +2175,7 @@
 
   function _queryConversas() {
     const arquivadas = state.escopoConversas === "arquivadas";
+    // "sem_menu" vai direto pro servidor, que já sabe filtrar.
     const escopoQuery = arquivadas ? (state.usuarioAtual.admin ? "todas" : "minhas") : state.escopoConversas;
     const etiqueta = state.tagFiltro ? `&tag_id=${state.tagFiltro}` : "";
     return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}`;

@@ -296,6 +296,25 @@ def _carregar_conversa(conn, empresa_id, conversa_id):
     return conversa
 
 
+def _limite_sem_menu(conn):
+    """Instante a partir do qual uma conversa sem setor já esperou
+    demais e vira fila de todo mundo. Devolve texto ISO pra comparar
+    direto no SQL."""
+    import datetime as _dt
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    minutos = config.get("minutos_liberar_sem_menu")
+    if minutos is None:
+        minutos = 2
+    return (_dt.datetime.utcnow() - _dt.timedelta(minutes=int(minutos))).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _esperou_demais_sem_menu(conn, conversa):
+    if conversa["menu_setor"]:
+        return False
+    quando = conversa["ultima_mensagem_em"] or conversa["criado_em"]
+    return bool(quando) and quando <= _limite_sem_menu(conn)
+
+
 def _pode_visualizar(usuario, conversa, conn=None):
     """Atribuída: só o dono (e o admin). Sem dono (na fila): só quem
     atende o setor pra onde o cliente foi direcionado — mesma régua do
@@ -308,10 +327,13 @@ def _pode_visualizar(usuario, conversa, conn=None):
         return True
     if conversa["atribuida_usuario_id"] is not None:
         return conversa["atribuida_usuario_id"] == usuario["id"]
+    conn = conn or get_db()
     if not conversa["menu_setor"]:
-        return False
-    setores = whatsapp_service.setores_do_usuario(conn or get_db(), usuario["id"])
-    return conversa["menu_setor"] in setores
+        # Sem setor: era invisível pra todo mundo menos o admin, e o
+        # cliente que não responde o menu ficava esperando sem ninguém
+        # saber. Passado o tempo configurado, vira fila de todos.
+        return _esperou_demais_sem_menu(conn, conversa)
+    return conversa["menu_setor"] in whatsapp_service.setores_do_usuario(conn, usuario["id"])
 
 
 # Mesma regra do _pode_visualizar, em SQL, pra filtrar as listas direto no
@@ -323,15 +345,21 @@ def _sql_visivel_nao_admin(conn, usuario):
     Vira função (em vez de constante) porque a pessoa pode atender vários
     setores — a quantidade de marcadores muda de um usuário pro outro."""
     setores = whatsapp_service.setores_do_usuario(conn, usuario["id"])
+    limite = _limite_sem_menu(conn)
+    # Conversa sem setor que já esperou demais entra na fila de todos —
+    # é o cliente que não escolheu número nenhum no menu e, sem isso,
+    # ficaria invisível pra equipe inteira.
+    sem_menu = ("(c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL "
+                "AND COALESCE(c.ultima_mensagem_em, c.criado_em) <= ?)")
     if not setores:
-        # Sem setor nenhum: só enxerga o que for atribuído a ela.
-        return "(c.atribuida_usuario_id = ?)", [usuario["id"]]
+        return f"(c.atribuida_usuario_id = ? OR {sem_menu})", [usuario["id"], limite]
     marcadores = ",".join("?" * len(setores))
     sql = (
-        f"(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL "
-        f"AND c.menu_setor IS NOT NULL AND c.menu_setor IN ({marcadores})))"
+        f"(c.atribuida_usuario_id = ? "
+        f"OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IN ({marcadores})) "
+        f"OR {sem_menu})"
     )
-    return sql, [usuario["id"], *setores]
+    return sql, [usuario["id"], *setores, limite]
 
 
 # Direção da última mensagem da conversa: 'entrada' = o cliente falou por
@@ -379,6 +407,17 @@ def listar_conversas():
             sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
             condicoes = [sql_visivel]
         condicoes.append(f"({_SQL_ULTIMA_DIRECAO} IS NULL OR {_SQL_ULTIMA_DIRECAO} = 'entrada')")
+    elif escopo == "sem_menu":
+        # Quem entrou em contato e não escolheu nenhum número do menu.
+        # Aba própria pra dar pra ver de uma vez quem está travado aí —
+        # inclusive os que ainda não completaram o tempo de espera.
+        if usuario["admin"]:
+            condicoes, params = [], []
+        else:
+            sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
+            condicoes = [sql_visivel]
+        condicoes.append("c.menu_setor IS NULL")
+        condicoes.append("c.atribuida_usuario_id IS NULL")
     elif escopo == "todas":
         if not usuario["admin"]:
             raise ApiError("Só um administrador pode ver todas as conversas.", status=403, codigo="sem_permissao")
@@ -702,11 +741,13 @@ def iniciar_conversa():
     ).fetchone()
     if conversa_existente:
         conversa = _carregar_conversa(conn, g.empresa_id, conversa_existente["id"])
-        if not _pode_agir(usuario, conversa):
-            raise ApiError(
-                f"Já existe uma conversa com este número, atribuída a {conversa['atribuida_usuario_id'] and 'outro usuário' or 'ninguém ainda'}.",
-                status=409, codigo="conversa_existente",
-            )
+        # Na fila (sem dono): qualquer atendente pode puxar pra si, mesmo
+        # que o cliente ainda não tenha escolhido setor — é o caso de
+        # quem está esperando e alguém reconhece pelo nome ou telefone.
+        # Já atribuída: recusa, dizendo com quem está.
+        if conversa["atribuida_usuario_id"] is not None and not _pode_agir(usuario, conversa):
+            raise ApiError(_recusa_atribuida(conversa, " Peça pra ela encaminhar, ou fale com um administrador."),
+                           status=409, codigo="conversa_existente")
     else:
         nova, _ = whatsapp_service.obter_ou_criar_conversa(conn, contato["id"])
         conversa = _carregar_conversa(conn, nova["id"])
@@ -1023,12 +1064,15 @@ def assumir_conversa(conversa_id):
         raise ApiError(_recusa_atribuida(conversa, " Peça pra ela encaminhar, ou fale com um administrador."),
                        status=409, codigo="ja_atribuida")
     if not usuario["admin"]:
-        if not conversa["menu_setor"]:
-            raise ApiError("Essa conversa ainda não tem setor definido — só um administrador pode assumi-la.", status=403, codigo="sem_permissao")
+        if not conversa["menu_setor"] and not _esperou_demais_sem_menu(conn, conversa):
+            raise ApiError(
+                "Essa conversa acabou de chegar e o cliente ainda pode escolher o setor. "
+                "Se ele não escolher, ela aparece na fila de todos em instantes.",
+                status=403, codigo="sem_permissao")
         # Compara com TODOS os setores da pessoa: quem atende Televendas
         # e Financeiro pode assumir conversa dos dois. Antes olhava só o
         # setor principal e barrava o segundo.
-        if conversa["menu_setor"] not in whatsapp_service.setores_do_usuario(conn, usuario["id"]):
+        if conversa["menu_setor"] and conversa["menu_setor"] not in whatsapp_service.setores_do_usuario(conn, usuario["id"]):
             raise ApiError(
                 f"Essa conversa é do setor {conversa['menu_setor']} — você só pode assumir conversas dos setores que atende.",
                 status=403, codigo="sem_permissao")
