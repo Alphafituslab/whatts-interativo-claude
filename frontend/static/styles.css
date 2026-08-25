@@ -386,9 +386,22 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-chat-vazio { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 32px; }
 .wpp-chat-vazio-icone { font-size: 44px; opacity: 0.45; }
 
-.wpp-chat-cabecalho { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--borda); flex-shrink: 0; }
-.wpp-chat-nome { font-weight: 700; font-size: 13px; }
-.wpp-chat-telefone { font-size: 11px; }
+/* Identidade de um lado, ações do outro. Quando não cabem na mesma
+   linha, as ações descem inteiras pra linha de baixo — o que não pode
+   acontecer é uma peça espremer a outra até o texto se sobrepor. */
+.wpp-chat-cabecalho {
+  display: flex; align-items: center; gap: 10px; row-gap: 8px;
+  padding: 10px 14px; border-bottom: 1px solid var(--borda);
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.wpp-chat-identidade { flex: 1 1 210px; min-width: 0; }
+/* Nome sempre numa linha só: quebrar "Clayton Borges" em duas empurrava
+   o telefone pra debaixo dos ícones. Nome comprido corta com reticências
+   — o nome inteiro continua no title. */
+.wpp-chat-nome { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 5px; min-width: 0; }
+.wpp-chat-nome-texto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wpp-chat-nome .botao-icone { flex-shrink: 0; }
+.wpp-chat-telefone { font-size: 11px; line-height: 1.45; }
 .wpp-botao-voltar { display: none; font-size: 18px; }
 
 .wpp-mensagens {
@@ -457,7 +470,13 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-conversa-dono { font-size: 11px; color: var(--texto-suave); margin-top: 3px; }
 .wpp-botao-assumir { flex-shrink: 0; align-self: center; }
 
-.wpp-chat-acoes { display: flex; gap: 6px; flex-shrink: 0; }
+/* Encostadas à direita e livres pra quebrar em duas fileiras. Antes
+   eram flex-shrink: 0 puro: nunca cediam espaço, e o que cedia era
+   sempre o nome do cliente. */
+.wpp-chat-acoes {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  align-items: center; justify-content: flex-end; margin-left: auto;
+}
 .wpp-conversa-fechada-aviso {
   margin: 0; padding: 8px 18px; font-size: 12px; text-align: center; color: var(--texto-suave);
   background: var(--superficie-2); border-bottom: 1px solid var(--borda);
@@ -1338,4 +1357,14 @@ nav { perspective: 800px; }
   background: color-mix(in srgb, var(--amarelo) 12%, transparent);
   font-size: 13.5px;
   line-height: 1.55;
+}
+
+/* cabecalho compacto em tela estreita */
+/* Numa tela estreita o cabeçalho chegava a três fileiras de botões e
+   comia metade da conversa. Aqui os botões ficam menores e as palavras
+   mais curtas — o que eles fazem continua no title. */
+@media (max-width: 1280px) {
+  .wpp-chat-acoes .botao.pequeno { padding: 5px 9px; font-size: 11.5px; }
+  .wpp-chat-acoes .botao-icone { width: 28px; height: 28px; font-size: 13px; }
+  .wpp-chat-cabecalho { padding: 8px 12px; }
 }

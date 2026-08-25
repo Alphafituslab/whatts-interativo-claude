@@ -78,6 +78,13 @@ EXTENSOES_TIPO = {
 }
 
 
+# Formatos de onde dá pra tirar áudio pra converter (ver
+# /audio-compativel). É mais largo que EXTENSOES_TIPO["audio"] de
+# propósito: inclui o .webm da gravação do navegador e o .oga que chega
+# do WhatsApp.
+EXTENSOES_AUDIO_CONVERSIVEL = {"mp3", "ogg", "oga", "opus", "wav", "m4a", "aac", "amr", "webm", "mp4"}
+
+
 def _classificar_tipo(nome_arquivo: str) -> str:
     ext = nome_arquivo.rsplit(".", 1)[-1].lower() if "." in nome_arquivo else ""
     for tipo, extensoes in EXTENSOES_TIPO.items():
@@ -968,7 +975,7 @@ def iniciar_conversa():
     contato = whatsapp_service.obter_ou_criar_contato(conn, g.empresa_id, telefone, nome)
 
     conversa_existente = conn.execute(
-        "SELECT id FROM whatsapp_conversas WHERE contato_id = ? ORDER BY id DESC LIMIT 1", (contato["id"],)
+        "SELECT id FROM whatsapp_conversas WHERE contato_id = ? AND excluida_em IS NULL ORDER BY id DESC LIMIT 1", (contato["id"],)
     ).fetchone()
     if conversa_existente:
         conversa = _carregar_conversa(conn, g.empresa_id, conversa_existente["id"])
@@ -1393,7 +1400,7 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
             continue
         contato = whatsapp_service.obter_ou_criar_contato(conn, g.empresa_id, tel)
         existente = conn.execute(
-            "SELECT id FROM whatsapp_conversas WHERE contato_id = ? ORDER BY id DESC LIMIT 1", (contato["id"],)
+            "SELECT id FROM whatsapp_conversas WHERE contato_id = ? AND excluida_em IS NULL ORDER BY id DESC LIMIT 1", (contato["id"],)
         ).fetchone()
         if existente:
             destinos_conversas.append(existente["id"])
@@ -2453,6 +2460,51 @@ def baixar_logo(nome_arquivo):
     resp = send_from_directory(PASTA_MARCA, nome_arquivo)
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    return resp
+
+
+@bp.get("/audio-compativel/<path:nome_arquivo>")
+def audio_compativel(nome_arquivo):
+    """Devolve o áudio em .m4a (AAC), o único formato que toca em todos os
+    aparelhos — inclusive iPhone.
+
+    Sem autenticação pela mesma razão do /uploads abaixo: quem serve isto
+    é a tag <audio> do navegador, que não manda header nenhum. O controle
+    de acesso continua sendo o nome aleatório de 16 hex do arquivo.
+
+    Converte na primeira vez e guarda o resultado ao lado do original.
+    """
+    nome_seguro = secure_filename(nome_arquivo)
+    origem = os.path.join(PASTA_UPLOADS, nome_seguro)
+    if not nome_seguro or not os.path.isfile(origem):
+        raise ApiError("Áudio não encontrado.", status=404, codigo="nao_encontrado")
+    # Lista própria, e não _classificar_tipo: .webm aqui é o contêiner da
+    # gravação de voz do navegador (que em outros contextos é vídeo), e
+    # .oga é o que o WhatsApp manda — nenhum dos dois cai em "audio" na
+    # classificação geral. O que importa nesta rota é só se o ffmpeg
+    # consegue tirar uma trilha de áudio do arquivo.
+    if nome_seguro.rsplit(".", 1)[-1].lower() not in EXTENSOES_AUDIO_CONVERSIVEL:
+        raise ApiError("Este arquivo não é um áudio.", status=400)
+
+    destino_nome = os.path.splitext(nome_seguro)[0] + ".m4a"
+    destino = os.path.join(PASTA_UPLOADS, destino_nome)
+    if not os.path.exists(destino) or os.path.getsize(destino) == 0:
+        import subprocess
+        try:
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", origem,
+                 "-vn", "-c:a", "aac", "-b:a", "64k", "-ar", "44100", "-ac", "1", destino],
+                check=True, timeout=180, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+        except Exception:
+            # Sem conversão, devolve o original: num navegador que já
+            # tocava, continua tocando. Só o iPhone fica sem — que é
+            # exatamente onde já estava antes.
+            return send_from_directory(PASTA_UPLOADS, nome_seguro)
+    resp = send_from_directory(PASTA_UPLOADS, destino_nome)
+    resp.headers["Content-Type"] = "audio/mp4"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Cache-Control"] = "private, max-age=86400"
     return resp
 
 

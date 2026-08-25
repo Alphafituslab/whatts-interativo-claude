@@ -2224,6 +2224,25 @@
     }
   }
 
+  // O navegador escolhe o formato que consegue tocar.
+  //
+  // O original vem primeiro de propósito: Chrome, Edge e Firefox tocam
+  // .webm e .oga direto, sem custo nenhum. Só o Safari (e portanto todo
+  // navegador de iPhone) desce pro .m4a — e é só aí que a conversão
+  // acontece, uma vez por áudio.
+  function htmlPlayerAudio(midiaUrl) {
+    const original = urlImagemSegura(midiaUrl);
+    const nome = (midiaUrl || "").split("?")[0].split("/").pop();
+    const compativel = urlImagemSegura(`/api/v1/whatsapp/audio-compativel/${nome}`);
+    const ext = (nome.split(".").pop() || "").toLowerCase();
+    const tipoOriginal = { webm: "audio/webm", oga: "audio/ogg", ogg: "audio/ogg",
+                           mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav" }[ext] || "";
+    return `<audio controls preload="metadata">
+      <source src="${original}"${tipoOriginal ? ` type="${tipoOriginal}"` : ""}>
+      <source src="${compativel}" type="audio/mp4">
+    </audio>`;
+  }
+
   function htmlAnexoBolha(m) {
     if (!m.midia_url) return "";
     if (m.tipo === "figurinha") return `
@@ -2245,7 +2264,7 @@
     // reouvir um áudio (enviado ou recebido) tinha que abrir noutra aba.
     if (m.tipo === "audio") return `
       <div class="wpp-bolha-audio">
-        <audio controls preload="metadata" src="${urlImagemSegura(m.midia_url)}"></audio>
+        ${htmlPlayerAudio(m.midia_url)}
         <a class="wpp-bolha-baixar wpp-bolha-baixar-audio" href="${urlImagemSegura(m.midia_url)}" download title="Baixar áudio">⬇</a>
       </div>
       ${htmlTranscricao(m)}`;
@@ -2520,22 +2539,20 @@
           ${htmlAvatarContato(conversa.contato_foto, conversa.contato_nome, conversa.telefone, 42)}
           <button type="button" class="wpp-avatar-atualizar" data-acao="atualizar-foto-contato" data-id="${conversa.id}" title="Atualizar foto do contato">🔄</button>
         </span>
-        <div style="flex:1; min-width:0;">
-          <div class="wpp-chat-nome">${escapeHtml(nome)} <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Trocar o nome deste contato (só você vê)">✏️</button></div>
+        <div class="wpp-chat-identidade">
+          <div class="wpp-chat-nome"><span class="wpp-chat-nome-texto" title="${escapeHtml(nome)}">${escapeHtml(nome)}</span> <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Trocar o nome deste contato (só você vê)">✏️</button></div>
           <div class="texto-suave wpp-chat-telefone">${escapeHtml(conversa.telefone)}${conversa.menu_setor ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
         </div>
         <div class="wpp-chat-acoes">
-          <button type="button" class="botao-icone ${conversa.resumo ? "wpp-icone-preenchido" : ""}" data-acao="abrir-resumo" data-id="${conversa.id}" data-resumo="${escapeHtml(conversa.resumo || "")}" title="${conversa.resumo ? "Ver/editar resumo do atendimento" : "Adicionar resumo do atendimento"}">📝</button>
-          <button type="button" class="botao-icone" data-acao="abrir-lembrete" data-id="${conversa.id}" title="Criar lembrete de retorno">🔔</button>
-          <button type="button" class="botao-icone ${conversa.proximo_contato_em ? "wpp-icone-preenchido" : ""}" data-acao="abrir-agendar-contato" data-id="${conversa.id}" title="${conversa.proximo_contato_em ? "Próximo contato marcado pra " + fmtData(conversa.proximo_contato_em) : "Agendar próximo contato (o sistema para de cobrar até a data)"}">📞</button>
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}
-          <button type="button" class="botao-icone" data-acao="${conversa.arquivada ? "desarquivar-conversa" : "arquivar-conversa"}" data-id="${conversa.id}" title="${conversa.arquivada ? "Desarquivar" : "Arquivar"}">${conversa.arquivada ? "📤" : "🗄️"}</button>
-          <button type="button" class="botao-icone" data-acao="excluir-conversa" data-id="${conversa.id}" title="Excluir conversa">🗑️</button>
+          <button type="button" class="botao-icone wpp-mais-acoes ${conversa.resumo || conversa.proximo_contato_em ? "wpp-icone-preenchido" : ""}" data-acao="abrir-mais-acoes" data-id="${conversa.id}"
+            data-resumo="${escapeHtml(conversa.resumo || "")}" data-arquivada="${conversa.arquivada ? "1" : "0"}"
+            data-proximo="${escapeHtml(conversa.proximo_contato_em || "")}" title="Mais ações">⋯</button>
         </div>
       </div>
       <div class="wpp-tags-linha">
@@ -3073,7 +3090,7 @@
           ${htmlAvatarContato(souCriador ? conversa.participante_foto : conversa.criado_por_foto, outroNome, outroNome, 36)}
           <span class="wpp-online-bolinha ${(souCriador ? conversa.participante_online : conversa.criado_por_online) ? "wpp-online-sim" : "wpp-online-nao"}"></span>
         </span>
-        <div style="flex:1; min-width:0;">
+        <div class="wpp-chat-identidade">
           <div class="wpp-chat-nome">${escapeHtml(outroNome)}${souAlheio ? "" : ` <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="abrir-apelido-interno" data-conversa-id="${conversa.id}" data-apelido="${escapeHtml(outroNome)}" title="Definir apelido (só você vê)">✏️</button>`}</div>
           <div class="texto-suave wpp-chat-telefone">
             ${htmlSeloPresenca(souCriador ? conversa.participante_online : conversa.criado_por_online, souCriador ? conversa.participante_ausente : conversa.criado_por_ausente, souCriador ? conversa.participante_ausente_motivo : conversa.criado_por_ausente_motivo)}
@@ -4805,6 +4822,22 @@
           }
         } catch (e) { /* sem contato: segue pra janela de nova conversa */ }
         return modalNovaConversa(tel);
+      }
+      case "abrir-mais-acoes": {
+        const id = alvo.dataset.id;
+        const r = alvo.getBoundingClientRect();
+        const arquivada = alvo.dataset.arquivada === "1";
+        const proximo = alvo.dataset.proximo;
+        return abrirMenuContexto(r.right - 250, r.bottom + 4, [
+          { acao: "abrir-resumo", id, rotulo: alvo.dataset.resumo ? "📝 Ver/editar resumo" : "📝 Escrever resumo",
+            dados: { resumo: alvo.dataset.resumo } },
+          { acao: "abrir-lembrete", id, rotulo: "🔔 Criar lembrete de retorno" },
+          { acao: "abrir-agendar-contato", id,
+            rotulo: proximo ? `📞 Próximo contato: ${fmtData(proximo)}` : "📞 Agendar próximo contato" },
+          { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id,
+            rotulo: arquivada ? "📤 Desarquivar" : "🗄️ Arquivar" },
+          { acao: "excluir-conversa", id, rotulo: "🗑️ Excluir conversa" },
+        ]);
       }
       case "abrir-nova-conversa": modalNovaConversa(); return;
       case "abrir-criar-grupo": {

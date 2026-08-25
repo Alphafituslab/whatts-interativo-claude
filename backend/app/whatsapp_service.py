@@ -1631,7 +1631,10 @@ def salvar_contato_manual(conn, empresa_id: int, telefone_bruto: str, nome: str 
     agora = _now_iso()
     row = conn.execute("SELECT id FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ?", (empresa_id, telefone)).fetchone()
     if row:
-        conn.execute("UPDATE whatsapp_contatos SET nome = ?, atualizado_em = ? WHERE id = ?", (nome, agora, row["id"]))
+        # Nome digitado por uma pessoa daqui: marca como editado pra que o
+        # nome do perfil do WhatsApp não desfaça isso depois.
+        conn.execute("UPDATE whatsapp_contatos SET nome = ?, nome_editado = 1, atualizado_em = ? WHERE id = ?",
+                     (nome, agora, row["id"]))
         return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (row["id"],)).fetchone())
     cur = conn.execute(
         "INSERT INTO whatsapp_contatos (empresa_id, telefone, nome, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)",
@@ -1722,8 +1725,17 @@ def obter_ou_criar_conversa(conn, contato_id: int):
     """Devolve (conversa, foi_criada_agora) — o segundo valor importa pra
     saber se é a primeira mensagem de um contato novo (dispara o menu de
     setor automático) ou uma conversa já existente."""
+    # Conversa excluída não conta como "já existe".
+    #
+    # Sem este filtro, o cliente que voltasse a escrever depois de alguém
+    # ter excluído a conversa dele continuava mandando mensagem PRA DENTRO
+    # da conversa excluída: as mensagens eram gravadas, mas a conversa não
+    # aparecia em lista nenhuma. Ninguém via, e o cliente ficava falando
+    # sozinho sem ninguém saber. Ignorando as excluídas, ele volta como
+    # contato novo — recebe o menu e cai na fila, como qualquer outro.
     row = conn.execute(
-        "SELECT * FROM whatsapp_conversas WHERE contato_id = ? ORDER BY id DESC LIMIT 1", (contato_id,)
+        "SELECT * FROM whatsapp_conversas WHERE contato_id = ? AND excluida_em IS NULL ORDER BY id DESC LIMIT 1",
+        (contato_id,),
     ).fetchone()
     if row:
         return dict(row), False
