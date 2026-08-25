@@ -21,6 +21,9 @@
     lembretesTodos: false, // admin: false = só os meus, true = de todo mundo
     agendamentosTodos: false,
     lembretesAlertados: new Set(), // ids de lembrete já alertados nesta sessão do navegador
+    // Transcrições que a pessoa fechou. Só nesta aba e nesta sessão: é
+    // preferência de quem está olhando, não algo que valha pros colegas.
+    transcricoesFechadas: new Set(),
     // Quantas não lidas na contagem anterior — o aviso sonoro só toca
     // quando o número sobe. null = ainda não contamos nenhuma vez (não
     // toca pras mensagens que já estavam lá quando a pessoa entrou).
@@ -1762,19 +1765,40 @@
   // e todo mundo vê pronta.
   // "direcao" só existe em mensagem de cliente (entrada/saida); no chat
   // interno o campo nem vem. É o que separa os dois endereços da API.
+  // Fechar a transcrição só a esconde — o texto continua guardado no
+  // servidor, então reabrir é instantâneo e não transcreve de novo.
+  // A chave leva o canal junto porque uma mensagem de cliente e uma do
+  // chat interno podem ter o mesmo número.
+  function _chaveTranscricao(m) {
+    return `${m.direcao === undefined ? "i" : "c"}:${m.id}`;
+  }
+
   function htmlTranscricao(m) {
-    if (m.transcricao_em) {
+    const interna = m.direcao === undefined ? "1" : "0";
+    const fechada = state.transcricoesFechadas && state.transcricoesFechadas.has(_chaveTranscricao(m));
+
+    if (m.transcricao_em && !fechada) {
       const texto = (m.transcricao || "").trim();
       return `<div class="wpp-transcricao">
-        <span class="wpp-transcricao-titulo">📝 Transcrição</span>
+        <div class="wpp-transcricao-topo">
+          <span class="wpp-transcricao-titulo">📝 Transcrição</span>
+          <button type="button" class="wpp-transcricao-fechar" data-acao="fechar-transcricao"
+            data-id="${m.id}" data-interna="${interna}" title="Fechar a transcrição (o texto continua guardado)">✕</button>
+        </div>
         ${texto
           ? `<span class="wpp-transcricao-texto">${escapeHtml(texto)}</span>`
           : `<span class="wpp-transcricao-texto wpp-transcricao-vazia">Não deu pra entender nada neste áudio.</span>`}
       </div>`;
     }
+    // Já transcrito e fechado: reabrir não custa nada, e o rótulo muda
+    // pra deixar claro que o texto já existe.
+    if (m.transcricao_em) {
+      return `<button type="button" class="wpp-transcricao-botao" data-acao="abrir-transcricao"
+        data-id="${m.id}" data-interna="${interna}" title="Mostrar de novo o texto do áudio">📝 Ver a transcrição</button>`;
+    }
     if (state.usuarioAtual && state.usuarioAtual.transcricao_disponivel === false) return "";
     return `<button type="button" class="wpp-transcricao-botao"
-      data-acao="transcrever-audio" data-id="${m.id}" data-interna="${m.direcao === undefined ? "1" : "0"}"
+      data-acao="transcrever-audio" data-id="${m.id}" data-interna="${interna}"
       title="Escrever aqui embaixo o que foi falado">📝 Ler o áudio</button>`;
   }
 
@@ -3821,6 +3845,17 @@
         const janela = alvo.closest(".fundo-modal-foto");
         if (janela) janela.remove();
         return;
+      }
+      case "fechar-transcricao":
+      case "abrir-transcricao": {
+        if (!state.transcricoesFechadas) state.transcricoesFechadas = new Set();
+        const chave = `${alvo.dataset.interna === "1" ? "i" : "c"}:${alvo.dataset.id}`;
+        if (acao === "fechar-transcricao") state.transcricoesFechadas.add(chave);
+        else state.transcricoesFechadas.delete(chave);
+        const conversaId = Number(location.hash.split("/")[2]);
+        return alvo.dataset.interna === "1"
+          ? atualizarMensagensInternasNoDom(conversaId)
+          : atualizarMensagensNoDom(conversaId);
       }
       case "transcrever-audio": {
         const id = Number(alvo.dataset.id);

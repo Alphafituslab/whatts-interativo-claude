@@ -1130,3 +1130,11 @@ nav { perspective: 800px; }
 }
 .wpp-transcricao-texto { font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
 .wpp-transcricao-vazia { color: var(--texto-suave); font-style: italic; }
+
+/* Cabeçalho da transcrição, com o ✕ para fechar */
+.wpp-transcricao-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wpp-transcricao-fechar {
+  cursor: pointer; border: none; background: none; padding: 0 2px; line-height: 1;
+  font-size: 12px; color: var(--texto-suave); flex-shrink: 0;
+}
+.wpp-transcricao-fechar:hover { color: var(--texto); }
