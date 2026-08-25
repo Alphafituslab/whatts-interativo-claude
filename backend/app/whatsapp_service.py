@@ -1876,13 +1876,34 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     telefone_bruto = remote_jid.split("@")[0].split(":")[0]
     if not telefone_bruto:
         return {"processado": False, "tipo": "sem_remetente"}
-    # Normaliza pro formato completo com o 9 (ver normalizar_telefone) —
-    # sem isso, a mesma pessoa vira dois contatos diferentes dependendo
-    # de qual formato de JID o WhatsApp mandou daquela vez.
-    try:
-        telefone = normalizar_telefone(telefone_bruto)
-    except ApiError:
-        telefone = telefone_bruto
+    # GRUPO: a conversa é o grupo inteiro, e quem falou vem noutro campo
+    # (key.participant). Sem separar os dois, todas as falas do grupo
+    # ficavam sem dono — não dava pra saber quem tinha pedido o quê.
+    #
+    # O id do grupo também não passa pela normalização de telefone: ele
+    # não tem DDD nem o 9 do celular, e "corrigir" isso o transformaria
+    # num identificador que não existe.
+    de_grupo = remote_jid.endswith("@g.us")
+    autor_nome, autor_telefone = None, None
+    if de_grupo:
+        telefone = _somente_digitos(telefone_bruto)
+        participante = chave.get("participant") or dados.get("participant") or ""
+        bruto_autor = participante.split("@")[0].split(":")[0]
+        if bruto_autor:
+            try:
+                autor_telefone = normalizar_telefone(bruto_autor)
+            except ApiError:
+                autor_telefone = bruto_autor
+        # pushName no grupo é o nome de quem FALOU, não o do grupo.
+        autor_nome = dados.get("pushName") or None
+    else:
+        # Normaliza pro formato completo com o 9 (ver normalizar_telefone)
+        # — sem isso, a mesma pessoa vira dois contatos diferentes
+        # dependendo de qual formato de JID o WhatsApp mandou daquela vez.
+        try:
+            telefone = normalizar_telefone(telefone_bruto)
+        except ApiError:
+            telefone = telefone_bruto
 
     externo_id = chave.get("id")
     if externo_id:
@@ -1906,8 +1927,14 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         aplicada = _aplicar_reacao(conn, empresa_id, id_alvo, emoji)
         return {"processado": True, "tipo": "reacao", "aplicada": aplicada}
 
-    nome_contato = dados.get("pushName")
+    # Em grupo o pushName é de quem falou; usar isso como nome do contato
+    # renomearia o grupo a cada mensagem, com o nome do último que
+    # escreveu.
+    nome_contato = None if de_grupo else dados.get("pushName")
     contato = obter_ou_criar_contato(conn, empresa_id, telefone, nome_contato)
+    if de_grupo and not contato.get("eh_grupo"):
+        conn.execute("UPDATE whatsapp_contatos SET eh_grupo = 1 WHERE id = ?", (contato["id"],))
+        contato["eh_grupo"] = 1
     # Não busca a foto em toda mensagem: quem já tem foto não é
     # consultado de novo, e quem não tem só é tentado a cada poucos dias
     # (ver _precisa_tentar_foto).
@@ -1939,17 +1966,29 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     if conversa_nova:
         conn.execute(
             """
-            INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em)
-            VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?)
+            INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em,
+                                            autor_nome, autor_telefone)
+            VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?)
             """,
-            (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora),
+            (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone),
         )
         conn.execute(
             "UPDATE whatsapp_conversas SET nao_lidas = nao_lidas + 1, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
             (agora, preview[:120], conversa["id"]),
         )
-        _iniciar_menu_setor(conn, empresa_id, conversa["id"], telefone)
-        return {"processado": True, "tipo": "menu_iniciado", "conversa_id": conversa["id"]}
+        # Menu de setores NÃO vai pra grupo: ele existe pra direcionar UM
+        # cliente ao setor certo. Mandado num grupo, todo mundo receberia
+        # "escolha o número do setor" e a primeira pessoa a responder
+        # decidiria o destino da conversa inteira — sem falar no
+        # constrangimento de um menu automático no meio de uma conversa
+        # entre pessoas. Grupo entra direto como conversa normal.
+        if not de_grupo:
+            _iniciar_menu_setor(conn, empresa_id, conversa["id"], telefone)
+            return {"processado": True, "tipo": "menu_iniciado", "conversa_id": conversa["id"]}
+        # Grupo: a mensagem já foi gravada acima. Sai aqui mesmo — sem
+        # este retorno ela seria inserida uma segunda vez pelo trecho
+        # das mensagens comuns, mais abaixo.
+        return {"processado": True, "tipo": "recebida_grupo", "conversa_id": conversa["id"]}
 
     # Se esta conversa está no meio do menu de setor/atendente (ver
     # acima), tenta interpretar ESTA mensagem como a escolha do cliente
@@ -1971,10 +2010,11 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
 
     conn.execute(
         """
-        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em)
-        VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?)
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em,
+                                        autor_nome, autor_telefone)
+        VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?)
         """,
-        (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora),
+        (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone),
     )
     conn.execute(
         """

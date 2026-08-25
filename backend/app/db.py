@@ -52,6 +52,7 @@ SCHEMA_FILES = [
     "schema_037_grupos.sql",
     "schema_038_reacoes.sql",
     "schema_039_tipo_figurinha.sql",
+    "schema_040_autor_no_grupo.sql",
 ]
 
 

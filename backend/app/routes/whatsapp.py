@@ -398,15 +398,21 @@ def listar_conversas():
         LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id
     """
     if escopo == "fila":
-        # "Fila" = aguardando alguma resposta nossa: as minhas em que o
-        # cliente falou por último, mais as do meu setor que ninguém
-        # assumiu ainda. Admin vê todas as que estão nesse estado.
+        # "Fila" = SEM DONO, esperando alguém pegar.
+        #
+        # Antes a fila era "aguardando resposta nossa", e incluía as
+        # conversas já atribuídas em que o cliente tinha falado por
+        # último. Na prática isso jogava o atendimento pra fora de
+        # "Minhas" toda vez que o cliente respondia — quem estava no meio
+        # da conversa via ela sumir da própria aba. Agora conversa com
+        # dono fica com o dono, ponto; a fila é só o que ainda é de
+        # ninguém.
         if usuario["admin"]:
             condicoes, params = [], []
         else:
             sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
             condicoes = [sql_visivel]
-        condicoes.append(f"({_SQL_ULTIMA_DIRECAO} IS NULL OR {_SQL_ULTIMA_DIRECAO} = 'entrada')")
+        condicoes.append("c.atribuida_usuario_id IS NULL")
     elif escopo == "sem_menu":
         # Quem entrou em contato e não escolheu nenhum número do menu.
         # Aba própria pra dar pra ver de uma vez quem está travado aí —
@@ -423,9 +429,11 @@ def listar_conversas():
             raise ApiError("Só um administrador pode ver todas as conversas.", status=403, codigo="sem_permissao")
         condicoes, params = [], []
     else:
-        # "Minhas" = as que já estão em andamento comigo (a última
-        # mensagem foi minha; a bola está com o cliente).
-        condicoes = ["c.atribuida_usuario_id = ?", f"{_SQL_ULTIMA_DIRECAO} = 'saida'"]
+        # "Minhas" = tudo o que está comigo, tenha falado quem tiver
+        # falado por último. Se é meu atendimento, ele não sai daqui
+        # porque o cliente respondeu — quem avisa que há algo novo é o
+        # contador de não lidas.
+        condicoes = ["c.atribuida_usuario_id = ?"]
         params = [usuario["id"]]
     condicoes.append("ct.empresa_id = ?")
     params.append(g.empresa_id)

@@ -1789,9 +1789,9 @@
   function htmlListaConversas(conversas, conversaAtivaId) {
     if (!conversas.length) {
       const msgs = {
-        fila: "Nada aguardando resposta no momento. 👏",
+        fila: "Ninguém esperando na fila. 👏 Aqui ficam só os clientes que ainda não têm dono.",
         todas: "Nenhuma conversa no sistema ainda.",
-        minhas: "Nenhuma conversa em andamento — as que estão esperando resposta ficam na aba Fila.",
+        minhas: "Você ainda não está atendendo ninguém. Assuma alguém da Fila e o atendimento fica aqui, mesmo depois que o cliente responder.",
         arquivadas: "Nenhuma conversa arquivada.",
         sem_menu: "Ninguém parado no menu agora. 👌 Aqui aparecem os clientes que escreveram e não escolheram nenhum número — passados alguns minutos, eles entram na Fila de todos.",
       };
@@ -1977,6 +1977,9 @@
     const saida = m.direcao === "saida";
     const iconeStatus = { pendente: "🕓", enviada: "✓", entregue: "✓✓", lida: "✓✓", falhou: "⚠️", recebida: "" }[m.status] || "";
     return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.status === "falhou" ? "wpp-bolha-falhou" : ""} ${m.excluida_em ? "wpp-bolha-apagada" : ""}" data-wpp-bolha-id="${m.id}">
+      ${!saida && (m.autor_nome || m.autor_telefone)
+        ? `<div class="wpp-bolha-autor" title="${escapeHtml(m.autor_telefone || "")}">${escapeHtml(m.autor_nome || m.autor_telefone)}</div>`
+        : ""}
       ${htmlSeloApagada(m)}
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
@@ -2153,7 +2156,7 @@
     const usuario = state.usuarioAtual;
     const abas = [
       { chave: "minhas", label: "Minhas", dica: "Conversas em andamento — você já respondeu, aguardando o cliente" },
-      { chave: "fila", label: "Fila", dica: "Aguardando resposta sua — inclui as ainda sem dono do seu setor, e as que ninguém escolheu setor e já esperaram demais" },
+      { chave: "fila", label: "Fila", dica: "Clientes que ainda são de ninguém, esperando alguém assumir — do seu setor, mais os que não escolheram setor e já esperaram demais" },
       { chave: "sem_menu", label: "Sem escolha", dica: "Clientes que escreveram e não escolheram nenhum número do menu. Passados alguns minutos, eles também entram na Fila de todos, até alguém assumir." },
     ];
     if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
