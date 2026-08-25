@@ -182,6 +182,9 @@ def obter_configuracao(conn, empresa_id: int):
 
 def config_publica(config):
     d = dict(config)
+    for campo, padrao in (("limite_envios_minuto", 20), ("limite_envios_hora", 250),
+                          ("limite_novos_contatos_hora", 20)):
+        d[campo] = int(config.get(campo) if config.get(campo) is not None else padrao)
     d["apikey_configurada"] = bool(d.get("evolution_apikey"))
     d["webhook_segredo_configurado"] = bool(d.get("webhook_segredo"))
     d.pop("evolution_apikey", None)
@@ -229,6 +232,22 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     else:
         expediente_mensagem = anterior.get("expediente_mensagem")
     sla_minutos_alerta = int(dados["sla_minutos_alerta"]) if dados.get("sla_minutos_alerta") else (anterior.get("sla_minutos_alerta") or 15)
+
+    # Limites de ritmo de envio. 0 desliga o limite — deliberado: numa
+    # emergência é melhor conseguir desligar pela tela do que ter que
+    # mexer no banco. Quem desliga assume o risco, e a tela avisa isso.
+    def _limite(campo, padrao):
+        if campo in dados and str(dados.get(campo)).strip() != "":
+            try:
+                return max(0, int(dados[campo]))
+            except (TypeError, ValueError):
+                raise ApiError(f"Valor inválido em {campo}.", status=400)
+        atual = anterior.get(campo)
+        return int(atual) if atual is not None else padrao
+
+    limite_envios_minuto = _limite("limite_envios_minuto", 20)
+    limite_envios_hora = _limite("limite_envios_hora", 250)
+    limite_novos_contatos_hora = _limite("limite_novos_contatos_hora", 20)
     # Quantos minutos esperar antes de jogar na fila de todos um cliente
     # que não escolheu setor nenhum no menu.
     if dados.get("minutos_liberar_sem_menu") not in (None, ""):
@@ -245,8 +264,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         """
         INSERT INTO configuracoes_whatsapp (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome,
                                               webhook_segredo, webhook_base_url, expediente_ativo, expediente_janelas,
-                                              expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?)
+                                              expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
+                                              limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -259,13 +279,17 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             expediente_mensagem = excluded.expediente_mensagem,
             saudacao_mensagem = excluded.saudacao_mensagem,
             sla_minutos_alerta = excluded.sla_minutos_alerta,
+            limite_envios_minuto = excluded.limite_envios_minuto,
+            limite_envios_hora = excluded.limite_envios_hora,
+            limite_novos_contatos_hora = excluded.limite_novos_contatos_hora,
             minutos_liberar_sem_menu = excluded.minutos_liberar_sem_menu,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
         (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome, webhook_segredo, webhook_base_url,
          expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta,
-         minutos_sem_menu, empresa_id, _now_iso(), usuario_id),
+         minutos_sem_menu, empresa_id, _now_iso(), usuario_id,
+         limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -301,6 +325,17 @@ def _atualizar_estado_conexao(conn, empresa_id: int, *, status_conexao=None, num
 # ============================================================
 # CHAMADAS AO PROVEDOR
 # ============================================================
+def _falha_de_rede(e):
+    """Traduz um problema de rede com a Evolution API pra uma resposta
+    que a tela sabe mostrar, em vez de 'erro interno do servidor'."""
+    import requests as _r
+    if isinstance(e, _r.exceptions.Timeout):
+        return ApiError("O serviço do WhatsApp demorou demais pra responder. Tente de novo em instantes.",
+                        status=504, codigo="whatsapp_lento")
+    return ApiError("Não consegui falar com o serviço do WhatsApp agora. Verifique a conexão em Configuração.",
+                    status=502, codigo="whatsapp_indisponivel")
+
+
 def _requests():
     try:
         import requests
@@ -310,7 +345,30 @@ def _requests():
             "Rode: pip install requests",
             status=500,
         )
-    return requests
+    return _ProvedorHttp(requests)
+
+
+class _ProvedorHttp:
+    """Repassa pro requests, mas traduz falha de rede em ApiError.
+
+    Existe porque um ReadTimeout da Evolution API subia cru e virava
+    "erro interno do servidor" na cara de quem estava atendendo — sendo
+    que o certo é dizer "o WhatsApp demorou, tente de novo"."""
+
+    def __init__(self, requests):
+        self._r = requests
+
+    def __getattr__(self, nome):
+        original = getattr(self._r, nome)
+        if nome not in ("post", "get", "put", "delete", "patch", "head"):
+            return original
+
+        def chamar(*args, **kwargs):
+            try:
+                return original(*args, **kwargs)
+            except self._r.exceptions.RequestException as e:
+                raise _falha_de_rede(e)
+        return chamar
 
 
 def _exigir_configurado(config):
@@ -488,6 +546,20 @@ def reagir_mensagem(config, telefone: str, externo_id: str, emoji: str, minha: b
     return _tratar_resposta(resp)
 
 
+def info_do_grupo(config, jid: str):
+    """Dados do grupo no WhatsApp — principalmente o nome (subject)."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento.", status=400)
+    requests = _requests()
+    resp = requests.get(
+        f"{config['evolution_url']}/group/findGroupInfos/{config['instancia_nome']}",
+        params={"groupJid": jid if "@" in jid else f"{_somente_digitos(jid)}@g.us"},
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    return _tratar_resposta(resp)
+
+
 def participantes_do_grupo(config, jid: str):
     """Quem está no grupo, direto do WhatsApp: lid, telefone, nome e se é
     administrador do grupo."""
@@ -559,6 +631,22 @@ def atualizar_membros_do_grupo(conn, config, contato_id: int, jid: str, forcar: 
             (contato_id, m["lid"], m["telefone"], m["nome"], m["admin"], m["foto_url"], agora),
         )
     conn.execute("UPDATE whatsapp_contatos SET membros_atualizados_em = ? WHERE id = ?", (agora, contato_id))
+
+    # Nome do grupo: só preenche se estiver faltando. Grupo que já tem
+    # nome — inclusive um que alguém daqui corrigiu — não é tocado.
+    linha = conn.execute(
+        "SELECT nome, telefone, nome_editado FROM whatsapp_contatos WHERE id = ?", (contato_id,)
+    ).fetchone()
+    if linha is not None and not linha["nome_editado"]:
+        atual = (linha["nome"] or "").strip()
+        if not atual or atual == (linha["telefone"] or ""):
+            try:
+                assunto = (info_do_grupo(config, jid) or {}).get("subject")
+            except ApiError:
+                assunto = None
+            if assunto:
+                conn.execute("UPDATE whatsapp_contatos SET nome = ?, atualizado_em = ? WHERE id = ?",
+                             (assunto.strip(), agora, contato_id))
     return membros
 
 
@@ -809,6 +897,81 @@ def verificar_repeticao_mensagem(conn, empresa_id: int, texto: str):
             "seja identificado como robô pelo WhatsApp.",
             status=429, codigo="mensagem_repetida",
         )
+
+
+def verificar_ritmo_envio(conn, empresa_id: int, config=None, telefone_destino: str = None):
+    """Segura a mão antes de mandar, se o ritmo estiver arriscado.
+
+    Chamada em todo caminho de envio (mensagem, anexo, catálogo,
+    encaminhamento, agendamento). Custa duas contagens curtas — barato
+    perto de perder o número da empresa.
+    """
+    config = config or obter_configuracao(conn, empresa_id)
+    por_minuto = int(config.get("limite_envios_minuto") or 0)
+    por_hora = int(config.get("limite_envios_hora") or 0)
+    novos_por_hora = int(config.get("limite_novos_contatos_hora") or 0)
+
+    def contar(minutos):
+        desde = (datetime.datetime.utcnow() - datetime.timedelta(minutes=minutos)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM whatsapp_mensagens m
+            JOIN whatsapp_conversas c ON c.id = m.conversa_id
+            JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+            WHERE m.direcao = 'saida' AND m.criado_em >= ? AND ct.empresa_id = ?
+            """,
+            (desde, empresa_id),
+        ).fetchone()["n"]
+
+    if por_minuto and contar(1) >= por_minuto:
+        raise ApiError(
+            f"Ritmo de envio alto demais: {por_minuto} mensagens no último minuto. "
+            "Espere alguns segundos — enviar em rajada é o que faz o WhatsApp marcar o número como robô.",
+            status=429, codigo="ritmo_envio",
+        )
+    if por_hora and contar(60) >= por_hora:
+        raise ApiError(
+            f"Limite de {por_hora} mensagens por hora atingido. "
+            "O envio volta a liberar aos poucos, conforme a hora corre. "
+            "Se isso atrapalha o atendimento normal, aumente o limite em Configuração.",
+            status=429, codigo="ritmo_envio",
+        )
+
+    # Contato novo = número pra quem a gente escreve sem que ele nunca
+    # tenha escrito pra gente. É o padrão que gera denúncia.
+    if novos_por_hora and telefone_destino:
+        nunca_falou = conn.execute(
+            """
+            SELECT 1 FROM whatsapp_contatos ct
+            JOIN whatsapp_conversas c ON c.contato_id = ct.id
+            WHERE ct.empresa_id = ? AND ct.telefone = ?
+              AND EXISTS (SELECT 1 FROM whatsapp_mensagens m
+                           WHERE m.conversa_id = c.id AND m.direcao = 'entrada')
+            LIMIT 1
+            """,
+            (empresa_id, telefone_destino),
+        ).fetchone() is None
+        if nunca_falou:
+            desde = (datetime.datetime.utcnow() - datetime.timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            iniciados = conn.execute(
+                """
+                SELECT COUNT(DISTINCT c.id) AS n FROM whatsapp_conversas c
+                JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+                WHERE ct.empresa_id = ?
+                  AND EXISTS (SELECT 1 FROM whatsapp_mensagens m
+                               WHERE m.conversa_id = c.id AND m.direcao = 'saida' AND m.criado_em >= ?)
+                  AND NOT EXISTS (SELECT 1 FROM whatsapp_mensagens m
+                                   WHERE m.conversa_id = c.id AND m.direcao = 'entrada')
+                """,
+                (empresa_id, desde),
+            ).fetchone()["n"]
+            if iniciados >= novos_por_hora:
+                raise ApiError(
+                    f"Já foram iniciadas {novos_por_hora} conversas nesta hora com números que nunca "
+                    "escreveram pra gente. Escrever pra desconhecido em série é o que mais derruba número "
+                    "no WhatsApp — espere um pouco antes de abrir outra.",
+                    status=429, codigo="ritmo_contatos_novos",
+                )
 
 
 def enviar_texto(config, telefone: str, texto: str, citar_externo_id: str = None) -> str:
@@ -1930,6 +2093,17 @@ def fechar_conversa(conn, conversa_id: int, resultado: str = None):
         "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, aguardando_avaliacao = 1, resultado = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
         (agora, resultado, conversa_id),
     )
+    # Grupo não recebe pesquisa: a pergunta é sobre UM atendimento a UMA
+    # pessoa, e num grupo ela chega pra todo mundo — sem falar que a
+    # primeira pessoa a digitar um número viraria a nota.
+    eh_grupo = conn.execute(
+        "SELECT ct.eh_grupo FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE c.id = ?",
+        (conversa_id,),
+    ).fetchone()
+    if eh_grupo is not None and eh_grupo["eh_grupo"]:
+        conn.execute("UPDATE whatsapp_conversas SET aguardando_avaliacao = 0 WHERE id = ?", (conversa_id,))
+        return
+
     config = obter_configuracao(conn, conversa["empresa_id"])
     try:
         externo_id = enviar_texto(config, conversa["telefone"], TEXTO_PESQUISA_SATISFACAO)

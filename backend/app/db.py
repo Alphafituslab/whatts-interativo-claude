@@ -61,6 +61,7 @@ SCHEMA_FILES = [
     "schema_046_grupo_participantes.sql",
     "schema_047_catalogos.sql",
     "schema_048_grupo_membros.sql",
+    "schema_049_ritmo_envio.sql",
 ]
 
 
@@ -71,9 +72,21 @@ def get_db_path():
 def _connect(db_path=None):
     path = db_path or get_db_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
+    conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Em vez de falhar na hora quando outro está gravando, espera a vez.
+    # Gravação aqui leva milissegundos; esperar 10s é um limite que nunca
+    # deveria ser alcançado, e é infinitamente melhor que "erro interno"
+    # na cara de quem está atendendo.
+    conn.execute("PRAGMA busy_timeout = 10000")
+    # WAL: leitor e escritor param de brigar. Sem isso, uma mensagem
+    # chegando pelo webhook derrubava a tela de quem estivesse lendo.
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.DatabaseError:
+        pass   # sistema de arquivos que não suporta WAL: segue no modo antigo
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 

@@ -1427,3 +1427,12 @@ nav { perspective: 800px; }
 }
 .followup-quem label { color: var(--texto-suave); flex-shrink: 0; }
 .followup-quem select { flex: 1; font-size: 12.5px; padding: 5px 8px; }
+
+/* Os três freios lado a lado: são um conjunto, e vê-los juntos ajuda a
+   entender que um cobre o que o outro não pega. */
+.wpp-limites {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px; align-items: start; margin-bottom: 12px;
+}
+.wpp-limites .campo { margin: 0; }
+.wpp-limites .dica { display: block; margin-top: 4px; }

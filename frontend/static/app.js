@@ -881,6 +881,7 @@
     const marcadas = JSON.parse(item.dataset.wppTags || "[]");
     const etiquetas = await obterEtiquetas();
     abrirMenuContexto(e.clientX, e.clientY, [
+      { acao: "fechar-conversa", id, rotulo: "✅ Encerrar atendimento" },
       { acao: "contexto-agendar", id, rotulo: "🕒 Agendar mensagem" },
       { acao: "contexto-lembrete", id, rotulo: "🔔 Abrir lembrete" },
       { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id, rotulo: arquivada ? "📤 Desarquivar" : "🗄️ Arquivar" },
@@ -3937,6 +3938,38 @@
        </div>
 
        <div class="cartao">
+         <h3 style="margin-top:0;">🛡️ Proteção contra bloqueio do WhatsApp</h3>
+         <p class="dica">
+           A conexão é <strong>não-oficial</strong>: o WhatsApp pode bloquear o número se o comportamento
+           parecer de robô. O que mais derruba número, em ordem: <strong>denúncia de quem recebeu</strong>,
+           mandar pra quem <strong>nunca falou com a gente</strong>, e <strong>rajada de mensagens</strong>.
+           Os freios abaixo seguram os dois últimos. O primeiro só depende de atender gente de verdade —
+           nenhum sistema protege de disparo em massa.
+         </p>
+         <form data-form="salvar-limites-envio" class="wpp-limites">
+           <div class="campo">
+             <label>Mensagens por minuto</label>
+             <input type="number" name="limite_envios_minuto" min="0" max="200" value="${config.limite_envios_minuto ?? 20}">
+             <span class="dica">Pega o disparo em rajada. Atendimento humano raramente passa de 20.</span>
+           </div>
+           <div class="campo">
+             <label>Mensagens por hora</label>
+             <input type="number" name="limite_envios_hora" min="0" max="5000" value="${config.limite_envios_hora ?? 250}">
+             <span class="dica">Pega o disparo espalhado. Suba se a equipe crescer e o freio atrapalhar.</span>
+           </div>
+           <div class="campo">
+             <label>Conversas novas por hora</label>
+             <input type="number" name="limite_novos_contatos_hora" min="0" max="500" value="${config.limite_novos_contatos_hora ?? 20}">
+             <span class="dica"><strong>O mais importante.</strong> Conta só quem nunca escreveu pra gente — é daí que vem denúncia.</span>
+           </div>
+           <div class="campo" style="align-self:end;">
+             <button type="submit" class="botao secundario">Salvar limites</button>
+           </div>
+         </form>
+         <p class="dica" style="margin-bottom:0;">0 desliga o freio. Só faça isso sabendo o risco: sem ele, um envio em massa por engano pode custar o número da empresa.</p>
+       </div>
+
+       <div class="cartao">
          <h3 style="margin-top:0;">📚 Portfólio e catálogos</h3>
          <p class="dica">O que a equipe manda pro cliente em um clique, pelo botão 📚 dentro da conversa. Dois formatos: <strong>link</strong> (o portfólio que já está no ar, sempre atualizado) e <strong>PDF</strong> (tabela de preço, encarte — o que não cabe no site). Em cada um você escolhe <strong>quem pode mandar</strong>.</p>
 
@@ -6215,6 +6248,18 @@
         state._tagsCache = null;
         definirFlash("ok", `Etiqueta "${nome}" criada.`);
         return renderWhatsappConfiguracao();
+      }
+      case "salvar-limites-envio": {
+        await chamarApi("/whatsapp/configuracao", {
+          method: "PUT",
+          body: {
+            limite_envios_minuto: dados.get("limite_envios_minuto"),
+            limite_envios_hora: dados.get("limite_envios_hora"),
+            limite_novos_contatos_hora: dados.get("limite_novos_contatos_hora"),
+          },
+        });
+        definirFlash("ok", "Limites de envio salvos.");
+        return renderConfiguracao();
       }
       case "criar-catalogo": {
         await chamarApi("/whatsapp/catalogos", {

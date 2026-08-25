@@ -457,7 +457,8 @@ def _sql_visivel_nao_admin(conn, usuario):
     # cadastrado é fila de todos, e na hora — não adianta esperar, não
     # existe ninguém pra quem esperar.
     # Grupo: só pra quem está nele (ver _pode_visualizar).
-    grupo = (" OR (ct.eh_grupo = 1 AND EXISTS (SELECT 1 FROM whatsapp_conversa_usuarios cu "
+    grupo = (" OR (ct.eh_grupo = 1 AND c.status = 'aberta' AND EXISTS ("
+             "SELECT 1 FROM whatsapp_conversa_usuarios cu "
              "WHERE cu.conversa_id = c.id AND cu.usuario_id = ?))")
     orfaos = _setores_orfaos(conn)
     if orfaos:
@@ -563,7 +564,7 @@ def listar_conversas():
         # não é "fila esperando alguém pegar" — é um lugar onde a equipe
         # conversa, e some da vista se não ficar em nenhuma aba. É onde o
         # WhatsApp também põe: junto das suas conversas.
-        condicoes = ["(c.atribuida_usuario_id = ? OR (ct.eh_grupo = 1 AND EXISTS ("
+        condicoes = ["(c.atribuida_usuario_id = ? OR (ct.eh_grupo = 1 AND c.status = 'aberta' AND EXISTS ("
                      "SELECT 1 FROM whatsapp_conversa_usuarios cu "
                      "WHERE cu.conversa_id = c.id AND cu.usuario_id = ?)))"]
         params = [usuario["id"], usuario["id"]]
@@ -758,7 +759,7 @@ def contagem_abas():
 
     # Mesmo critério da lista de "Minhas": o que é meu MAIS os grupos,
     # que são de todo mundo.
-    meu_ou_grupo = ("AND (c.atribuida_usuario_id = ? OR (ct.eh_grupo = 1 AND EXISTS ("
+    meu_ou_grupo = ("AND (c.atribuida_usuario_id = ? OR (ct.eh_grupo = 1 AND c.status = 'aberta' AND EXISTS ("
                     "SELECT 1 FROM whatsapp_conversa_usuarios cu "
                     "WHERE cu.conversa_id = c.id AND cu.usuario_id = ?)))")
     minhas = conn.execute(
@@ -1117,6 +1118,7 @@ def iniciar_conversa():
         conversa = _carregar_conversa(conn, g.empresa_id, nova["id"])
 
     whatsapp_service.verificar_repeticao_mensagem(conn, g.empresa_id, texto)
+    whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
 
     if conversa["atribuida_usuario_id"] is None:
         whatsapp_service.atribuir_conversa(conn, conversa["id"], usuario["id"], usuario["id"])
@@ -1217,6 +1219,7 @@ def enviar_mensagem(conversa_id):
         raise ApiError(_recusa_atribuida(conversa, " Encaminhe para si mesmo antes de responder."), status=403, codigo="sem_permissao")
 
     whatsapp_service.verificar_repeticao_mensagem(conn, g.empresa_id, texto)
+    whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
 
     # Responder uma conversa da fila assume ela automaticamente — evita
     # a etapa extra de "Assumir" antes de simplesmente responder.
@@ -1602,6 +1605,15 @@ def _encaminhar_para_clientes(conn, usuario, destinos_conversas, telefones, mens
             resultados.append({"conversa_id": destino_id, "ok": False,
                                "nome": destino["contato_nome"] or destino["telefone"],
                                "motivo": _recusa_atribuida(destino)})
+            continue
+        try:
+            whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, config, destino["telefone"])
+        except ApiError as e:
+            # Um destino barrado pelo freio não derruba os outros: os que
+            # couberam no ritmo vão, e a resposta diz quais ficaram.
+            resultados.append({"conversa_id": destino_id, "ok": False,
+                               "nome": destino["contato_nome"] or destino["telefone"],
+                               "motivo": e.mensagem})
             continue
         if destino["eh_grupo"]:
             _entrar_no_grupo(conn, destino_id, usuario["id"])
@@ -2009,6 +2021,7 @@ def enviar_catalogo(conversa_id, catalogo_id):
 
     catalogo = conn.execute("SELECT * FROM catalogos WHERE id = ?", (catalogo_id,)).fetchone()
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, config, conversa["telefone"])
     agora = _now_iso()
     observacao = (request.get_json(silent=True) or {}).get("observacao", "")
     observacao = (observacao or "").strip()
@@ -2957,6 +2970,7 @@ def enviar_anexo(conversa_id):
     tipo_forcado = request.form.get("tipo")
     tipo = tipo_forcado if tipo_forcado in EXTENSOES_TIPO else _classificar_tipo(arquivo.filename)
     legenda = (request.form.get("legenda") or "").strip() or None
+    whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
 
     os.makedirs(PASTA_UPLOADS, exist_ok=True)
     nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
@@ -3144,7 +3158,23 @@ def baixar_anexo(nome_arquivo):
     inline = _classificar_tipo(nome_arquivo) in ("imagem", "video", "audio") or extensao == "pdf"
     resp = send_from_directory(PASTA_UPLOADS, nome_arquivo, as_attachment=not inline)
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
+    # PDF precisa de um cabeçalho diferente dos outros.
+    #
+    # O "sandbox" sem nenhuma permissão é o mais restritivo que existe —
+    # e o leitor de PDF do Chrome é justamente uma dessas coisas que ele
+    # bloqueia. Resultado: o navegador desistia de MOSTRAR o PDF e
+    # baixava, mesmo com Content-Disposition: inline. Era isso que fazia
+    # "só dá pra baixar, não dá pra visualizar".
+    #
+    # Tirar o sandbox só do PDF não abre brecha: o que o sandbox estava
+    # defendendo era HTML/SVG com script rodando NO NOSSO endereço, e
+    # esses continuam saindo como download (ver a lista de inline acima).
+    # O PDF é desenhado pelo leitor do próprio navegador, numa caixa
+    # separada, sem acesso à nossa página nem à sessão de quem abriu.
+    if extensao == "pdf":
+        resp.headers["Content-Security-Policy"] = "default-src 'none'; object-src 'none'; frame-ancestors 'self'"
+    else:
+        resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"
     return resp
 
 
