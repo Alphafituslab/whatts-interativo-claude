@@ -114,6 +114,28 @@ def _extrair_base64_puro(valor):
     return valor
 
 
+def eh_id_de_grupo(valor: str) -> bool:
+    """Grupo do WhatsApp tem id longo e sem cara de telefone (18+
+    dígitos, normalmente começando com 1203...). Telefone brasileiro
+    completo tem 13. A checagem por tamanho evita confundir os dois em
+    qualquer lugar que receba "o destino" sem saber o que é."""
+    digitos = _somente_digitos(valor or "")
+    return len(digitos) >= 15 or "@g.us" in (valor or "")
+
+
+def destino_whatsapp(valor: str) -> str:
+    """Endereço que a Evolution API espera. Pessoa vira número
+    normalizado; grupo vai como <id>@g.us, sem passar pela normalização
+    de telefone (que inseriria DDI e o 9 do celular e quebraria o id)."""
+    if not valor:
+        raise ApiError("Destino inválido.", status=400)
+    if "@" in valor:
+        return valor
+    if eh_id_de_grupo(valor):
+        return f"{_somente_digitos(valor)}@g.us"
+    return normalizar_telefone(valor)
+
+
 def normalizar_telefone(numero: str) -> str:
     """Celular brasileiro tem 9 dígitos (começando com 9) depois do DDD.
     O WhatsApp às vezes manda/aceita o número SEM esse 9 (formato antigo
@@ -435,6 +457,73 @@ def _registrar_webhook(config):
         pass
 
 
+def criar_grupo(config, nome: str, participantes: list, descricao: str = None):
+    """Cria o grupo no WhatsApp e devolve o id dele.
+
+    Os participantes vão com o número normalizado — o WhatsApp recusa o
+    grupo inteiro se um número vier num formato que ele não reconhece,
+    então é melhor arrumar aqui do que descobrir pelo erro."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado — conecte um número antes de criar grupos.", status=400)
+    numeros = []
+    for p in participantes or []:
+        try:
+            numeros.append(normalizar_telefone(p))
+        except ApiError:
+            continue
+    if not numeros:
+        raise ApiError("Escolha pelo menos uma pessoa para o grupo.", status=400)
+    requests = _requests()
+    corpo = {"subject": nome, "participants": numeros}
+    if descricao:
+        corpo["description"] = descricao
+    resp = requests.post(
+        f"{config['evolution_url']}/group/create/{config['instancia_nome']}",
+        json=corpo, headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    dados = _tratar_resposta(resp)
+    jid = dados.get("id") or (dados.get("groupMetadata") or {}).get("id") or ""
+    if not jid:
+        raise ApiError("O WhatsApp não devolveu o identificador do grupo. Tente de novo.", status=502)
+    return {"jid": jid, "id": _somente_digitos(jid), "nome": nome}
+
+
+def definir_foto_grupo(config, jid: str, url_imagem: str):
+    """A imagem vai por URL: a Evolution API busca o arquivo, então ele
+    precisa estar num endereço que o container alcance (usamos o próprio
+    site, ver url_publica). Falhar aqui não desfaz o grupo — ele já
+    existe, só ficou sem foto."""
+    requests = _requests()
+    try:
+        resp = requests.post(
+            f"{config['evolution_url']}/group/updateGroupPicture/{config['instancia_nome']}",
+            params={"groupJid": jid}, json={"image": url_imagem},
+            headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+        )
+        return resp.status_code < 400
+    except Exception:
+        return False
+
+
+def adicionar_ao_grupo(config, jid: str, participantes: list):
+    numeros = []
+    for p in participantes or []:
+        try:
+            numeros.append(normalizar_telefone(p))
+        except ApiError:
+            continue
+    if not numeros:
+        raise ApiError("Escolha pelo menos uma pessoa.", status=400)
+    requests = _requests()
+    resp = requests.post(
+        f"{config['evolution_url']}/group/updateParticipant/{config['instancia_nome']}",
+        params={"groupJid": jid}, json={"action": "add", "participants": numeros},
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    return _tratar_resposta(resp)
+
+
 def _numero_da_instancia(config):
     """Consulta a Evolution API pelo número de WhatsApp que está de fato
     conectado nessa instância agora — não é algo que a gente escolhe ou
@@ -608,7 +697,7 @@ def enviar_texto(config, telefone: str, texto: str, citar_externo_id: str = None
     if config.get("status_conexao") != "conectado":
         raise ApiError("O WhatsApp não está conectado no momento. Peça a um administrador para reconectar em Configurações.", status=400)
     requests = _requests()
-    corpo_envio = {"number": normalizar_telefone(telefone), "text": texto}
+    corpo_envio = {"number": destino_whatsapp(telefone), "text": texto}
     if citar_externo_id:
         corpo_envio["quoted"] = {"key": {"id": citar_externo_id}}
     resp = requests.post(
@@ -635,7 +724,7 @@ def enviar_figurinha(config, telefone: str, midia_url: str) -> str:
     requests = _requests()
     resp = requests.post(
         f"{config['evolution_url']}/message/sendSticker/{config['instancia_nome']}",
-        json={"number": normalizar_telefone(telefone), "sticker": midia_url},
+        json={"number": destino_whatsapp(telefone), "sticker": midia_url},
         headers=_cabecalhos(config), timeout=120,
     )
     corpo = _tratar_resposta(resp)
@@ -659,7 +748,7 @@ def enviar_midia(config, telefone: str, tipo: str, midia_url: str, nome_arquivo:
     resp = requests.post(
         f"{config['evolution_url']}/message/sendMedia/{config['instancia_nome']}",
         json={
-            "number": normalizar_telefone(telefone),
+            "number": destino_whatsapp(telefone),
             "mediatype": MAPA_TIPO_MEDIA_EVOLUTION.get(tipo, "document"),
             "media": midia_url,
             "fileName": nome_arquivo,

@@ -49,6 +49,7 @@ SCHEMA_FILES = [
     "schema_034_transcricao_audio.sql",
     "schema_035_indice_pulso.sql",
     "schema_036_fila_sem_menu.sql",
+    "schema_037_grupos.sql",
 ]
 
 

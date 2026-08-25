@@ -2752,10 +2752,93 @@
     return contatos.map((c) => `
       <div class="wpp-contato-linha">
         ${htmlAvatarContato(c.foto_url, c.nome, c.telefone, 32)}
-        <div style="flex:1; min-width:0;"><strong>${escapeHtml(c.nome || c.telefone)}</strong>${c.nome ? `<div class="texto-suave">${escapeHtml(c.telefone)}</div>` : ""}</div>
+        <div style="flex:1; min-width:0;"><strong>${c.eh_grupo ? "👥 " : ""}${escapeHtml(c.nome || c.telefone)}</strong>${c.nome && !c.eh_grupo ? `<div class="texto-suave">${escapeHtml(c.telefone)}</div>` : ""}${c.eh_grupo ? '<div class="texto-suave">Grupo</div>' : ""}</div>
         <button type="button" class="botao-icone" data-acao="editar-contato" data-id="${c.id}" data-nome="${escapeHtml(c.nome || "")}" data-telefone="${escapeHtml(c.telefone)}" title="Corrigir o nome deste contato">✏️</button>
         <button type="button" class="botao secundario pequeno" data-acao="iniciar-conversa-contato" data-telefone="${escapeHtml(c.telefone)}" data-nome="${escapeHtml(c.nome || "")}">Conversar</button>
       </div>`).join("");
+  }
+
+  async function modalCriarGrupo() {
+    const contatos = (await chamarApi("/whatsapp/contatos")).filter((c) => !c.eh_grupo);
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">👥 Criar grupo</h3>
+      <p class="dica">O grupo é criado no WhatsApp de verdade, com o número conectado como administrador. Depois ele aparece aqui na lista de Conversas como qualquer outra.</p>
+      <div class="campo"><label class="rotulo-forte">Nome do grupo</label>
+        <input name="nome" required maxlength="60" placeholder="Ex.: Obra Centro — Fornecedores" autofocus></div>
+      <div class="campo"><label class="rotulo-forte">Imagem do grupo (opcional)</label>
+        <input type="file" name="imagem" accept="image/*">
+        <p class="dica" style="margin-top:4px;">Se der problema ao definir a imagem, o grupo é criado do mesmo jeito — dá pra pôr a foto depois pelo WhatsApp.</p>
+      </div>
+      <div class="campo"><label class="rotulo-forte">Quem entra no grupo</label>
+        <input type="search" data-busca-grupo placeholder="Filtrar por nome ou telefone…" style="margin-bottom:8px;">
+        <div class="escolha-lista" data-lista-grupo style="max-height:260px; overflow-y:auto;">
+          ${contatos.length
+            ? contatos.map((c) => `
+              <label class="escolha-item" data-nome-contato="${escapeHtml((c.nome || "") + " " + c.telefone)}">
+                <input type="checkbox" name="participantes" value="${escapeHtml(c.telefone)}">
+                <span class="escolha-texto"><strong>${escapeHtml(c.nome || c.telefone)}</strong>${c.nome ? `<span class="escolha-ajuda">${escapeHtml(c.telefone)}</span>` : ""}</span>
+              </label>`).join("")
+            : '<p class="texto-suave">Nenhum contato salvo ainda — adicione contatos antes de montar um grupo.</p>'}
+        </div>
+        <p class="dica" data-contagem-grupo style="margin-top:6px;">Ninguém escolhido ainda.</p>
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-criar-grupo>Criar grupo</button>
+      </div>`);
+
+    const campoNome = wrap.querySelector('input[name="nome"]');
+    const busca = wrap.querySelector("[data-busca-grupo]");
+    const contagem = wrap.querySelector("[data-contagem-grupo]");
+    const marcados = () => [...wrap.querySelectorAll('input[name="participantes"]:checked')].map((i) => i.value);
+
+    const atualizarContagem = () => {
+      const n = marcados().length;
+      contagem.textContent = n === 0 ? "Ninguém escolhido ainda."
+        : n === 1 ? "1 pessoa escolhida." : `${n} pessoas escolhidas.`;
+    };
+    wrap.addEventListener("change", atualizarContagem);
+    busca.addEventListener("input", () => {
+      const termo = busca.value.trim().toLowerCase();
+      for (const item of wrap.querySelectorAll("[data-nome-contato]")) {
+        item.hidden = !!termo && !item.dataset.nomeContato.toLowerCase().includes(termo);
+      }
+    });
+
+    wrap.querySelector("[data-criar-grupo]").addEventListener("click", async (ev) => {
+      const nome = campoNome.value.trim();
+      const telefones = marcados();
+      if (!nome) { campoNome.focus(); return; }
+      if (!telefones.length) { definirFlash("erro", "Escolha pelo menos uma pessoa para o grupo."); return montarRota(); }
+      const botao = ev.currentTarget;
+      botao.disabled = true;
+      botao.textContent = "Criando…";
+      try {
+        // A imagem sobe primeiro, pelo mesmo caminho dos anexos: o
+        // WhatsApp busca a foto por URL, então ela precisa estar num
+        // endereço público antes do grupo existir.
+        let imagem_url = null;
+        const arquivo = wrap.querySelector('input[name="imagem"]').files[0];
+        if (arquivo) {
+          const forma = new FormData();
+          forma.append("arquivo", arquivo, arquivo.name || "imagem");
+          const resp = await fetch(`${API}/whatsapp/upload-avulso`, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + state.accessToken },
+            body: forma,
+          });
+          if (resp.ok) imagem_url = (await resp.json()).url;
+        }
+        const r = await chamarApi("/whatsapp/grupos", { method: "POST", body: { nome, telefones, imagem_url } });
+        fecharModais();
+        definirFlash("ok", `Grupo "${nome}" criado com ${telefones.length} pessoa(s).`);
+        location.hash = `#/whatsapp/${r.conversa_id}`;
+      } catch (e) {
+        botao.disabled = false;
+        botao.textContent = "Criar grupo";
+        throw e;
+      }
+    });
   }
 
   function modalEditarContato(id, nomeAtual, telefoneAtual) {
@@ -2790,7 +2873,10 @@
   async function modalContatos() {
     const contatos = await chamarApi("/whatsapp/contatos");
     abrirModal(`
-      <h3 style="margin-top:0;">Contatos</h3>
+      <h3 style="margin-top:0; display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <span>Contatos</span>
+        <button type="button" class="botao secundario pequeno" data-acao="abrir-criar-grupo">👥 Criar grupo</button>
+      </h3>
       <form data-form="criar-contato" style="display:flex; gap:6px; margin-bottom:16px;">
         <input name="telefone" type="tel" placeholder="Telefone (com DDD)" required style="flex:1;">
         <input name="nome" placeholder="Nome" style="flex:1;">
@@ -4106,6 +4192,9 @@
         return renderWhatsapp(null);
       }
       case "abrir-nova-conversa": modalNovaConversa(); return;
+      case "abrir-criar-grupo": {
+        return modalCriarGrupo();
+      }
       case "editar-contato": {
         return modalEditarContato(Number(alvo.dataset.id), alvo.dataset.nome || "", alvo.dataset.telefone || "");
       }

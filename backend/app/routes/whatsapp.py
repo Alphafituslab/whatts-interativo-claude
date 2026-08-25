@@ -586,11 +586,11 @@ def listar_contatos():
         digitos = re.sub(r"\D", "", q)
         termo_tel = f"%{digitos}%" if len(digitos) >= 4 else termo
         rows = conn.execute(
-            "SELECT id, nome, telefone, foto_url FROM whatsapp_contatos WHERE empresa_id = ? AND (nome LIKE ? OR telefone LIKE ?) ORDER BY nome LIMIT 200",
+            "SELECT id, nome, telefone, foto_url, eh_grupo FROM whatsapp_contatos WHERE empresa_id = ? AND (nome LIKE ? OR telefone LIKE ?) ORDER BY nome LIMIT 200",
             (g.empresa_id, termo, termo_tel),
         ).fetchall()
     else:
-        rows = conn.execute("SELECT id, nome, telefone, foto_url FROM whatsapp_contatos WHERE empresa_id = ? ORDER BY nome LIMIT 500", (g.empresa_id,)).fetchall()
+        rows = conn.execute("SELECT id, nome, telefone, foto_url, eh_grupo FROM whatsapp_contatos WHERE empresa_id = ? ORDER BY nome LIMIT 500", (g.empresa_id,)).fetchall()
     apelidos = _apelidos_contatos()
     contatos = []
     for r in rows:
@@ -686,6 +686,98 @@ def criar_contato():
     conn = get_db()
     contato = whatsapp_service.salvar_contato_manual(conn, g.empresa_id, telefone, dados.get("nome"))
     return jsonify(contato), 201
+
+
+@bp.post("/upload-avulso")
+@requires_auth
+def upload_avulso():
+    """Guarda um arquivo e devolve o endereço dele, sem prender a
+    nenhuma conversa. Usado pela foto do grupo: o WhatsApp busca a
+    imagem por URL, então ela precisa estar num endereço público ANTES
+    do grupo existir."""
+    arquivo = request.files.get("arquivo")
+    if arquivo is None or not arquivo.filename:
+        raise ApiError("Nenhum arquivo enviado.", status=400)
+    nome_original = secure_filename(arquivo.filename) or "arquivo"
+    if _classificar_tipo(nome_original) != "imagem":
+        raise ApiError("Só imagem por aqui.", status=400)
+    os.makedirs(PASTA_UPLOADS, exist_ok=True)
+    nome_seguro = f"{secrets.token_hex(8)}_{nome_original}"
+    caminho = os.path.join(PASTA_UPLOADS, nome_seguro)
+    arquivo.save(caminho)
+    if os.path.getsize(caminho) > MAX_ANEXO_MB * 1024 * 1024:
+        os.remove(caminho)
+        raise ApiError(f"Arquivo maior que {MAX_ANEXO_MB}MB.", status=400)
+    return jsonify({"url": f"/api/v1/whatsapp/uploads/{nome_seguro}"}), 201
+
+
+@bp.post("/grupos")
+@requires_auth
+def criar_grupo():
+    """Cria um grupo no WhatsApp com os contatos escolhidos.
+
+    O grupo entra no sistema como um contato marcado com eh_grupo, e já
+    ganha uma conversa — daí em diante ele se comporta como qualquer
+    outra: aparece na lista, aceita mensagem, anexo, etiqueta.
+    """
+    usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
+    nome = (dados.get("nome") or "").strip()
+    if not nome:
+        raise ApiError("Dê um nome ao grupo.", status=400)
+    telefones = [t for t in (dados.get("telefones") or []) if (t or "").strip()]
+    if not telefones:
+        raise ApiError("Escolha pelo menos uma pessoa para o grupo.", status=400)
+
+    conn = get_db()
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    grupo = whatsapp_service.criar_grupo(config, nome, telefones, (dados.get("descricao") or "").strip() or None)
+
+    # A foto é opcional e vai depois: o grupo já existe, e falhar aqui
+    # não pode desfazer o que deu certo.
+    foto_url = None
+    imagem = (dados.get("imagem_url") or "").strip()
+    if imagem:
+        publica = imagem if imagem.startswith("http") else whatsapp_service.url_publica(config, imagem)
+        if whatsapp_service.definir_foto_grupo(config, grupo["jid"], publica):
+            foto_url = imagem
+
+    agora = whatsapp_service._now_iso()
+    conn.execute(
+        "INSERT INTO whatsapp_contatos (empresa_id, telefone, nome, foto_url, eh_grupo, criado_em, atualizado_em) "
+        "VALUES (?, ?, ?, ?, 1, ?, ?)",
+        (g.empresa_id, grupo["id"], nome, foto_url, agora, agora),
+    )
+    contato_id = conn.execute("SELECT id FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ?",
+                              (g.empresa_id, grupo["id"])).fetchone()["id"]
+    conversa, _ = whatsapp_service.obter_ou_criar_conversa(conn, contato_id)
+    # Quem criou já fica responsável — senão o grupo nasceria numa fila
+    # sem setor, esperando alguém assumir algo que já tem dono.
+    whatsapp_service.atribuir_conversa(conn, conversa["id"], usuario["id"], usuario["id"])
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "grupo_criado", nome, conversa["id"])
+    return jsonify({"conversa_id": conversa["id"], "contato_id": contato_id,
+                    "nome": nome, "id_grupo": grupo["id"], "foto_url": foto_url}), 201
+
+
+@bp.post("/grupos/<int:conversa_id>/participantes")
+@requires_auth
+def adicionar_participantes(conversa_id):
+    """Adiciona gente a um grupo que já existe."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    contato = conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (conversa["contato_id"],)).fetchone()
+    if not contato["eh_grupo"]:
+        raise ApiError("Essa conversa não é um grupo.", status=400)
+    telefones = [t for t in ((request.get_json(silent=True) or {}).get("telefones") or []) if (t or "").strip()]
+    if not telefones:
+        raise ApiError("Escolha pelo menos uma pessoa.", status=400)
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    whatsapp_service.adicionar_ao_grupo(config, f"{contato['telefone']}@g.us", telefones)
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "grupo_participantes", contato["nome"], conversa_id)
+    return jsonify({"ok": True, "adicionados": len(telefones)})
 
 
 @bp.post("/contatos/importar")
