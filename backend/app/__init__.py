@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import secrets
@@ -12,7 +13,30 @@ FRONTEND_DIR = os.path.abspath(FRONTEND_DIR)
 # backend). O frontend fica de olho nisso (ver GET /api/v1/versao) pra
 # saber quando uma versão nova subiu e forçar todo mundo a logar de novo
 # — garante que ninguém fique preso rodando o app.js antigo em cache.
-VERSAO_SERVIDOR = secrets.token_hex(8)
+#
+# É a data e a hora da atualização, só com números: além de mudar a cada
+# subida (que é o que o mecanismo precisa), dá pra bater o olho e saber
+# de quando é a versão que está rodando. Antes era um código
+# hexadecimal, cheio de letras e sem significado nenhum pra quem lê.
+# Os segundos entram pra duas subidas no mesmo minuto não gerarem o
+# mesmo número — aí ninguém seria avisado da segunda.
+def _numero_da_versao() -> str:
+    """Data e hora da subida, no horário de Brasília.
+
+    O resto do sistema guarda tudo em UTC (e o frontend converte), mas
+    aqui é um rótulo pra ler direto na tela: em UTC ele mostraria três
+    horas à frente do relógio de quem está olhando, o que confunde mais
+    do que ajuda. Se o servidor não tiver a base de fusos instalada,
+    cai pra UTC em vez de quebrar."""
+    try:
+        from zoneinfo import ZoneInfo
+        agora = datetime.datetime.now(ZoneInfo("America/Sao_Paulo"))
+    except Exception:
+        agora = datetime.datetime.now(datetime.timezone.utc)
+    return agora.strftime("%Y.%m.%d.%H%M%S")
+
+
+VERSAO_SERVIDOR = _numero_da_versao()
 
 
 def create_app(test_config: dict = None) -> Flask:

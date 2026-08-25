@@ -50,6 +50,14 @@
     return `${dia}/${mes}/${ano} às ${h}:${min}:${s}`;
   }
 
+  // A versão vem como AAAA.MM.DD.HHMMSS. Na tela mostramos até o minuto
+  // — os segundos existem só pra duas atualizações no mesmo minuto não
+  // gerarem o mesmo número. A comparação que dispara o recarregamento
+  // usa o valor inteiro, não este.
+  function _versaoCurta(versao) {
+    return String(versao || "").slice(0, 15);
+  }
+
   function fmtData(iso) {
     if (!iso) return "—";
     try {
@@ -336,7 +344,7 @@
               <button class="botao-icone" data-acao="alternar-tema" title="Alternar tema">🌓</button>
               <button class="botao secundario pequeno" data-acao="logout" style="margin-left:auto;">Sair</button>
             </div>
-            ${usuario && usuario.admin ? `<div class="wpp-versao-rodape" data-wpp-versao title="Versão do sistema — muda a cada atualização">${state.versaoServidor ? `v${state.versaoServidor.slice(0, 8)}` : ""}</div>` : ""}
+            ${usuario && usuario.admin ? `<div class="wpp-versao-rodape" data-wpp-versao title="Versão do sistema — muda a cada atualização">${state.versaoServidor ? `v${_versaoCurta(state.versaoServidor)}` : ""}</div>` : ""}
           </div>
         </aside>
         <div class="conteudo-principal">
@@ -1354,7 +1362,7 @@
       if (!state.versaoServidor) {
         state.versaoServidor = resp.versao;
         const badge = document.querySelector("[data-wpp-versao]");
-        if (badge) badge.textContent = `v${resp.versao.slice(0, 8)}`;
+        if (badge) badge.textContent = `v${_versaoCurta(resp.versao)}`;
         return;
       }
       if (resp.versao === state.versaoServidor) return;
