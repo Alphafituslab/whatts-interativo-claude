@@ -495,6 +495,9 @@ def listar_conversas():
 
     base = """
         SELECT c.*, ct.telefone, ct.nome AS contato_nome, ct.foto_url AS contato_foto,
+               ct.eh_grupo AS eh_grupo,
+               (SELECT COUNT(*) FROM whatsapp_conversa_usuarios cu
+                 WHERE cu.conversa_id = c.id) AS equipe_no_grupo,
                u.nome AS atribuida_usuario_nome,
                u.ultimo_acesso AS _u_ultimo_acesso, u.offline_forcado AS _u_offline_forcado
         FROM whatsapp_conversas c
@@ -800,6 +803,9 @@ def buscar_conversas():
     rows = conn.execute(
         f"""
         SELECT c.*, ct.telefone, ct.nome AS contato_nome, ct.foto_url AS contato_foto,
+               ct.eh_grupo AS eh_grupo,
+               (SELECT COUNT(*) FROM whatsapp_conversa_usuarios cu
+                 WHERE cu.conversa_id = c.id) AS equipe_no_grupo,
                u.nome AS atribuida_usuario_nome,
                u.ultimo_acesso AS _u_ultimo_acesso, u.offline_forcado AS _u_offline_forcado
         FROM whatsapp_conversas c
@@ -1169,7 +1175,16 @@ def listar_mensagens(conversa_id):
     # da conversa — se for o admin espiando a conversa de outro usuário
     # (supervisão) ou alguém só espiando a fila antes de assumir, o
     # contador continua do jeito que o dono vai ver depois.
-    if conversa["atribuida_usuario_id"] == usuario["id"]:
+    dono_id = conversa["atribuida_usuario_id"]
+    if conversa["eh_grupo"]:
+        # Grupo não tem dono: quem lê é quem participa.
+        zerar = _participa_do_grupo(conn, conversa_id, usuario["id"])
+    elif dono_id is None:
+        # Ainda de ninguém: quem consegue abrir consegue atender, e leu.
+        zerar = True
+    else:
+        zerar = dono_id == usuario["id"]
+    if zerar:
         conn.execute("UPDATE whatsapp_conversas SET nao_lidas = 0 WHERE id = ?", (conversa_id,))
 
     return jsonify([dict(r) for r in rows])
@@ -1751,6 +1766,260 @@ def remover_participante_grupo(conversa_id, usuario_id):
     whatsapp_service.registrar_atividade(
         conn, usuario["id"], "grupo_participante_removido", str(usuario_id), conversa_id)
     return jsonify({"ok": True, "participantes": _participantes_do_grupo(conn, conversa_id)})
+
+
+def _catalogo_visivel(conn, usuario, catalogo_id) -> bool:
+    """Quem pode MANDAR este catálogo.
+
+    Catálogo não restrito é de todos. Restrito, só de quem está na lista.
+    Admin manda qualquer um — é quem cadastra."""
+    linha = conn.execute(
+        "SELECT restrito, ativo FROM catalogos WHERE id = ? AND empresa_id = ?",
+        (catalogo_id, g.empresa_id),
+    ).fetchone()
+    if linha is None or not linha["ativo"]:
+        return False
+    if usuario["admin"] or not linha["restrito"]:
+        return True
+    return conn.execute(
+        "SELECT 1 FROM catalogo_usuarios WHERE catalogo_id = ? AND usuario_id = ?",
+        (catalogo_id, usuario["id"]),
+    ).fetchone() is not None
+
+
+def _catalogo_para_tela(conn, row, com_permissoes=False):
+    d = dict(row)
+    if com_permissoes:
+        d["usuarios"] = [r["usuario_id"] for r in conn.execute(
+            "SELECT usuario_id FROM catalogo_usuarios WHERE catalogo_id = ?", (row["id"],)
+        ).fetchall()]
+    return d
+
+
+@bp.get("/catalogos")
+@requires_auth
+def listar_catalogos():
+    """Os catálogos que ESTA pessoa pode mandar.
+
+    Com ?todos=1 (só admin) vem a lista completa, inclusive os desligados
+    e com a lista de quem pode mandar cada um — é o que a tela de
+    Configuração usa."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    todos = request.args.get("todos") == "1"
+    if todos:
+        if not usuario["admin"]:
+            raise ApiError("Só um administrador vê a lista completa.", status=403, codigo="sem_permissao")
+        rows = conn.execute(
+            "SELECT * FROM catalogos WHERE empresa_id = ? ORDER BY ordem, id", (g.empresa_id,)
+        ).fetchall()
+        return jsonify([_catalogo_para_tela(conn, r, com_permissoes=True) for r in rows])
+
+    rows = conn.execute(
+        """
+        SELECT c.* FROM catalogos c
+        WHERE c.empresa_id = ? AND c.ativo = 1
+          AND (c.restrito = 0 OR ? = 1 OR EXISTS (
+                SELECT 1 FROM catalogo_usuarios cu
+                 WHERE cu.catalogo_id = c.id AND cu.usuario_id = ?))
+        ORDER BY c.ordem, c.id
+        """,
+        (g.empresa_id, 1 if usuario["admin"] else 0, usuario["id"]),
+    ).fetchall()
+    return jsonify([_catalogo_para_tela(conn, r) for r in rows])
+
+
+@bp.post("/catalogos")
+@requires_admin
+def criar_catalogo():
+    """Cadastra um catálogo por LINK. PDF entra pela rota /catalogos/pdf."""
+    dados = request.get_json(silent=True) or {}
+    nome = (dados.get("nome") or "").strip()
+    url = (dados.get("url") or "").strip()
+    if not nome:
+        raise ApiError("Dê um nome pro catálogo — é o que a equipe vê na hora de escolher.", status=400)
+    if not url.startswith(("http://", "https://")):
+        raise ApiError("O endereço precisa começar com http:// ou https://.", status=400)
+
+    conn = get_db()
+    proxima = conn.execute(
+        "SELECT COALESCE(MAX(ordem), 0) + 1 AS v FROM catalogos WHERE empresa_id = ?", (g.empresa_id,)
+    ).fetchone()["v"]
+    cur = conn.execute(
+        "INSERT INTO catalogos (empresa_id, nome, descricao, tipo, url, restrito, ativo, ordem, criado_por, criado_em) "
+        "VALUES (?, ?, ?, 'link', ?, 0, 1, ?, ?, ?)",
+        (g.empresa_id, nome, (dados.get("descricao") or "").strip() or None, url,
+         proxima, g.usuario_atual["id"], _now_iso()),
+    )
+    row = conn.execute("SELECT * FROM catalogos WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return jsonify(_catalogo_para_tela(conn, row, com_permissoes=True)), 201
+
+
+@bp.post("/catalogos/pdf")
+@requires_admin
+def subir_catalogo_pdf():
+    """Cadastra um catálogo em PDF. O arquivo fica na mesma pasta dos
+    anexos e é enviado ao cliente como documento comum."""
+    arquivo = request.files.get("arquivo")
+    if not arquivo or not arquivo.filename:
+        raise ApiError("Escolha o arquivo do catálogo.", status=400)
+    if _classificar_tipo(arquivo.filename) != "documento":
+        raise ApiError("Envie um PDF (ou outro documento).", status=400)
+
+    dados_bytes = arquivo.read()
+    if len(dados_bytes) > MAX_ANEXO_MB * 1024 * 1024:
+        raise ApiError(f"Arquivo maior que o limite de {MAX_ANEXO_MB}MB.", status=400)
+
+    os.makedirs(PASTA_UPLOADS, exist_ok=True)
+    nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
+    with open(os.path.join(PASTA_UPLOADS, nome_seguro), "wb") as f:
+        f.write(dados_bytes)
+
+    conn = get_db()
+    proxima = conn.execute(
+        "SELECT COALESCE(MAX(ordem), 0) + 1 AS v FROM catalogos WHERE empresa_id = ?", (g.empresa_id,)
+    ).fetchone()["v"]
+    cur = conn.execute(
+        "INSERT INTO catalogos (empresa_id, nome, descricao, tipo, url, nome_arquivo, restrito, ativo, ordem, criado_por, criado_em) "
+        "VALUES (?, ?, ?, 'pdf', ?, ?, 0, 1, ?, ?, ?)",
+        (g.empresa_id, (request.form.get("nome") or arquivo.filename).strip(),
+         (request.form.get("descricao") or "").strip() or None,
+         f"/api/v1/whatsapp/uploads/{nome_seguro}", arquivo.filename,
+         proxima, g.usuario_atual["id"], _now_iso()),
+    )
+    row = conn.execute("SELECT * FROM catalogos WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return jsonify(_catalogo_para_tela(conn, row, com_permissoes=True)), 201
+
+
+@bp.put("/catalogos/<int:catalogo_id>")
+@requires_admin
+def editar_catalogo(catalogo_id):
+    """Nome, endereço, ligado/desligado e QUEM PODE MANDAR."""
+    conn = get_db()
+    atual = conn.execute(
+        "SELECT * FROM catalogos WHERE id = ? AND empresa_id = ?", (catalogo_id, g.empresa_id)
+    ).fetchone()
+    if atual is None:
+        raise ApiError("Catálogo não encontrado.", status=404, codigo="nao_encontrado")
+
+    dados = request.get_json(silent=True) or {}
+    nome = (dados.get("nome") or atual["nome"]).strip()
+    url = (dados.get("url") or atual["url"]).strip()
+    if atual["tipo"] == "link" and not url.startswith(("http://", "https://")):
+        raise ApiError("O endereço precisa começar com http:// ou https://.", status=400)
+
+    # Só mexe no que veio. A tela salva um campo de cada vez (trocar o
+    # nome, marcar restrito, ligar/desligar) — se o que não veio virasse
+    # vazio, marcar "restrito" apagaria a descrição junto.
+    descricao = ((dados["descricao"] or "").strip() or None) if "descricao" in dados else atual["descricao"]
+    restrito = (1 if dados["restrito"] else 0) if "restrito" in dados else atual["restrito"]
+    ativo = (1 if dados["ativo"] else 0) if "ativo" in dados else atual["ativo"]
+    conn.execute(
+        "UPDATE catalogos SET nome = ?, descricao = ?, url = ?, restrito = ?, ativo = ? WHERE id = ?",
+        (nome, descricao, url, restrito, ativo, catalogo_id),
+    )
+
+    # A lista de quem pode mandar é sempre reescrita inteira: é mais
+    # simples de entender do que somar e subtrair pessoas, e a tela manda
+    # a seleção completa de qualquer jeito.
+    if "usuarios" in dados:
+        conn.execute("DELETE FROM catalogo_usuarios WHERE catalogo_id = ?", (catalogo_id,))
+        for uid in dict.fromkeys(int(x) for x in (dados.get("usuarios") or [])):
+            existe = conn.execute(
+                "SELECT 1 FROM usuarios WHERE id = ? AND ativo = 1 AND empresa_id = ?", (uid, g.empresa_id)
+            ).fetchone()
+            if existe:
+                conn.execute(
+                    "INSERT OR IGNORE INTO catalogo_usuarios (catalogo_id, usuario_id) VALUES (?, ?)",
+                    (catalogo_id, uid),
+                )
+
+    row = conn.execute("SELECT * FROM catalogos WHERE id = ?", (catalogo_id,)).fetchone()
+    return jsonify(_catalogo_para_tela(conn, row, com_permissoes=True))
+
+
+@bp.delete("/catalogos/<int:catalogo_id>")
+@requires_admin
+def excluir_catalogo(catalogo_id):
+    conn = get_db()
+    existe = conn.execute(
+        "SELECT 1 FROM catalogos WHERE id = ? AND empresa_id = ?", (catalogo_id, g.empresa_id)
+    ).fetchone()
+    if existe is None:
+        raise ApiError("Catálogo não encontrado.", status=404, codigo="nao_encontrado")
+    conn.execute("DELETE FROM catalogo_usuarios WHERE catalogo_id = ?", (catalogo_id,))
+    conn.execute("DELETE FROM catalogos WHERE id = ?", (catalogo_id,))
+    return jsonify({"ok": True})
+
+
+@bp.post("/conversas/<int:conversa_id>/catalogo/<int:catalogo_id>")
+@requires_auth
+def enviar_catalogo(conversa_id, catalogo_id):
+    """Manda o catálogo pro cliente desta conversa.
+
+    Link vira mensagem de texto (com o nome na frente, pra não chegar um
+    endereço solto); PDF vai como documento. O registro fica em
+    catalogo_envios — é o que responde 'já mandamos o portfólio pra
+    ele?'."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao",
+                       extra=_dados_do_dono(conversa))
+    if not _catalogo_visivel(conn, usuario, catalogo_id):
+        raise ApiError("Você não tem permissão para enviar este catálogo.", status=403, codigo="sem_permissao")
+
+    catalogo = conn.execute("SELECT * FROM catalogos WHERE id = ?", (catalogo_id,)).fetchone()
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    agora = _now_iso()
+    observacao = (request.get_json(silent=True) or {}).get("observacao", "")
+    observacao = (observacao or "").strip()
+
+    if catalogo["tipo"] == "link":
+        texto = f"*{catalogo['nome']}*"
+        if catalogo["descricao"]:
+            texto += f"\n{catalogo['descricao']}"
+        if observacao:
+            texto += f"\n\n{observacao}"
+        texto += f"\n\n{catalogo['url']}"
+        _mandar_texto_simples(conn, config, conversa, usuario, texto, agora)
+        preview = f"📚 {catalogo['nome']}"
+    else:
+        if observacao:
+            _mandar_texto_simples(conn, config, conversa, usuario, observacao, agora)
+        try:
+            url_completa = whatsapp_service.url_publica(config, catalogo["url"])
+            externo_id = whatsapp_service.enviar_midia(
+                config, conversa["telefone"], "documento", url_completa,
+                catalogo["nome_arquivo"] or "catalogo.pdf", catalogo["nome"])
+            status_msg, erro = "enviada", None
+        except ApiError as e:
+            externo_id, status_msg, erro = None, "falhou", e.mensagem
+        conn.execute(
+            "INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, "
+            "usuario_id, status, erro, criado_em) VALUES (?, 'saida', 'documento', ?, ?, ?, ?, ?, ?, ?)",
+            (conversa_id, catalogo["nome"], catalogo["url"], externo_id, usuario["id"], status_msg, erro, agora),
+        )
+        preview = f"📚 {catalogo['nome']}"
+
+    conn.execute(
+        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, "
+        "ultima_mensagem_preview = ?, ultima_msg_operador_em = ? WHERE id = ?",
+        (agora, preview[:120], agora, conversa_id),
+    )
+    if conversa["eh_grupo"]:
+        _entrar_no_grupo(conn, conversa_id, usuario["id"])
+    elif conversa["atribuida_usuario_id"] is None:
+        whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
+
+    conn.execute(
+        "INSERT INTO catalogo_envios (catalogo_id, conversa_id, usuario_id, criado_em) VALUES (?, ?, ?, ?)",
+        (catalogo_id, conversa_id, usuario["id"], agora),
+    )
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "catalogo_enviado", f"{catalogo['nome']} -> {conversa['telefone']}", conversa_id)
+    return jsonify({"ok": True, "nome": catalogo["nome"]})
 
 
 @bp.post("/conversas/<int:conversa_id>/pedir-liberacao")

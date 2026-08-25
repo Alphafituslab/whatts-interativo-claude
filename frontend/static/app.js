@@ -2304,7 +2304,9 @@
   function htmlItemConversa(c, conversaAtivaId) {
     {
       const nome = c.contato_nome || c.telefone;
-      const naFila = !c.atribuida_usuario_id;
+      // Grupo nunca tem dono, então "sem dono" não significa "na fila":
+      // só está na fila o grupo em que ninguém da equipe entrou ainda.
+      const naFila = c.eh_grupo ? !c.equipe_no_grupo : !c.atribuida_usuario_id;
       const slaEstourado = state.slaAlertasIds.has(c.id);
       return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : ""}>
         ${htmlAvatarContato(c.contato_foto, c.contato_nome, c.telefone, 42)}
@@ -2331,7 +2333,7 @@
           })()}
           ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
         </div>
-        ${naFila ? `<button type="button" class="botao pequeno wpp-botao-assumir" data-acao="assumir-conversa" data-id="${c.id}">Assumir</button>` : ""}
+        ${naFila ? `<button type="button" class="botao pequeno wpp-botao-assumir" data-acao="assumir-conversa" data-id="${c.id}">${c.eh_grupo ? "Entrar no grupo" : "Assumir"}</button>` : ""}
       </a>`;
     }
   }
@@ -2555,6 +2557,25 @@
   // porque o painel é montado toda vez que a conversa é redesenhada
   // (que acontece a cada mensagem enviada) — buscar no servidor sempre
   // deixaria o envio lento à toa. Quem adiciona/remove limpa o cache.
+  // Os catálogos mudam raramente e o botão precisa aparecer sem esperar
+  // a rede — por isso o cache. Quem cadastra/edita limpa.
+  async function obterCatalogos(forcar) {
+    if (forcar === true && state._catalogosCache) return state._catalogosCache;
+    if (forcar === "limpar") state._catalogosCache = null;
+    if (!state._catalogosCache) {
+      try { state._catalogosCache = await chamarApi("/whatsapp/catalogos"); }
+      catch (e) { state._catalogosCache = []; }
+    }
+    return state._catalogosCache;
+  }
+
+  async function _mostrarBotaoCatalogo() {
+    const envolucro = document.querySelector("[data-wpp-catalogo-envolucro]");
+    if (!envolucro) return;
+    const catalogos = await obterCatalogos();
+    envolucro.hidden = catalogos.length === 0;
+  }
+
   async function obterEmojisSalvos() {
     if (!state._emojisCache) {
       try { state._emojisCache = await chamarApi("/whatsapp/emojis"); }
@@ -2667,6 +2688,17 @@
             data-proximo="${escapeHtml(conversa.proximo_contato_em || "")}" title="Mais ações">⋯</button>
         </div>
       </div>
+      ${conversa.eh_grupo ? `
+        <div class="wpp-grupo-membros">
+          <span class="wpp-grupo-rotulo">👥 Da nossa equipe neste grupo:</span>
+          ${(conversa.participantes || []).length
+            ? conversa.participantes.map((p) => `
+                <span class="wpp-grupo-membro">${escapeHtml(p.nome)}
+                  <button type="button" class="wpp-tag-tirar" data-acao="tirar-do-grupo" data-id="${conversa.id}" data-usuario="${p.id}" title="Tirar ${escapeHtml(p.nome)} deste grupo">✕</button>
+                </span>`).join("")
+            : `<span class="texto-suave">ninguém ainda</span>`}
+          <button type="button" class="wpp-tag-adicionar" data-acao="abrir-membros-grupo" data-id="${conversa.id}" title="Chamar um colega pra este grupo — só quem está aqui dentro vê a conversa">+ colega</button>
+        </div>` : ""}
       <div class="wpp-tags-linha">
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
@@ -2696,6 +2728,10 @@
           <button type="button" class="botao-icone" data-acao="alternar-respostas-prontas" title="Respostas prontas">📋</button>
           <div class="wpp-respostas-painel" data-wpp-respostas-painel hidden>${htmlRespostasProntasLista(respostasProntas || [])}</div>
         </div>
+        <div class="wpp-emoji-envolucro" data-wpp-catalogo-envolucro hidden>
+          <button type="button" class="botao-icone" data-acao="alternar-catalogos" data-id="${conversa.id}" title="Enviar portfólio ou catálogo">📚</button>
+          <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
+        </div>
         <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1"></textarea>
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
         <button type="button" class="botao-icone" data-acao="gravar-video" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
@@ -2707,7 +2743,7 @@
   function htmlAbasConversas() {
     const usuario = state.usuarioAtual;
     const abas = [
-      { chave: "minhas", label: "Minhas", dica: "Conversas em andamento — você já respondeu, aguardando o cliente" },
+      { chave: "minhas", label: "Minhas", dica: "Seus atendimentos. O número mostra quantos têm mensagem esperando resposta." },
       { chave: "fila", label: "Fila", dica: "Clientes que ainda são de ninguém, esperando alguém assumir — do seu setor, mais os que não escolheram setor e já esperaram demais" },
       { chave: "sem_menu", label: "Sem escolha", dica: "Clientes que escreveram e não escolheram nenhum número do menu. Passados alguns minutos, eles também entram na Fila de todos, até alguém assumir." },
     ];
@@ -2718,7 +2754,11 @@
     // ali o tempo conta, e ninguém está olhando pra aba o tempo todo.
     const cont = state.contagemAbas || {};
     return `<div class="wpp-abas">${abas.map((a) => {
-      const n = cont[a.chave];
+      // Em "Minhas" o número é o que FALTA RESPONDER, não quantas
+      // conversas existem. Um "6" que nunca muda porque você tem seis
+      // atendimentos abertos não informa nada — o que a pessoa procura
+      // ali é "tem alguém esperando?".
+      const n = a.chave === "minhas" ? cont.minhas_nao_lidas : cont[a.chave];
       const urgente = (a.chave === "fila" || a.chave === "sem_menu") && n > 0;
       const naoLidas = a.chave === "minhas" && cont.minhas_nao_lidas > 0;
       const selo = (n === null || n === undefined || n === 0)
@@ -2847,6 +2887,7 @@
     );
 
     _irParaOFim(document.querySelector("[data-wpp-mensagens]"));
+    _mostrarBotaoCatalogo();
     iniciarPollingWhatsapp(conversaId);
   }
 
@@ -3783,10 +3824,12 @@
     // a plataforma tem acesso — o servidor barra de qualquer jeito, aqui
     // é só pra não mostrar uma seção que daria erro ao usar.
     const ehSuperAdmin = !!state.usuarioAtual.super_admin;
-    const [{ config, webhookUrl }, setoresDetalhado, backups] = await Promise.all([
+    const [{ config, webhookUrl }, setoresDetalhado, backups, catalogos, usuarios] = await Promise.all([
       buscarConfigECriarWebhookUrl(),
       chamarApi("/usuarios/setores/detalhado"),
       ehSuperAdmin ? chamarApi("/sistema/backups") : Promise.resolve([]),
+      chamarApi("/whatsapp/catalogos?todos=1").catch(() => []),
+      chamarApi("/usuarios").catch(() => []),
     ]);
     const setoresAtuais = setoresDetalhado.map((s) => s.nome);
 
@@ -3852,6 +3895,52 @@
          <form data-form="criar-setor" style="display:flex; gap:8px;">
            <input name="nome" placeholder="Nome do novo setor" required style="flex:1;">
            <button type="submit" class="botao secundario">Adicionar setor</button>
+         </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">📚 Portfólio e catálogos</h3>
+         <p class="dica">O que a equipe manda pro cliente em um clique, pelo botão 📚 dentro da conversa. Dois formatos: <strong>link</strong> (o portfólio que já está no ar, sempre atualizado) e <strong>PDF</strong> (tabela de preço, encarte — o que não cabe no site). Em cada um você escolhe <strong>quem pode mandar</strong>.</p>
+
+         <div class="wpp-catalogos-lista">
+           ${catalogos.length ? catalogos.map((c) => `
+             <div class="wpp-catalogo-item ${c.ativo ? "" : "wpp-catalogo-desligado"}">
+               <div class="wpp-catalogo-topo">
+                 <span class="wpp-catalogo-icone">${c.tipo === "pdf" ? "📄" : "🌐"}</span>
+                 <input value="${escapeHtml(c.nome)}" data-acao-change="renomear-catalogo" data-id="${c.id}" style="flex:1; font-weight:600;">
+                 <button type="button" class="botao-icone" data-acao="alternar-catalogo-ativo" data-id="${c.id}" data-ativo="${c.ativo ? 1 : 0}" title="${c.ativo ? "Desligar (some da lista da equipe)" : "Ligar"}">${c.ativo ? "👁" : "🚫"}</button>
+                 <button type="button" class="botao-icone" data-acao="excluir-catalogo" data-id="${c.id}" data-nome="${escapeHtml(c.nome)}" title="Excluir">🗑️</button>
+               </div>
+               <div class="wpp-catalogo-endereco">
+                 ${c.tipo === "pdf"
+                   ? `<a href="${escapeHtml(c.url)}" target="_blank" rel="noopener">${escapeHtml(c.nome_arquivo || "ver arquivo")}</a>`
+                   : `<input value="${escapeHtml(c.url)}" data-acao-change="trocar-url-catalogo" data-id="${c.id}" placeholder="https://…">`}
+               </div>
+               <label class="wpp-catalogo-restrito">
+                 <input type="checkbox" data-acao-change="alternar-catalogo-restrito" data-id="${c.id}" ${c.restrito ? "checked" : ""}>
+                 <span>Só algumas pessoas podem mandar este catálogo</span>
+               </label>
+               ${c.restrito ? `
+                 <div class="wpp-catalogo-quem" data-quem="${c.id}">
+                   ${usuarios.filter((u) => u.ativo).map((u) => `
+                     <label class="wpp-catalogo-pessoa">
+                       <input type="checkbox" data-acao-change="marcar-usuario-catalogo" data-id="${c.id}" data-usuario="${u.id}" ${(c.usuarios || []).includes(u.id) ? "checked" : ""}>
+                       <span>${escapeHtml(u.nome)}${u.admin ? " (admin)" : ""}</span>
+                     </label>`).join("")}
+                   <p class="dica" style="margin:6px 0 0;">Administrador manda qualquer catálogo, marcado ou não.</p>
+                 </div>` : ""}
+             </div>`).join("") : `<p class="dica">Nenhum catálogo cadastrado ainda.</p>`}
+         </div>
+
+         <form data-form="criar-catalogo" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+           <input name="nome" placeholder="Nome (ex.: Portfólio 2026)" required style="flex:1; min-width:180px;">
+           <input name="url" placeholder="https://…" required style="flex:2; min-width:220px;">
+           <button type="submit" class="botao secundario">+ Adicionar link</button>
+         </form>
+         <form data-form="subir-catalogo-pdf" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center;">
+           <input name="nome" placeholder="Nome (ex.: Tabela de preços)" style="flex:1; min-width:180px;">
+           <input type="file" name="arquivo" accept=".pdf,.doc,.docx,.xls,.xlsx" required style="flex:2; min-width:220px;">
+           <button type="submit" class="botao secundario">+ Enviar PDF</button>
          </form>
        </div>
 
@@ -5270,6 +5359,94 @@
         alvo.closest("[data-wpp-emoji-painel]").hidden = true;
         return;
       }
+      case "alternar-catalogo-ativo": {
+        await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, {
+          method: "PUT", body: { ativo: alvo.dataset.ativo !== "1" },
+        });
+        obterCatalogos("limpar");
+        return renderConfiguracao();
+      }
+      case "excluir-catalogo": {
+        if (!confirm(`Excluir o catálogo "${alvo.dataset.nome}"? A equipe deixa de poder mandá-lo.`)) return;
+        await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "DELETE" });
+        obterCatalogos("limpar");
+        definirFlash("ok", "Catálogo excluído.");
+        return renderConfiguracao();
+      }
+      case "abrir-membros-grupo": {
+        const id = Number(alvo.dataset.id);
+        const [participantes, usuarios] = await Promise.all([
+          chamarApi(`/whatsapp/conversas/${id}/participantes`),
+          chamarApi("/usuarios"),
+        ]);
+        const dentro = new Set(participantes.map((p) => p.id));
+        const fora = usuarios.filter((u) => u.ativo && u.acesso_conversas !== false && !dentro.has(u.id));
+        const wrap = abrirModal(`
+          <h3 style="margin-top:0;">👥 Chamar alguém pro grupo</h3>
+          <p class="dica">Quem entrar passa a ver e escrever neste grupo. Quem está de fora não vê nada dele.</p>
+          <div class="wpp-encaminhar-lista">
+            ${fora.length ? fora.map((u) => `
+              <label class="wpp-encaminhar-item">
+                <input type="checkbox" data-usuario="${u.id}">
+                <span class="wpp-encaminhar-nome">${u.online ? "🟢" : "🔴"} ${escapeHtml(u.nome)}</span>
+                <span class="wpp-encaminhar-tel">${escapeHtml(_setoresDoColega(u).join(", ") || "")}</span>
+              </label>`).join("") : `<p class="dica">Todo mundo já está no grupo.</p>`}
+          </div>
+          <div class="rodape-modal">
+            <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+            <button type="button" class="botao" data-add-membros>Chamar</button>
+          </div>`);
+        wrap.querySelector("[data-add-membros]").addEventListener("click", async (ev) => {
+          const escolhidos = [...wrap.querySelectorAll("input:checked")].map((c) => Number(c.dataset.usuario));
+          if (!escolhidos.length) { definirFlash("erro", "Marque quem você quer chamar."); return; }
+          ev.currentTarget.disabled = true;
+          try {
+            const r = await chamarApi(`/whatsapp/conversas/${id}/participantes`, { method: "POST", body: { usuarios: escolhidos } });
+            fecharModais();
+            definirFlash("ok", `${(r.entraram || []).join(", ")} agora participa deste grupo.`);
+          } catch (e) {
+            definirFlash("erro", e.message || "Não consegui chamar.");
+          }
+          return renderWhatsapp(id);
+        });
+        return;
+      }
+      case "tirar-do-grupo": {
+        const id = Number(alvo.dataset.id);
+        const uid = Number(alvo.dataset.usuario);
+        if (!confirm("Tirar esta pessoa do grupo? Ela deixa de ver a conversa.")) return;
+        await chamarApi(`/whatsapp/conversas/${id}/participantes/${uid}`, { method: "DELETE" });
+        definirFlash("ok", "Pronto.");
+        return renderWhatsapp(id);
+      }
+      case "alternar-catalogos": {
+        const painel = alvo.parentElement.querySelector("[data-wpp-catalogos-painel]");
+        if (!painel.hidden) { painel.hidden = true; return; }
+        painel.hidden = false;
+        painel.innerHTML = `<p class="dica" style="padding:10px;">Carregando…</p>`;
+        const catalogos = await obterCatalogos(true);
+        painel.innerHTML = catalogos.length
+          ? catalogos.map((c) => `
+              <button type="button" class="wpp-resposta-item" data-acao="enviar-catalogo" data-id="${c.id}" data-conversa="${alvo.dataset.id}">
+                <strong>${c.tipo === "pdf" ? "📄" : "🌐"} ${escapeHtml(c.nome)}</strong>
+                ${c.descricao ? `<span class="texto-suave">${escapeHtml(c.descricao)}</span>` : ""}
+              </button>`).join("")
+          : `<p class="dica" style="padding:10px;">Nenhum catálogo liberado pra você. Um administrador cadastra em Configuração.</p>`;
+        return;
+      }
+      case "enviar-catalogo": {
+        const conversaId = Number(alvo.dataset.conversa);
+        const catalogoId = Number(alvo.dataset.id);
+        const painel = alvo.closest("[data-wpp-catalogos-painel]");
+        if (painel) painel.hidden = true;
+        try {
+          const r = await chamarApi(`/whatsapp/conversas/${conversaId}/catalogo/${catalogoId}`, { method: "POST" });
+          definirFlash("ok", `${r.nome} enviado.`);
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não consegui enviar o catálogo.");
+        }
+        return renderWhatsapp(conversaId);
+      }
       case "alternar-respostas-prontas": {
         const painel = alvo.parentElement.querySelector("[data-wpp-respostas-painel]");
         painel.hidden = !painel.hidden;
@@ -5492,6 +5669,35 @@
         await chamarApi(`/usuarios/${alvo.dataset.id}/reativar`, { method: "POST" });
         definirFlash("ok", "Usuário reativado.");
         return renderUsuarios();
+      }
+      case "renomear-catalogo": {
+        const nome = alvo.value.trim();
+        if (!nome) return renderConfiguracao();
+        await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "PUT", body: { nome } });
+        obterCatalogos("limpar");
+        definirFlash("ok", "Nome atualizado.");
+        return;
+      }
+      case "trocar-url-catalogo": {
+        await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "PUT", body: { url: alvo.value.trim() } });
+        obterCatalogos("limpar");
+        definirFlash("ok", "Endereço atualizado.");
+        return;
+      }
+      case "alternar-catalogo-restrito": {
+        await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "PUT", body: { restrito: alvo.checked } });
+        obterCatalogos("limpar");
+        return renderConfiguracao();
+      }
+      case "marcar-usuario-catalogo": {
+        // Manda a seleção inteira: é o que o servidor grava, e evita
+        // ficar somando e subtraindo pessoa por pessoa.
+        const caixa = document.querySelector(`[data-quem="${alvo.dataset.id}"]`);
+        const escolhidos = [...caixa.querySelectorAll("input:checked")].map((c) => Number(c.dataset.usuario));
+        await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "PUT", body: { usuarios: escolhidos } });
+        obterCatalogos("limpar");
+        definirFlash("ok", "Quem pode mandar foi atualizado.");
+        return;
       }
       case "renomear-setor": {
         const nome = alvo.value.trim();
@@ -5891,6 +6097,33 @@
         state._tagsCache = null;
         definirFlash("ok", `Etiqueta "${nome}" criada.`);
         return renderWhatsappConfiguracao();
+      }
+      case "criar-catalogo": {
+        await chamarApi("/whatsapp/catalogos", {
+          method: "POST",
+          body: { nome: dados.get("nome"), url: dados.get("url") },
+        });
+        obterCatalogos("limpar");
+        definirFlash("ok", "Catálogo adicionado.");
+        return renderConfiguracao();
+      }
+      case "subir-catalogo-pdf": {
+        const arquivo = form.querySelector('input[name="arquivo"]').files[0];
+        if (!arquivo) { definirFlash("erro", "Escolha o arquivo."); return; }
+        const fd = new FormData();
+        fd.append("arquivo", arquivo);
+        if (dados.get("nome")) fd.append("nome", dados.get("nome"));
+        const resp = await fetch(`${API}/whatsapp/catalogos/pdf`, {
+          method: "POST", headers: { Authorization: "Bearer " + state.accessToken }, body: fd,
+        });
+        if (!resp.ok) {
+          const corpo = await resp.json().catch(() => ({}));
+          definirFlash("erro", corpo.mensagem || "Não consegui enviar o arquivo.");
+          return renderConfiguracao();
+        }
+        obterCatalogos("limpar");
+        definirFlash("ok", "Catálogo em PDF adicionado.");
+        return renderConfiguracao();
       }
       case "criar-setor": {
         await chamarApi("/usuarios/setores", { method: "POST", body: { nome: dados.get("nome") || "" } });
