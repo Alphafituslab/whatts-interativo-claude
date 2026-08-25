@@ -612,13 +612,18 @@
 
   // Encaminhar sem sair da conversa: escolhe um ou vários contatos, com
   // busca (a lista de conversas é longa demais pra rolar procurando).
-  async function modalEncaminharMensagem(conversaId, mensagemId) {
+  async function modalEncaminharMensagem(conversaId, mensagemId, daTelaInterna) {
     const wrap = abrirModal(`
       <h3 style="margin-top:0;">📨 Encaminhar mensagem</h3>
+      <div class="wpp-encaminhar-abas">
+        <button type="button" class="wpp-encaminhar-aba ativa" data-aba-encaminhar="clientes">👤 Clientes</button>
+        <button type="button" class="wpp-encaminhar-aba" data-aba-encaminhar="colegas">🗨️ Colegas</button>
+      </div>
       <div class="campo">
         <input data-busca-encaminhar placeholder="Procurar por nome ou número…" autofocus>
       </div>
-      <div class="wpp-encaminhar-lista" data-lista-encaminhar><p class="dica">Carregando contatos…</p></div>
+      <div class="wpp-encaminhar-lista" data-lista-encaminhar><p class="dica">Carregando…</p></div>
+      <p class="dica" data-resumo-escolhidos></p>
       <div class="campo" style="margin-top:10px;">
         <label class="rotulo-forte">Escrever algo antes (opcional)</label>
         <input name="comentario" maxlength="300" placeholder="Ex.: segue o laudo que a Tabata mandou">
@@ -630,29 +635,53 @@
 
     const lista = wrap.querySelector("[data-lista-encaminhar]");
     const botao = wrap.querySelector("[data-enviar-encaminhar]");
-    const escolhidos = new Map();
+    const resumo = wrap.querySelector("[data-resumo-escolhidos]");
+    const busca = wrap.querySelector("[data-busca-encaminhar]");
+    // Duas listas separadas: a escolha feita numa aba não some ao trocar
+    // pra outra — dá pra mandar o mesmo documento pro cliente e pro
+    // laboratório de uma vez só.
+    const clientes = new Map();   // telefone -> conversa_id | null
+    const colegas = new Map();    // usuario_id -> nome
+    let aba = "clientes";
 
     function atualizarBotao() {
-      botao.disabled = escolhidos.size === 0;
-      botao.textContent = escolhidos.size ? `Encaminhar para ${escolhidos.size}` : "Encaminhar";
+      const total = clientes.size + colegas.size;
+      botao.disabled = total === 0;
+      botao.textContent = total ? `Encaminhar para ${total}` : "Encaminhar";
+      const partes = [];
+      if (clientes.size) partes.push(`${clientes.size} cliente${clientes.size > 1 ? "s" : ""}`);
+      if (colegas.size) partes.push(`${colegas.size} colega${colegas.size > 1 ? "s" : ""}`);
+      resumo.textContent = partes.length ? `Selecionado: ${partes.join(" e ")}.` : "";
     }
 
-    function desenhar(contatos) {
-      if (!contatos.length) {
-        lista.innerHTML = `<p class="dica">Nenhum contato encontrado. Você também pode digitar um número novo na busca.</p>`;
+    function desenhar(itens) {
+      if (!itens.length) {
+        lista.innerHTML = aba === "clientes"
+          ? `<p class="dica">Nenhum contato encontrado. Você também pode digitar um número novo na busca.</p>`
+          : `<p class="dica">Nenhum colega encontrado.</p>`;
         return;
       }
-      lista.innerHTML = contatos.map((c) => `
-        <label class="wpp-encaminhar-item">
-          <input type="checkbox" data-conversa="${c.conversa_id || ""}" data-telefone="${escapeHtml(c.telefone)}" ${escolhidos.has(c.telefone) ? "checked" : ""}>
-          <span class="wpp-encaminhar-nome">${escapeHtml(c.nome || c.telefone)}</span>
-          <span class="wpp-encaminhar-tel">${escapeHtml(c.telefone)}</span>
-        </label>`).join("");
+      lista.innerHTML = itens.map((c) => aba === "clientes"
+        ? `<label class="wpp-encaminhar-item">
+             <input type="checkbox" data-tipo="cliente" data-conversa="${c.conversa_id || ""}" data-telefone="${escapeHtml(c.telefone)}" ${clientes.has(c.telefone) ? "checked" : ""}>
+             <span class="wpp-encaminhar-nome">${escapeHtml(c.nome || c.telefone)}</span>
+             <span class="wpp-encaminhar-tel">${escapeHtml(c.telefone)}</span>
+           </label>`
+        : `<label class="wpp-encaminhar-item">
+             <input type="checkbox" data-tipo="colega" data-usuario="${c.id}" data-nome="${escapeHtml(c.nome)}" ${colegas.has(c.id) ? "checked" : ""}>
+             <span class="wpp-encaminhar-nome">${c.online ? "🟢" : "🔴"} ${escapeHtml(c.nome)}</span>
+             <span class="wpp-encaminhar-tel">${escapeHtml(_setoresDoColega(c).join(", ") || "")}</span>
+           </label>`).join("");
       lista.querySelectorAll("input[type=checkbox]").forEach((cx) => {
         cx.addEventListener("change", () => {
-          const tel = cx.dataset.telefone;
-          if (cx.checked) escolhidos.set(tel, cx.dataset.conversa ? Number(cx.dataset.conversa) : null);
-          else escolhidos.delete(tel);
+          if (cx.dataset.tipo === "cliente") {
+            if (cx.checked) clientes.set(cx.dataset.telefone, cx.dataset.conversa ? Number(cx.dataset.conversa) : null);
+            else clientes.delete(cx.dataset.telefone);
+          } else {
+            const id = Number(cx.dataset.usuario);
+            if (cx.checked) colegas.set(id, cx.dataset.nome);
+            else colegas.delete(id);
+          }
           atualizarBotao();
         });
       });
@@ -660,30 +689,51 @@
 
     async function buscar(termo) {
       try {
-        const r = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(termo || "")}`);
-        desenhar((r.contatos || r || []).slice(0, 60));
+        if (aba === "clientes") {
+          const r = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(termo || "")}`);
+          desenhar((r.contatos || r || []).slice(0, 60));
+        } else {
+          const eu = state.usuarioAtual.id;
+          const t = (termo || "").toLowerCase();
+          const todos = await chamarApi("/usuarios");
+          desenhar((todos || []).filter((u) => u.ativo && u.id !== eu
+            && (!t || (u.nome || "").toLowerCase().includes(t))).slice(0, 60));
+        }
       } catch (e) {
-        lista.innerHTML = `<p class="dica">Não consegui carregar os contatos agora.</p>`;
+        lista.innerHTML = `<p class="dica">Não consegui carregar a lista agora.</p>`;
       }
     }
     buscar("");
 
     let debounce = null;
-    wrap.querySelector("[data-busca-encaminhar]").addEventListener("input", (e) => {
+    busca.addEventListener("input", (e) => {
       clearTimeout(debounce);
       const termo = e.target.value.trim();
       debounce = setTimeout(() => buscar(termo), 250);
     });
 
+    wrap.querySelectorAll("[data-aba-encaminhar]").forEach((b) => {
+      b.addEventListener("click", () => {
+        aba = b.dataset.abaEncaminhar;
+        wrap.querySelectorAll("[data-aba-encaminhar]").forEach((o) => o.classList.toggle("ativa", o === b));
+        busca.placeholder = aba === "clientes" ? "Procurar por nome ou número…" : "Procurar colega pelo nome…";
+        busca.value = "";
+        lista.innerHTML = `<p class="dica">Carregando…</p>`;
+        buscar("");
+      });
+    });
+
     botao.addEventListener("click", async () => {
       botao.disabled = true;
       botao.textContent = "Encaminhando…";
-      const conversas = [...escolhidos.values()].filter((v) => v);
-      const telefones = [...escolhidos.entries()].filter(([, v]) => !v).map(([t]) => t);
+      const conversas = [...clientes.values()].filter((v) => v);
+      const telefones = [...clientes.entries()].filter(([, v]) => !v).map(([t]) => t);
+      const usuarios = [...colegas.keys()];
       try {
-        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens/${mensagemId}/encaminhar`, {
+        const base = daTelaInterna ? "/chat-interno" : "/whatsapp";
+        const r = await chamarApi(`${base}/conversas/${conversaId}/mensagens/${mensagemId}/encaminhar`, {
           method: "POST",
-          body: { conversas, telefones, comentario: wrap.querySelector('input[name="comentario"]').value.trim() },
+          body: { conversas, telefones, usuarios, comentario: wrap.querySelector('input[name="comentario"]').value.trim() },
         });
         fecharModais();
         const falhas = (r.resultados || []).filter((x) => !x.ok);
@@ -692,7 +742,7 @@
         } else {
           definirFlash(r.enviados ? "erro" : "erro",
             `Encaminhada para ${r.enviados}. Não deu certo em: ` +
-            falhas.map((f) => `${f.nome || f.conversa_id} (${f.motivo || "falhou"})`).join("; "));
+            falhas.map((f) => `${f.nome || f.conversa_id || f.usuario_id} (${f.motivo || "falhou"})`).join("; "));
         }
       } catch (e) {
         definirFlash("erro", e.message || "Não consegui encaminhar.");
@@ -3062,9 +3112,12 @@
       ${htmlSeloApagada(m)}
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
-      ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
+      ${m.texto ? `<div class="wpp-bolha-texto">${textoComTelefones(m.texto)}</div>` : ""}
+      ${m.reacao ? `<span class="wpp-reacao" title="Reagiu${m.reacao_por_nome ? ": " + escapeHtml(m.reacao_por_nome) : ""}${m.reacao_em ? " em " + fmtData(m.reacao_em) : ""}">${escapeHtml(m.reacao)}</span>` : ""}
       <div class="wpp-bolha-rodape">
+        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="abrir-reacao" data-id="${m.id}" data-interna="1" title="Reagir a esta mensagem">😊</button>` : ""}
         ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="1" title="Responder citando esta mensagem">↩️</button>` : ""}
+        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="encaminhar-mensagem" data-id="${m.id}" data-interna="1" title="Encaminhar para clientes ou colegas">📨</button>` : ""}
         ${m.usuario_id === eu && !m.excluida_em && (m.tipo || "texto") === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
         ${htmlEditada(m)}
         ${m.usuario_id === eu && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" title="Apagar (mandei por engano)">🗑️</button>` : ""}
@@ -4473,15 +4526,16 @@
         // acha o que quer sem procurar.
         const rapidas = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
         const id = Number(alvo.dataset.id);
+        const interna = alvo.dataset.interna === "1" ? "1" : "0";
         const bolha = alvo.closest(".wpp-bolha");
         const jaTem = bolha && bolha.querySelector(".wpp-reacao");
         document.querySelectorAll(".wpp-reacao-painel").forEach((p) => p.remove());
         const painel = document.createElement("div");
         painel.className = "wpp-reacao-painel";
         painel.innerHTML = rapidas.map((e) =>
-          `<button type="button" class="wpp-reacao-opcao" data-acao="reagir" data-id="${id}" data-emoji="${e}">${e}</button>`
+          `<button type="button" class="wpp-reacao-opcao" data-acao="reagir" data-id="${id}" data-interna="${interna}" data-emoji="${e}">${e}</button>`
         ).join("") + (jaTem
-          ? `<button type="button" class="wpp-reacao-opcao wpp-reacao-tirar" data-acao="reagir" data-id="${id}" data-emoji="" title="Tirar a reação">✕</button>`
+          ? `<button type="button" class="wpp-reacao-opcao wpp-reacao-tirar" data-acao="reagir" data-id="${id}" data-interna="${interna}" data-emoji="" title="Tirar a reação">✕</button>`
           : "");
         alvo.parentElement.appendChild(painel);
         setTimeout(() => document.addEventListener("click", function fechar(ev) {
@@ -4494,14 +4548,18 @@
       case "reagir": {
         const conversaId = Number(location.hash.split("/")[2]);
         const id = Number(alvo.dataset.id);
+        const interna = alvo.dataset.interna === "1";
         document.querySelectorAll(".wpp-reacao-painel").forEach((p) => p.remove());
-        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens/${id}/reagir`, {
+        const base = interna ? "/chat-interno" : "/whatsapp";
+        const r = await chamarApi(`${base}/conversas/${conversaId}/mensagens/${id}/reagir`, {
           method: "POST", body: { emoji: alvo.dataset.emoji },
         });
-        if (!r.enviada_ao_cliente && alvo.dataset.emoji) {
+        // No chat interno não existe "mandar pro cliente": a reação já
+        // está onde precisa estar. O aviso abaixo é só do outro lado.
+        if (!interna && !r.enviada_ao_cliente && alvo.dataset.emoji) {
           definirFlash("erro", "A reação ficou registrada aqui, mas o WhatsApp não aceitou enviá-la ao cliente.");
         }
-        return atualizarMensagensNoDom(conversaId);
+        return interna ? atualizarMensagensInternasNoDom(conversaId) : atualizarMensagensNoDom(conversaId);
       }
       case "gravar-video": {
         const id = Number(alvo.dataset.id);
@@ -4805,7 +4863,7 @@
       }
       case "encaminhar-mensagem": {
         const conversaId = Number(location.hash.split("/")[2]);
-        return modalEncaminharMensagem(conversaId, Number(alvo.dataset.id));
+        return modalEncaminharMensagem(conversaId, Number(alvo.dataset.id), alvo.dataset.interna === "1");
       }
       case "conversar-com-numero": {
         // Já existe conversa com esse número? Abre ela. Se não, cai na

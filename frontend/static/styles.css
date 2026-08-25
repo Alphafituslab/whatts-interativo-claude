@@ -1368,3 +1368,14 @@ nav { perspective: 800px; }
   .wpp-chat-acoes .botao-icone { width: 28px; height: 28px; font-size: 13px; }
   .wpp-chat-cabecalho { padding: 8px 12px; }
 }
+
+/* Duas listas no mesmo lugar: cliente e colega. A escolha de uma aba
+   não se perde ao trocar pra outra — o mesmo documento costuma ir pro
+   cliente E pro laboratório. */
+.wpp-encaminhar-abas { display: flex; gap: 6px; margin-bottom: 10px; }
+.wpp-encaminhar-aba {
+  flex: 1; padding: 7px 10px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--borda); border-radius: var(--raio-peq);
+  background: transparent; color: var(--texto-suave); font-family: inherit; cursor: pointer;
+}
+.wpp-encaminhar-aba.ativa { background: var(--primaria); border-color: var(--primaria); color: #fff; }

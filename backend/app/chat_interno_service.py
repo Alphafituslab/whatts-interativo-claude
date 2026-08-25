@@ -261,11 +261,13 @@ def listar_mensagens(conn, conversa_id: int, lado: str = None, incluir_excluidas
     rows = conn.execute(
         f"SELECT m.*, ue.nome AS excluida_por_nome, "
         f"cit.texto AS citada_texto, cit.tipo AS citada_tipo, "
-        f"cit.excluida_em AS citada_excluida_em, uc.nome AS citada_autor "
+        f"cit.excluida_em AS citada_excluida_em, uc.nome AS citada_autor, "
+        f"ur.nome AS reacao_por_nome "
         f"FROM chat_interno_mensagens m "
         f"LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
         f"LEFT JOIN chat_interno_mensagens cit ON cit.id = m.responde_a "
         f"LEFT JOIN usuarios uc ON uc.id = cit.usuario_id "
+        f"LEFT JOIN usuarios ur ON ur.id = m.reacao_por "
         f"WHERE m.conversa_id = ?{filtro} ORDER BY m.criado_em, m.id",
         (conversa_id,),
     ).fetchall()

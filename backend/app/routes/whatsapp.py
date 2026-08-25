@@ -1386,21 +1386,56 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
         raise ApiError("Esta mensagem foi apagada — não dá pra encaminhar.", status=400)
 
     dados = request.get_json(silent=True) or {}
-    destinos_conversas = [int(x) for x in (dados.get("conversas") or [])]
-    telefones = [str(x).strip() for x in (dados.get("telefones") or []) if str(x).strip()]
     comentario = (dados.get("comentario") or "").strip()
-    if not destinos_conversas and not telefones:
-        raise ApiError("Escolha pelo menos um contato pra encaminhar.", status=400)
+    resultados = _encaminhar_para_clientes(
+        conn, usuario,
+        [int(x) for x in (dados.get("conversas") or [])],
+        [str(x).strip() for x in (dados.get("telefones") or []) if str(x).strip()],
+        dict(mensagem), comentario, origem_id=mensagem_id,
+    )
+    resultados += _encaminhar_para_colegas(
+        conn, usuario, [int(x) for x in (dados.get("usuarios") or [])],
+        dict(mensagem), comentario,
+        de_onde=f"conversa com {origem['contato_nome'] or origem['telefone']}",
+    )
+    if not resultados:
+        raise ApiError("Escolha pelo menos um destino pra encaminhar.", status=400)
+
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "mensagem_encaminhada",
+        f"msg {mensagem_id} -> {len(resultados)} destino(s)", conversa_id
+    )
+    enviados = sum(1 for r in resultados if r["ok"])
+    return jsonify({"ok": enviados > 0, "enviados": enviados, "resultados": resultados})
+
+
+PREVIEW_POR_TIPO = {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento",
+                    "audio": "🎵 Áudio", "figurinha": "🌟 Figurinha"}
+
+
+def _encaminhar_para_clientes(conn, usuario, destinos_conversas, telefones, mensagem, comentario, origem_id=None):
+    """Repassa uma mensagem pra conversas de cliente.
+
+    Serve as duas telas: a mensagem de origem tanto pode vir de uma
+    conversa de WhatsApp quanto do chat interno — as duas guardam o anexo
+    na mesma pasta, então aqui só interessa o par (tipo, midia_url).
+
+    O arquivo não é baixado nem recopiado: o envio aponta pro mesmo
+    arquivo que já está no disco. Um destino que falha não derruba os
+    outros — a resposta diz, um por um, o que foi e o que não foi.
+    """
+    destinos_conversas = list(destinos_conversas or [])
 
     # Telefone solto vira contato + conversa, igual "nova conversa" faz.
-    for bruto in telefones:
+    for bruto in (telefones or []):
         try:
             tel = whatsapp_service.normalizar_telefone(bruto)
         except ApiError:
             continue
         contato = whatsapp_service.obter_ou_criar_contato(conn, g.empresa_id, tel)
         existente = conn.execute(
-            "SELECT id FROM whatsapp_conversas WHERE contato_id = ? AND excluida_em IS NULL ORDER BY id DESC LIMIT 1", (contato["id"],)
+            "SELECT id FROM whatsapp_conversas WHERE contato_id = ? AND excluida_em IS NULL ORDER BY id DESC LIMIT 1",
+            (contato["id"],),
         ).fetchone()
         if existente:
             destinos_conversas.append(existente["id"])
@@ -1408,9 +1443,16 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
             nova, _ = whatsapp_service.obter_ou_criar_conversa(conn, contato["id"])
             destinos_conversas.append(nova["id"])
 
+    if not destinos_conversas:
+        return []
+
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
     agora = _now_iso()
+    tipo = mensagem.get("tipo") or "texto"
+    legenda = mensagem.get("texto") or None
+    midia_url = mensagem.get("midia_url")
     resultados = []
+
     for destino_id in dict.fromkeys(destinos_conversas):   # sem repetir destino
         try:
             destino = _carregar_conversa(conn, g.empresa_id, destino_id)
@@ -1431,12 +1473,10 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
         if comentario:
             _mandar_texto_simples(conn, config, destino, usuario, comentario, agora)
 
-        tipo = mensagem["tipo"]
-        legenda = mensagem["texto"] or None
         try:
-            if mensagem["midia_url"]:
-                url_completa = whatsapp_service.url_publica(config, mensagem["midia_url"])
-                nome_arquivo = (mensagem["midia_url"] or "").rsplit("/", 1)[-1]
+            if midia_url:
+                url_completa = whatsapp_service.url_publica(config, midia_url)
+                nome_arquivo = midia_url.rsplit("/", 1)[-1]
                 if tipo == "figurinha":
                     externo_id = whatsapp_service.enviar_figurinha(config, destino["telefone"], url_completa)
                 else:
@@ -1457,11 +1497,10 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
                                             usuario_id, status, erro, criado_em, encaminhada_de)
             VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (destino_id, tipo, legenda, mensagem["midia_url"], externo_id, usuario["id"],
-             status_msg, erro, agora, mensagem_id),
+            (destino_id, tipo if tipo != "texto" or not midia_url else "documento",
+             legenda, midia_url, externo_id, usuario["id"], status_msg, erro, agora, origem_id),
         )
-        preview = legenda or {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento",
-                              "audio": "🎵 Áudio", "figurinha": "🌟 Figurinha"}.get(tipo, "Mensagem")
+        preview = legenda or PREVIEW_POR_TIPO.get(tipo, "Mensagem")
         conn.execute(
             "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, "
             "ultima_mensagem_preview = ?, ultima_msg_operador_em = ? WHERE id = ?",
@@ -1470,13 +1509,50 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
         resultados.append({"conversa_id": destino_id, "ok": status_msg == "enviada",
                            "nome": destino["contato_nome"] or destino["telefone"],
                            "motivo": erro})
+    return resultados
 
-    whatsapp_service.registrar_atividade(
-        conn, usuario["id"], "mensagem_encaminhada",
-        f"msg {mensagem_id} -> {len(resultados)} destino(s)", conversa_id
-    )
-    enviados = sum(1 for r in resultados if r["ok"])
-    return jsonify({"ok": enviados > 0, "enviados": enviados, "resultados": resultados})
+
+def _encaminhar_para_colegas(conn, usuario, colegas, mensagem, comentario, de_onde=""):
+    """Repassa a mensagem pro chat interno de cada colega escolhido.
+
+    Não passa pelo WhatsApp — o chat interno é aqui dentro. O arquivo é o
+    mesmo do original; só a linha da mensagem é nova."""
+    resultados = []
+    for colega_id in dict.fromkeys(colegas or []):
+        if colega_id == usuario["id"]:
+            continue
+        alvo = conn.execute(
+            "SELECT id, nome, setor FROM usuarios WHERE id = ? AND ativo = 1 AND empresa_id = ?",
+            (colega_id, g.empresa_id),
+        ).fetchone()
+        if alvo is None:
+            resultados.append({"usuario_id": colega_id, "ok": False, "motivo": "Colega não encontrado."})
+            continue
+
+        conversa_interna = chat_interno_service.buscar_conversa_existente(conn, usuario["id"], colega_id)
+        if not conversa_interna:
+            conversa_interna = chat_interno_service.iniciar_conversa(
+                conn, usuario["id"], colega_id, (alvo["setor"] or "").strip() or "Geral")
+
+        # De onde veio, escrito na frente: sem isso chega um PDF solto no
+        # chat interno e o colega não sabe de qual cliente é.
+        cabecalho = f"↪️ Encaminhado da {de_onde}" if de_onde else "↪️ Encaminhado"
+        if comentario:
+            cabecalho += f"\n{comentario}"
+        chat_interno_service.enviar_mensagem(conn, conversa_interna, usuario["id"], cabecalho)
+
+        if mensagem.get("midia_url"):
+            chat_interno_service.enviar_mensagem(
+                conn, conversa_interna, usuario["id"], mensagem.get("texto"),
+                tipo=mensagem.get("tipo") or "documento", midia_url=mensagem["midia_url"],
+                nome_arquivo=mensagem.get("nome_arquivo") or mensagem["midia_url"].rsplit("/", 1)[-1],
+            )
+        elif mensagem.get("texto"):
+            chat_interno_service.enviar_mensagem(conn, conversa_interna, usuario["id"], mensagem["texto"])
+
+        resultados.append({"usuario_id": colega_id, "ok": True, "nome": alvo["nome"],
+                           "chat_interno_id": conversa_interna, "motivo": None})
+    return resultados
 
 
 def _mandar_texto_simples(conn, config, conversa, usuario, texto, agora):

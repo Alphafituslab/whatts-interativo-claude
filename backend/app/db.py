@@ -57,6 +57,7 @@ SCHEMA_FILES = [
     "schema_042_sem_pendencia.sql",
     "schema_043_nome_do_whatsapp.sql",
     "schema_044_encaminhada.sql",
+    "schema_045_chat_interno_reacao.sql",
 ]
 
 

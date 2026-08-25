@@ -355,6 +355,78 @@ def enviar_anexo(conversa_id):
     return jsonify({"ok": True, "midia_url": midia_url, "tipo": tipo}), 201
 
 
+@bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/reagir")
+@requires_auth
+def reagir_mensagem(conversa_id, mensagem_id):
+    """Reage a uma mensagem do chat interno com um emoji.
+
+    Diferente das conversas de cliente, aqui não há nada a mandar pro
+    WhatsApp: a reação é entre nós. Emoji vazio tira a reação — mesma
+    regra do outro lado, pra não precisar decorar dois comportamentos."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    mensagem = conn.execute(
+        "SELECT id FROM chat_interno_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+
+    emoji = ((request.get_json(silent=True) or {}).get("emoji") or "").strip()
+    conn.execute(
+        "UPDATE chat_interno_mensagens SET reacao = ?, reacao_em = ?, reacao_por = ? WHERE id = ?",
+        (emoji or None, chat_interno_service._now_iso() if emoji else None,
+         usuario["id"] if emoji else None, mensagem_id),
+    )
+    return jsonify({"ok": True, "emoji": emoji or None})
+
+
+@bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/encaminhar")
+@requires_auth
+def encaminhar_mensagem(conversa_id, mensagem_id):
+    """Repassa uma mensagem do chat interno pra clientes e/ou colegas.
+
+    É o caminho que faltava: a Tabata manda um documento aqui dentro e
+    ele precisa ir pro cliente sem ninguém baixar, procurar na pasta de
+    downloads e anexar de novo. O arquivo já está guardado aqui — o
+    encaminhamento aponta pro mesmo, nos dois sentidos.
+    """
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if not _pode_ver(usuario, conversa):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+
+    mensagem = conn.execute(
+        "SELECT * FROM chat_interno_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    if mensagem["excluida_em"]:
+        raise ApiError("Esta mensagem foi apagada — não dá pra encaminhar.", status=400)
+
+    dados = request.get_json(silent=True) or {}
+    comentario = (dados.get("comentario") or "").strip()
+    quem_mandou = (conversa["criado_por_nome"] if mensagem["usuario_id"] == conversa["criado_por_id"]
+                   else conversa["participante_nome"]) or "um colega"
+
+    resultados = rotas_whatsapp._encaminhar_para_colegas(
+        conn, usuario, [int(x) for x in (dados.get("usuarios") or [])],
+        dict(mensagem), comentario, de_onde=f"conversa interna com {quem_mandou}")
+    resultados += rotas_whatsapp._encaminhar_para_clientes(
+        conn, usuario,
+        [int(x) for x in (dados.get("conversas") or [])],
+        [str(x).strip() for x in (dados.get("telefones") or []) if str(x).strip()],
+        dict(mensagem), comentario, origem_id=None)
+
+    if not resultados:
+        raise ApiError("Escolha pelo menos um destino pra encaminhar.", status=400)
+    enviados = sum(1 for r in resultados if r["ok"])
+    return jsonify({"ok": enviados > 0, "enviados": enviados, "resultados": resultados})
+
+
 @bp.post("/conversas/<int:conversa_id>/digitando")
 @requires_auth
 def marcar_digitando(conversa_id):
