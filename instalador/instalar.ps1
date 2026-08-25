@@ -81,6 +81,18 @@ if ($temIcone) { $atalho.IconLocation = "$caminhoIcone,0" }
 $atalho.Save()
 
 Escrever '  [3/3] Atalho criado na area de trabalho' Green
+
+# --- 4. Forcar o Windows a reler o icone ---------------------
+# O Windows guarda os icones num cache proprio. Quem ja tinha o atalho
+# continuaria vendo o icone antigo mesmo com o arquivo novo no lugar -
+# limpar o cache evita ter que reiniciar o computador so por causa
+# disso.
+try {
+    ie4uinit.exe -show 2>$null
+} catch {
+    # comando nao existe em algumas versoes do Windows; sem problema,
+    # o icone troca sozinho no proximo logon
+}
 Escrever ''
 Escrever '  ============================================' Cyan
 Escrever '   Pronto!' Green
@@ -88,8 +100,13 @@ Escrever ''
 Escrever "   Procure o atalho '$NOME_ATALHO' na sua" White
 Escrever '   area de trabalho e clique duas vezes.' White
 Escrever ''
+Escrever '   O icone do atalho aparece maior e mais nitido' DarkGray
+Escrever '   quando a area de trabalho esta em "Icones grandes":' DarkGray
+Escrever '   clique com o botao direito num espaco vazio da area' DarkGray
+Escrever '   de trabalho, escolha Exibir e depois Icones grandes.' DarkGray
+Escrever '' 
 Escrever '   Se o icone ainda aparecer como o do navegador,' DarkGray
-Escrever '   reinicie o computador que ele troca.' DarkGray
+Escrever '   faca logoff e login que ele troca.' DarkGray
 Escrever '  ============================================' Cyan
 Escrever ''
 Read-Host '  Pressione Enter para fechar'
