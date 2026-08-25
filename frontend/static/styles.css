@@ -1248,8 +1248,11 @@ nav { perspective: 800px; }
 /* =====================================================================
    Reagir a uma mensagem
    ===================================================================== */
+/* Preso à JANELA, não à bolha: a lista de mensagens rola, e tudo que
+   passa da borda dela é cortado — era assim que sumiam dois dos seis
+   emojis. A posição exata quem calcula é o JS (ver abrir-reacao). */
 .wpp-reacao-painel {
-  position: absolute; bottom: 100%; right: 0; z-index: 30;
+  position: fixed; z-index: 60;
   display: flex; gap: 2px; padding: 4px;
   background: var(--superficie); border: 1px solid var(--borda);
   border-radius: 999px; box-shadow: 0 6px 20px rgba(0,0,0,0.22);

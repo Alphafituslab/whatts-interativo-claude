@@ -4564,12 +4564,39 @@
         ).join("") + (jaTem
           ? `<button type="button" class="wpp-reacao-opcao wpp-reacao-tirar" data-acao="reagir" data-id="${id}" data-interna="${interna}" data-emoji="" title="Tirar a reação">✕</button>`
           : "");
-        alvo.parentElement.appendChild(painel);
-        setTimeout(() => document.addEventListener("click", function fechar(ev) {
-          if (painel.contains(ev.target)) return;
+        document.body.appendChild(painel);
+
+        // Encosta o painel no botão e puxa pra dentro se estourar a
+        // janela — sem isso, quem reage numa mensagem colada na beirada
+        // recebe metade dos emojis fora da tela.
+        const r = alvo.getBoundingClientRect();
+        const largura = painel.offsetWidth, altura = painel.offsetHeight;
+        let x = r.right - largura;
+        if (x < 8) x = 8;
+        if (x + largura > window.innerWidth - 8) x = window.innerWidth - largura - 8;
+        // Acima do botão; se não couber, abaixo.
+        let y = r.top - altura - 6;
+        if (y < 8) y = r.bottom + 6;
+        if (y + altura > window.innerHeight - 8) y = window.innerHeight - altura - 8;
+        if (y < 8) y = 8;
+        painel.style.left = x + "px";
+        painel.style.top = y + "px";
+
+        // Rolar a conversa deixaria o painel parado no ar, longe da
+        // mensagem — fecha junto, como faz o menu do botão direito.
+        const painelMensagens = alvo.closest(".wpp-mensagens");
+        const fechar = (ev) => {
+          if (ev && ev.type === "click" && painel.contains(ev.target)) return;
           painel.remove();
           document.removeEventListener("click", fechar);
-        }), 0);
+          window.removeEventListener("resize", fechar);
+          if (painelMensagens) painelMensagens.removeEventListener("scroll", fechar);
+        };
+        setTimeout(() => {
+          document.addEventListener("click", fechar);
+          window.addEventListener("resize", fechar);
+          if (painelMensagens) painelMensagens.addEventListener("scroll", fechar, { passive: true });
+        }, 0);
         return;
       }
       case "reagir": {
