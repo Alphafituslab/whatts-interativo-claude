@@ -712,6 +712,32 @@
   }
   function fecharModais() { document.querySelectorAll(".fundo-modal").forEach((m) => m.remove()); }
 
+  function _irParaOFim(painel) {
+    if (!painel) return;
+    // Se a pessoa rolar pra cima pra ler algo antigo, paramos na hora: o
+    // pior defeito possível aqui seria arrancar a tela dela de volta pro
+    // fim enquanto ela lê.
+    let cancelado = false;
+    const parar = () => { cancelado = true; };
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach((ev) =>
+      painel.addEventListener(ev, parar, { once: true, passive: true }));
+
+    const ir = () => { if (!cancelado) painel.scrollTop = painel.scrollHeight; };
+    ir();
+    requestAnimationFrame(ir);
+
+    // Toda mídia que ainda não terminou de carregar muda a altura depois.
+    painel.querySelectorAll("img, video, audio").forEach((el) => {
+      if (el.tagName === "IMG" && el.complete) return;
+      el.addEventListener("load", ir, { once: true });
+      el.addEventListener("loadedmetadata", ir, { once: true });
+      el.addEventListener("error", ir, { once: true });
+    });
+    // Rede lenta: as duas últimas chances, já canceladas se a pessoa mexeu.
+    setTimeout(ir, 150);
+    setTimeout(ir, 600);
+  }
+
   // Fecha só a janela de cima: com duas abertas (uma janela que abriu
   // outra), Esc deve voltar um passo, não varrer as duas.
   document.addEventListener("keydown", (e) => {
@@ -2691,8 +2717,7 @@
       "whatsapp"
     );
 
-    const painelMensagens = document.querySelector("[data-wpp-mensagens]");
-    if (painelMensagens) painelMensagens.scrollTop = painelMensagens.scrollHeight;
+    _irParaOFim(document.querySelector("[data-wpp-mensagens]"));
     iniciarPollingWhatsapp(conversaId);
   }
 
@@ -3148,8 +3173,7 @@
       "chat-interno"
     );
 
-    const painelMensagens = document.querySelector("[data-wpp-mensagens-interno]");
-    if (painelMensagens) painelMensagens.scrollTop = painelMensagens.scrollHeight;
+    _irParaOFim(document.querySelector("[data-wpp-mensagens-interno]"));
     iniciarPollingChatInterno(conversaId);
   }
 
