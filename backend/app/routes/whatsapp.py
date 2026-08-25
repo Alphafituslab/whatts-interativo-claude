@@ -390,13 +390,20 @@ def buscar_conversas():
         raise ApiError("Digite ao menos 2 caracteres pra buscar.", status=400)
     conn = get_db()
     termo = f"%{q}%"
+    # Telefone é guardado só com dígitos (5548991212203), mas ninguém
+    # digita assim: vem "(48) 99121-2203", "48 99121 2203", "99121-2203".
+    # Comparando só os dígitos, qualquer uma dessas formas acha o mesmo
+    # contato. Abaixo de 4 dígitos não vale a pena — "48" casaria com
+    # quase todo número do país.
+    digitos = re.sub(r"\D", "", q)
+    por_telefone = "ct.telefone LIKE ?"
     condicoes = [
         "ct.empresa_id = ?",
         "c.excluida_em IS NULL",
-        "(ct.nome LIKE ? OR ct.telefone LIKE ? OR EXISTS ("
+        f"(ct.nome LIKE ? OR {por_telefone} OR EXISTS ("
         "SELECT 1 FROM whatsapp_mensagens m WHERE m.conversa_id = c.id AND m.texto LIKE ? AND m.excluida_em IS NULL))",
     ]
-    params = [g.empresa_id, termo, termo, termo]
+    params = [g.empresa_id, termo, f"%{digitos}%" if len(digitos) >= 4 else termo, termo]
     if not usuario["admin"]:
         sql_visivel, params_visivel = _sql_visivel_nao_admin(conn, usuario)
         condicoes.append(sql_visivel)
@@ -437,9 +444,13 @@ def listar_contatos():
     q = (request.args.get("q") or "").strip()
     if q:
         termo = f"%{q}%"
+        # Ver buscar_conversas: compara só os dígitos, pra achar o
+        # contato mesmo com o número digitado com máscara.
+        digitos = re.sub(r"\D", "", q)
+        termo_tel = f"%{digitos}%" if len(digitos) >= 4 else termo
         rows = conn.execute(
             "SELECT id, nome, telefone, foto_url FROM whatsapp_contatos WHERE empresa_id = ? AND (nome LIKE ? OR telefone LIKE ?) ORDER BY nome LIMIT 200",
-            (g.empresa_id, termo, termo),
+            (g.empresa_id, termo, termo_tel),
         ).fetchall()
     else:
         rows = conn.execute("SELECT id, nome, telefone, foto_url FROM whatsapp_contatos WHERE empresa_id = ? ORDER BY nome LIMIT 500", (g.empresa_id,)).fetchall()

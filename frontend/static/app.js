@@ -449,6 +449,36 @@
     form.requestSubmit();
   });
 
+  // Busca enquanto digita, nas Conversas.
+  //
+  // Antes só buscava no Enter (ou na lupa), e quem digitava ficava
+  // olhando a lista antiga achando que não tinha achado nada. A pausa
+  // de 350ms evita uma consulta por tecla; e o campo não é redesenhado
+  // no meio da digitação, senão o cursor pularia pro começo.
+  let _timerBusca = null;
+  document.addEventListener("input", (e) => {
+    const campo = e.target.closest('form[data-form="buscar-conversas"] input[name="q"]');
+    if (!campo) return;
+    clearTimeout(_timerBusca);
+    _timerBusca = setTimeout(async () => {
+      const texto = campo.value.trim();
+      const digitos = texto.replace(/\D/g, "");
+      // Número precisa de 4 dígitos pra valer a pena ("48" acharia quase
+      // tudo); texto, de 2 letras. Menos que isso, volta a lista normal.
+      const vale = digitos.length >= 4 || (digitos.length === 0 && texto.length >= 2) || texto.length >= 3;
+      const novo = vale ? texto : null;
+      if (novo === state.buscaConversas) return;
+      state.buscaConversas = novo;
+      await renderWhatsapp(null);
+      // Devolve o foco e o cursor pro fim, pra pessoa seguir digitando.
+      const recriado = document.querySelector('form[data-form="buscar-conversas"] input[name="q"]');
+      if (recriado) {
+        recriado.focus();
+        recriado.setSelectionRange(recriado.value.length, recriado.value.length);
+      }
+    }, 350);
+  });
+
   function abrirModal(html) {
     const wrap = document.createElement("div");
     wrap.className = "fundo-modal";
@@ -2133,7 +2163,7 @@
        <div class="wpp-layout ${conversaId ? "wpp-conversa-aberta" : ""}">
          <div class="wpp-painel-lista">
            <form class="wpp-busca-form" data-form="buscar-conversas">
-             <input type="search" name="q" class="wpp-busca-input" placeholder="Buscar por nome, telefone ou mensagem…" value="${escapeHtml(state.buscaConversas || "")}">
+             <input type="search" name="q" class="wpp-busca-input" placeholder="Buscar por nome, telefone ou mensagem…" autocomplete="off" value="${escapeHtml(state.buscaConversas || "")}">
              <button type="submit" class="botao-icone" title="Buscar">🔍</button>
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${state.buscaConversas ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
