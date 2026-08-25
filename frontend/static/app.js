@@ -1740,7 +1740,8 @@
       <div class="wpp-bolha-audio">
         <audio controls preload="metadata" src="${urlImagemSegura(m.midia_url)}"></audio>
         <a class="wpp-bolha-baixar wpp-bolha-baixar-audio" href="${urlImagemSegura(m.midia_url)}" download title="Baixar áudio">⬇</a>
-      </div>`;
+      </div>
+      ${htmlTranscricao(m)}`;
     const rotulo = { documento: "📄 Documento" }[m.tipo] || "📎 Anexo";
     return `
       <div class="wpp-bolha-anexo-linha">
@@ -1755,6 +1756,28 @@
   // Trecho citado, desenhado dentro da bolha que responde. Mostra só o
   // começo: é referência ("estou falando disto"), não uma segunda cópia
   // da mensagem.
+  // Transcrição do áudio: ler em vez de ouvir. Fica embaixo do próprio
+  // áudio, e só é gerada quando alguém pede — transcrever custa alguns
+  // segundos de processador no servidor. Depois de feita, fica guardada
+  // e todo mundo vê pronta.
+  // "direcao" só existe em mensagem de cliente (entrada/saida); no chat
+  // interno o campo nem vem. É o que separa os dois endereços da API.
+  function htmlTranscricao(m) {
+    if (m.transcricao_em) {
+      const texto = (m.transcricao || "").trim();
+      return `<div class="wpp-transcricao">
+        <span class="wpp-transcricao-titulo">📝 Transcrição</span>
+        ${texto
+          ? `<span class="wpp-transcricao-texto">${escapeHtml(texto)}</span>`
+          : `<span class="wpp-transcricao-texto wpp-transcricao-vazia">Não deu pra entender nada neste áudio.</span>`}
+      </div>`;
+    }
+    if (state.usuarioAtual && state.usuarioAtual.transcricao_disponivel === false) return "";
+    return `<button type="button" class="wpp-transcricao-botao"
+      data-acao="transcrever-audio" data-id="${m.id}" data-interna="${m.direcao === undefined ? "1" : "0"}"
+      title="Escrever aqui embaixo o que foi falado">📝 Ler o áudio</button>`;
+  }
+
   function htmlCitacao(m) {
     if (!m.responde_a) return "";
     if (m.citada_texto === null || m.citada_texto === undefined) {
@@ -3798,6 +3821,25 @@
         const janela = alvo.closest(".fundo-modal-foto");
         if (janela) janela.remove();
         return;
+      }
+      case "transcrever-audio": {
+        const id = Number(alvo.dataset.id);
+        const interna = alvo.dataset.interna === "1";
+        const conversaId = Number(location.hash.split("/")[2]);
+        const original = alvo.textContent;
+        alvo.disabled = true;
+        alvo.textContent = "📝 Transcrevendo…";
+        try {
+          const base = interna ? `/chat-interno/conversas/${conversaId}` : `/whatsapp/conversas/${conversaId}`;
+          await chamarApi(`${base}/mensagens/${id}/transcrever`, { method: "POST" });
+        } catch (e) {
+          alvo.disabled = false;
+          alvo.textContent = original;
+          throw e;
+        }
+        // Redesenha pra transcrição aparecer embaixo do áudio — e ela já
+        // vem junto das mensagens daqui pra frente, sem pedir de novo.
+        return interna ? atualizarMensagensInternasNoDom(conversaId) : atualizarMensagensNoDom(conversaId);
       }
       case "ampliar-foto": {
         modalFotoAmpliada(alvo.dataset.url, alvo.dataset.nome || "");

@@ -10,7 +10,7 @@ import secrets
 from flask import Blueprint, g, jsonify, request
 from werkzeug.utils import secure_filename
 
-from .. import chat_interno_service, whatsapp_service
+from .. import chat_interno_service, transcricao, whatsapp_service
 from ..context import ApiError, get_db, requires_auth
 # Reaproveita os limites, a classificação de tipo e a pasta de anexos do
 # WhatsApp — anexo é anexo, não faz sentido ter duas regras diferentes.
@@ -98,6 +98,43 @@ def listar_mensagens(conversa_id):
         lado = None  # admin espiando pela aba "Todas" — não conta como leitura
     mensagens = chat_interno_service.listar_mensagens(conn, conversa_id, lado, incluir_excluidas=usuario["admin"])
     return jsonify(mensagens)
+
+
+@bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/transcrever")
+@requires_auth
+def transcrever_audio_interno(conversa_id, mensagem_id):
+    """Mesma coisa das conversas de cliente, com a régua de visibilidade
+    do chat interno: só quem participa (ou o admin) pode pedir."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if not _pode_ver(usuario, conversa):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    mensagem = conn.execute(
+        "SELECT * FROM chat_interno_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    if mensagem["transcricao_em"]:
+        return jsonify({"transcricao": mensagem["transcricao"] or "", "de_cache": True})
+    if mensagem["tipo"] != "audio":
+        raise ApiError("Essa mensagem não é um áudio.", status=400)
+
+    caminho = rotas_whatsapp._caminho_do_anexo(mensagem["midia_url"])
+    if caminho is None:
+        raise ApiError("O arquivo deste áudio não está mais no servidor.", status=404, codigo="nao_encontrado")
+    try:
+        texto = transcricao.transcrever(caminho)
+    except transcricao.TranscricaoIndisponivel as e:
+        raise ApiError(str(e), status=503)
+    except Exception:
+        raise ApiError("Não consegui transcrever este áudio. Tente de novo em instantes.", status=500)
+
+    conn.execute(
+        "UPDATE chat_interno_mensagens SET transcricao = ?, transcricao_em = ? WHERE id = ?",
+        (texto, whatsapp_service._now_iso(), mensagem_id),
+    )
+    return jsonify({"transcricao": texto, "de_cache": False})
 
 
 @bp.put("/conversas/<int:conversa_id>/tags")

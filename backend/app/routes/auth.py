@@ -3,7 +3,7 @@ import json
 
 from flask import Blueprint, g, jsonify, request
 
-from .. import limite_tentativas, security, whatsapp_service
+from .. import limite_tentativas, security, transcricao, whatsapp_service
 from ..context import ApiError, AuthError, get_db, requires_auth
 
 bp = Blueprint("auth", __name__, url_prefix="/api/v1/auth")
@@ -84,6 +84,10 @@ def _usuario_publico(u):
         "acesso_conversas": bool(u["acesso_conversas"]) if "acesso_conversas" in u.keys() else True,
         "setor": u["setor"] if "setor" in u.keys() else None,
         "setores": whatsapp_service.setores_do_usuario(get_db(), u["id"]),
+        # Pra tela não oferecer "transcrever" num servidor onde o
+        # transcritor não foi instalado — o botão só apareceria pra
+        # falhar.
+        "transcricao_disponivel": transcricao.disponivel(),
     }
 
 

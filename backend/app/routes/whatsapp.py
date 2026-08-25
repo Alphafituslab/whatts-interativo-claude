@@ -15,7 +15,7 @@ import secrets
 from flask import Blueprint, Response, g, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
-from .. import whatsapp_service
+from .. import transcricao, whatsapp_service
 from ..context import ApiError, ForbiddenError, get_current_user, get_db, requires_admin, requires_auth
 
 bp = Blueprint("whatsapp", __name__, url_prefix="/api/v1/whatsapp")
@@ -807,6 +807,65 @@ def editar_mensagem(conversa_id, mensagem_id):
         conn.execute("UPDATE whatsapp_conversas SET ultima_mensagem_preview = ? WHERE id = ?", (texto[:120], conversa_id))
     whatsapp_service.registrar_atividade(conn, usuario["id"], "mensagem_editada", texto[:120], conversa_id)
     return jsonify(dict(conn.execute("SELECT * FROM whatsapp_mensagens WHERE id = ?", (mensagem_id,)).fetchone()))
+
+
+def _caminho_do_anexo(midia_url: str):
+    """Do endereço guardado na mensagem para o arquivo no disco.
+
+    Confere que o nome não tem barra nem "..": a mensagem vem do banco,
+    mas o webhook grava o que chega de fora, e um caminho montado sem
+    conferir viraria porta pra ler arquivo de qualquer lugar do
+    servidor."""
+    if not midia_url or "/uploads/" not in midia_url:
+        return None
+    nome = midia_url.rsplit("/", 1)[-1]
+    if not nome or nome != secure_filename(nome):
+        return None
+    caminho = os.path.join(PASTA_UPLOADS, nome)
+    return caminho if os.path.exists(caminho) else None
+
+
+@bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/transcrever")
+@requires_auth
+def transcrever_audio_mensagem(conversa_id, mensagem_id):
+    """Escreve o que foi falado no áudio, pra quem prefere (ou precisa)
+    ler em vez de ouvir.
+
+    Guarda o resultado: transcrever custa alguns segundos de
+    processador, e quem abrir a conversa depois já lê pronto."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_visualizar(usuario, conversa, conn):
+        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+    mensagem = conn.execute(
+        "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    # Já transcrita: devolve o que está guardado, sem refazer.
+    if mensagem["transcricao_em"]:
+        return jsonify({"transcricao": mensagem["transcricao"] or "", "de_cache": True})
+    if mensagem["tipo"] != "audio":
+        raise ApiError("Essa mensagem não é um áudio.", status=400)
+
+    caminho = _caminho_do_anexo(mensagem["midia_url"])
+    if caminho is None:
+        raise ApiError("O arquivo deste áudio não está mais no servidor.", status=404, codigo="nao_encontrado")
+
+    try:
+        texto = transcricao.transcrever(caminho)
+    except transcricao.TranscricaoIndisponivel as e:
+        raise ApiError(str(e), status=503)
+    except Exception:
+        raise ApiError("Não consegui transcrever este áudio. Tente de novo em instantes.", status=500)
+
+    conn.execute(
+        "UPDATE whatsapp_mensagens SET transcricao = ?, transcricao_em = ? WHERE id = ?",
+        (texto, _now_iso(), mensagem_id),
+    )
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "audio_transcrito", texto[:120], conversa_id)
+    return jsonify({"transcricao": texto, "de_cache": False})
 
 
 @bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/reenviar")
