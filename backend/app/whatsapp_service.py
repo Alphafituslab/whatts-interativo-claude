@@ -2202,7 +2202,7 @@ def setores_com_alguem_online(conn, empresa_id: int):
         SELECT DISTINCT us.setor FROM usuario_setores us
         JOIN usuarios u ON u.id = us.usuario_id
         WHERE u.empresa_id = ? AND u.ativo = 1
-          AND u.ultimo_acesso >= ? AND u.offline_forcado = 0
+          AND u.ultimo_acesso >= ? AND u.offline_forcado = 0 AND u.ausente = 0
         """,
         (empresa_id, limite),
     ).fetchall()
@@ -2243,8 +2243,14 @@ def _texto_menu_setores(config=None, setores=None, setores_online=None):
     return f"{SAUDACAO_PADRAO}\n\n{linhas}{rodape}"
 
 
-def usuario_esta_online(ultimo_acesso, offline_forcado=0) -> bool:
-    if offline_forcado:
+def usuario_esta_online(ultimo_acesso, offline_forcado=0, ausente=0) -> bool:
+    """Disponível de verdade pra atender.
+
+    Três coisas diferentes tiram alguém daqui: estar sem acessar há
+    tempo (offline), ter sido marcado como afastado pelo admin
+    (offline_forcado) e ter avisado que saiu (ausente). Só a primeira é
+    deduzida; as outras duas alguém declarou."""
+    if offline_forcado or ausente:
         return False
     if not ultimo_acesso:
         return False
@@ -2260,7 +2266,7 @@ def usuarios_online_do_setor(conn, empresa_id: int, setor: str):
     rows = conn.execute(
         """
         SELECT id, nome FROM usuarios
-        WHERE empresa_id = ? AND setor = ? AND ativo = 1 AND ultimo_acesso >= ? AND offline_forcado = 0
+        WHERE empresa_id = ? AND setor = ? AND ativo = 1 AND ultimo_acesso >= ? AND offline_forcado = 0 AND ausente = 0
         ORDER BY nome
         """,
         (empresa_id, setor, limite),
@@ -2576,6 +2582,11 @@ def listar_conversas_sla_estourado(conn, empresa_id: int, usuario_id=None, setor
         "c.ultima_mensagem_em IS NOT NULL", "c.ultima_mensagem_em < ?",
         "(c.atribuida_usuario_id IS NULL OR (SELECT m.direcao FROM whatsapp_mensagens m "
         "WHERE m.conversa_id = c.id ORDER BY m.criado_em DESC, m.id DESC LIMIT 1) = 'entrada')",
+        # Marcada como "não precisa responder" DEPOIS da última mensagem:
+        # sai do alerta. A comparação com a data da última mensagem é o
+        # que faz a marca se desfazer sozinha quando o cliente fala de
+        # novo — aí é pendência nova, e o alerta volta a valer.
+        "(c.sem_pendencia_em IS NULL OR c.sem_pendencia_em < c.ultima_mensagem_em)",
     ]
     params = [empresa_id, limite]
     if usuario_id:

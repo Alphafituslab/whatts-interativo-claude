@@ -929,7 +929,10 @@ def listar_mensagens(conversa_id):
         "LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
         "LEFT JOIN whatsapp_mensagens cit ON cit.id = m.responde_a "
     )
-    if usuario["admin"]:
+    # Mesma régua do chat interno: apagada só aparece em supervisão. Se a
+    # conversa é do próprio admin, ele vê como qualquer atendente vê.
+    supervisionando = usuario["admin"] and conversa["atribuida_usuario_id"] != usuario["id"]
+    if supervisionando:
         rows = conn.execute(campos + "WHERE m.conversa_id = ? ORDER BY m.criado_em, m.id", (conversa_id,)).fetchall()
     else:
         rows = conn.execute(
@@ -1163,6 +1166,39 @@ def reenviar_mensagem(conversa_id, mensagem_id):
     if not ok:
         raise ApiError("O reenvio falhou de novo. Tente em instantes.", status=502)
     return jsonify({"ok": True})
+
+
+@bp.post("/conversas/<int:conversa_id>/sem-pendencia")
+@requires_auth
+def marcar_sem_pendencia(conversa_id):
+    """"Vi, não precisa responder" — tira a conversa do alerta de atraso
+    sem mandar mensagem.
+
+    Existe porque o alerta considera pendente toda conversa em que o
+    cliente falou por último, e isso obrigava o atendente a ter sempre a
+    última palavra, mesmo diante de um "ok, obrigado". Fica registrado
+    quem marcou: isso mexe no indicador de atraso, e sem registro seria
+    um jeito silencioso de esconder demora.
+
+    Se o cliente escrever de novo, a marca deixa de valer sozinha (ver a
+    comparação com ultima_mensagem_em em listar_conversas_sla_estourado).
+    """
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    desmarcar = bool((request.get_json(silent=True) or {}).get("desmarcar"))
+    if desmarcar:
+        conn.execute("UPDATE whatsapp_conversas SET sem_pendencia_em = NULL, sem_pendencia_por = NULL WHERE id = ?",
+                     (conversa_id,))
+        return jsonify({"ok": True, "sem_pendencia": False})
+    conn.execute(
+        "UPDATE whatsapp_conversas SET sem_pendencia_em = ?, sem_pendencia_por = ? WHERE id = ?",
+        (_now_iso(), usuario["id"], conversa_id),
+    )
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "sem_pendencia", conversa["telefone"], conversa_id)
+    return jsonify({"ok": True, "sem_pendencia": True})
 
 
 @bp.post("/conversas/<int:conversa_id>/assumir")

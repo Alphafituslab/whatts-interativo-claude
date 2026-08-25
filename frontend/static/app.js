@@ -344,6 +344,10 @@
             ${usuario && usuario.admin ? `
               <button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
               <a class="botao secundario pequeno" href="/downloads/" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
+            <button class="botao secundario pequeno ${usuario && usuario.ausente ? "botao-ausente-ligado" : ""}" style="width:100%; margin-top:10px;" data-acao="alternar-ausente"
+              title="${usuario && usuario.ausente ? "Você está marcado como ausente — clique pra voltar" : "Avise que você saiu (almoço, reunião). Some das listas de quem pode atender."}">
+              ${usuario && usuario.ausente ? `🟡 Ausente${usuario.ausente_motivo ? " — " + escapeHtml(usuario.ausente_motivo) : ""} · voltar` : "🟡 Marcar ausência"}
+            </button>
             <div class="barra-acoes" style="margin-top:10px;">
               <button class="botao-icone" data-acao="alternar-tema" title="Alternar tema">🌓</button>
               <button class="botao secundario pequeno" data-acao="logout" style="margin-left:auto;">Sair</button>
@@ -504,18 +508,60 @@
       definirFlash("erro", "A imagem colada é maior que 35MB.");
       return montarRota();
     }
-    try {
-      const base = interna
-        ? `/chat-interno/conversas/${conversaId}/anexo`
-        : `/whatsapp/conversas/${conversaId}/anexo`;
-      await _subirAnexo(`${API}${base}`, comNome);
-      if (interna) await atualizarMensagensInternasNoDom(conversaId);
-      else await atualizarMensagensNoDom(conversaId);
-    } catch (erro) {
-      definirFlash("erro", erro.message || "Não consegui enviar a imagem colada.");
-      montarRota();
-    }
+    // Mostra ANTES de mandar. Colar é rápido demais pra não ter uma
+    // conferida: dá pra colar o print errado (a área de transferência
+    // guarda o último de qualquer programa), e mandar imagem errada pro
+    // cliente não tem desfazer bonito.
+    modalPreviaPrint(comNome, conversaId, interna);
   });
+
+  function modalPreviaPrint(arquivo, conversaId, interna) {
+    const endereco = URL.createObjectURL(arquivo);
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">📋 Enviar print</h3>
+      <div class="wpp-previa-print"><img src="${endereco}" alt="Prévia do print"></div>
+      <div class="campo" style="margin-top:12px;">
+        <label class="rotulo-forte">Escrever junto (opcional)</label>
+        <textarea name="legenda" rows="2" placeholder="Ex.: veja o erro que aparece na tela"></textarea>
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-enviar-print>Enviar</button>
+      </div>`);
+    // Solta a memória da prévia quando a janela sai, de um jeito ou de
+    // outro — sem isso a imagem fica presa no navegador.
+    const liberar = () => URL.revokeObjectURL(endereco);
+    wrap.addEventListener("click", (e) => { if (e.target === wrap) liberar(); });
+
+    const legenda = wrap.querySelector('textarea[name="legenda"]');
+    legenda.focus();
+    const enviar = async (ev) => {
+      const botao = ev ? ev.currentTarget : wrap.querySelector("[data-enviar-print]");
+      botao.disabled = true;
+      botao.textContent = "Enviando…";
+      try {
+        const base = interna
+          ? `/chat-interno/conversas/${conversaId}/anexo`
+          : `/whatsapp/conversas/${conversaId}/anexo`;
+        await _subirAnexo(`${API}${base}`, arquivo, null, legenda.value.trim());
+        liberar();
+        fecharModais();
+        if (interna) await atualizarMensagensInternasNoDom(conversaId);
+        else await atualizarMensagensNoDom(conversaId);
+      } catch (erro) {
+        botao.disabled = false;
+        botao.textContent = "Enviar";
+        definirFlash("erro", erro.message || "Não consegui enviar a imagem.");
+        montarRota();
+      }
+    };
+    wrap.querySelector("[data-enviar-print]").addEventListener("click", enviar);
+    // Enter manda, Shift+Enter quebra linha — mesmo comportamento do
+    // campo de mensagem.
+    legenda.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); }
+    });
+  }
 
   function abrirModal(html) {
     const wrap = document.createElement("div");
@@ -729,10 +775,11 @@
 
   // Sobe um arquivo pra uma conversa (de cliente ou interna) — as duas
   // telas mandam do mesmo jeito, só muda o endereço.
-  async function _subirAnexo(url, arquivo, tipoForcado) {
+  async function _subirAnexo(url, arquivo, tipoForcado, legenda) {
     const formData = new FormData();
     formData.append("arquivo", arquivo, arquivo.name || "arquivo");
     if (tipoForcado) formData.append("tipo", tipoForcado);
+    if (legenda) formData.append("legenda", legenda);
     const resp = await fetch(url, {
       method: "POST",
       headers: { Authorization: "Bearer " + state.accessToken },
@@ -2150,6 +2197,8 @@
           <button type="button" class="botao-icone ${conversa.resumo ? "wpp-icone-preenchido" : ""}" data-acao="abrir-resumo" data-id="${conversa.id}" data-resumo="${escapeHtml(conversa.resumo || "")}" title="${conversa.resumo ? "Ver/editar resumo do atendimento" : "Adicionar resumo do atendimento"}">📝</button>
           <button type="button" class="botao-icone" data-acao="abrir-lembrete" data-id="${conversa.id}" title="Criar lembrete de retorno">🔔</button>
           <button type="button" class="botao-icone ${conversa.proximo_contato_em ? "wpp-icone-preenchido" : ""}" data-acao="abrir-agendar-contato" data-id="${conversa.id}" title="${conversa.proximo_contato_em ? "Próximo contato marcado pra " + fmtData(conversa.proximo_contato_em) : "Agendar próximo contato (o sistema para de cobrar até a data)"}">📞</button>
+          ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
+            : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
@@ -2390,6 +2439,39 @@
     return wrap;
   }
 
+  // O motivo é opcional, mas ajuda muito: "ausente" sozinho faz o colega
+  // ficar sem saber se espera 5 minutos ou procura outra pessoa.
+  function modalAusencia() {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🟡 Marcar ausência</h3>
+      <p class="dica">Você sai das listas de quem pode atender e aparece como <strong>ausente</strong> para os colegas. O menu automático deixa de oferecer o seu setor se todo mundo dele estiver ausente. Nada é perdido: as conversas continuam suas.</p>
+      <div class="campo"><label class="rotulo-forte">Motivo (opcional)</label>
+        <input name="motivo" maxlength="60" placeholder="Ex.: almoço, reunião, atendimento externo" autofocus>
+        <div class="escolha-lista" style="margin-top:8px;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${["Almoço", "Reunião", "Atendimento externo", "Pausa"].map((m) =>
+              `<button type="button" class="botao secundario pequeno" data-motivo-rapido="${m}">${m}</button>`).join("")}
+          </div>
+        </div>
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-confirmar-ausencia>Ficar ausente</button>
+      </div>`);
+    const campo = wrap.querySelector('input[name="motivo"]');
+    for (const b of wrap.querySelectorAll("[data-motivo-rapido]")) {
+      b.addEventListener("click", () => { campo.value = b.dataset.motivoRapido; campo.focus(); });
+    }
+    wrap.querySelector("[data-confirmar-ausencia]").addEventListener("click", async () => {
+      const motivo = campo.value.trim();
+      await chamarApi("/usuarios/ausente", { method: "PUT", body: { ausente: true, motivo } });
+      state.usuarioAtual = { ...state.usuarioAtual, ausente: true, ausente_motivo: motivo || null };
+      fecharModais();
+      definirFlash("ok", motivo ? `Marcado como ausente (${motivo}).` : "Marcado como ausente.");
+      montarRota();
+    });
+  }
+
   function modalNovaEtiqueta(aoCriar) {
     const wrap = abrirModal(`
       <h3 style="margin-top:0;">🏷️ Nova etiqueta</h3>
@@ -2513,10 +2595,15 @@
   // (esperar resposta agora, ou ir atrás por outro caminho), então isso
   // aparece escrito — não só como uma bolinha de 8px que se perde no
   // meio da tela.
-  function htmlSeloPresenca(online) {
-    return online
-      ? `<span class="wpp-presenca wpp-presenca-online">● Online agora</span>`
-      : `<span class="wpp-presenca wpp-presenca-offline">● Offline</span>`;
+  function htmlSeloPresenca(online, ausente, motivo) {
+    if (online) return `<span class="wpp-presenca wpp-presenca-online">● Online agora</span>`;
+    // Ausente é diferente de offline: a pessoa está por perto e avisou
+    // que saiu. Cor própria (amarelo) pra dar pra decidir se vale
+    // esperar ou procurar outra pessoa.
+    if (ausente) {
+      return `<span class="wpp-presenca wpp-presenca-ausente" title="${escapeHtml(motivo || "Avisou que está ausente")}">● Ausente${motivo ? " — " + escapeHtml(motivo) : ""}</span>`;
+    }
+    return `<span class="wpp-presenca wpp-presenca-offline">● Offline</span>`;
   }
 
   function htmlListaConversasInternas(conversas, ativaId) {
@@ -2552,7 +2639,7 @@
         <div class="wpp-conversa-info">
           <div class="wpp-conversa-linha1">
             <span class="wpp-conversa-nome">${escapeHtml(outroNome)}</span>
-            ${htmlSeloPresenca(outroOnline)}
+            ${htmlSeloPresenca(outroOnline, souCriador ? c.participante_ausente : c.criado_por_ausente, souCriador ? c.participante_ausente_motivo : c.criado_por_ausente_motivo)}
             <span class="wpp-conversa-hora">${fmtHoraCurta(c.ultima_mensagem_em)}</span>
           </div>
           <div class="wpp-conversa-linha2">
@@ -2625,7 +2712,7 @@
         <div style="flex:1; min-width:0;">
           <div class="wpp-chat-nome">${escapeHtml(outroNome)}${souAlheio ? "" : ` <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="abrir-apelido-interno" data-conversa-id="${conversa.id}" data-apelido="${escapeHtml(outroNome)}" title="Definir apelido (só você vê)">✏️</button>`}</div>
           <div class="texto-suave wpp-chat-telefone">
-            ${htmlSeloPresenca(souCriador ? conversa.participante_online : conversa.criado_por_online)}
+            ${htmlSeloPresenca(souCriador ? conversa.participante_online : conversa.criado_por_online, souCriador ? conversa.participante_ausente : conversa.criado_por_ausente, souCriador ? conversa.participante_ausente_motivo : conversa.criado_por_ausente_motivo)}
             ${souAlheio ? " · 👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${conversa.setor_destino ? ` · 🏷️ ${escapeHtml(conversa.setor_destino)}` : ""}
           </div>
         </div>
@@ -3995,6 +4082,26 @@
         document.querySelector(".barra-lateral").classList.toggle("aberta");
         document.querySelector(".fundo-menu-mobile").classList.toggle("visivel");
         return;
+      case "sem-pendencia": {
+        const id = Number(alvo.dataset.id);
+        const desmarcar = alvo.dataset.desmarcar === "1";
+        await chamarApi(`/whatsapp/conversas/${id}/sem-pendencia`, { method: "POST", body: { desmarcar } });
+        definirFlash("ok", desmarcar
+          ? "Conversa voltou a contar como pendente."
+          : "Marcada como resolvida — sai do alerta de atraso. Se o cliente escrever de novo, volta a cobrar.");
+        atualizarBadgeSla();
+        return renderWhatsapp(id);
+      }
+      case "alternar-ausente": {
+        const jaAusente = state.usuarioAtual && state.usuarioAtual.ausente;
+        if (jaAusente) {
+          const u = await chamarApi("/usuarios/ausente", { method: "PUT", body: { ausente: false } });
+          state.usuarioAtual = { ...state.usuarioAtual, ausente: false, ausente_motivo: null };
+          definirFlash("ok", "Bem-vindo de volta — você voltou a aparecer como disponível.");
+          return montarRota();
+        }
+        return modalAusencia();
+      }
       case "alternar-tema": {
         const atual = document.documentElement.getAttribute("data-tema") || "auto";
         const proximo = atual === "escuro" ? "claro" : atual === "claro" ? "auto" : "escuro";

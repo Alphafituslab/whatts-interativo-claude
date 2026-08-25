@@ -96,7 +96,16 @@ def listar_mensagens(conversa_id):
         lado = "participante"
     else:
         lado = None  # admin espiando pela aba "Todas" — não conta como leitura
-    mensagens = chat_interno_service.listar_mensagens(conn, conversa_id, lado, incluir_excluidas=usuario["admin"])
+    # Mensagem apagada só aparece pro admin em SUPERVISÃO — quando ele
+    # está olhando uma conversa que não é dele (lado is None).
+    #
+    # Antes bastava ser admin, e a mensagem apagada aparecia até na
+    # conversa em que ele mesmo participa: quem apagou some do próprio
+    # lado, mas o texto continuava riscado na tela do outro, no meio de
+    # uma conversa normal. Supervisão é onde essa informação serve; numa
+    # conversa que é dele, só atrapalha.
+    supervisionando = usuario["admin"] and lado is None
+    mensagens = chat_interno_service.listar_mensagens(conn, conversa_id, lado, incluir_excluidas=supervisionando)
     return jsonify(mensagens)
 
 

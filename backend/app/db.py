@@ -53,6 +53,8 @@ SCHEMA_FILES = [
     "schema_038_reacoes.sql",
     "schema_039_tipo_figurinha.sql",
     "schema_040_autor_no_grupo.sql",
+    "schema_041_ausente.sql",
+    "schema_042_sem_pendencia.sql",
 ]
 
 

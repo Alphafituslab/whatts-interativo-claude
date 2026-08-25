@@ -1182,3 +1182,31 @@ nav { perspective: 800px; }
   font-size: 9px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
 }
 .wpp-tag-tirar:hover { background: rgba(255,255,255,0.55); }
+
+/* Ausente: cor própria. Não é offline (sumido) nem online (disponível)
+   — é "estou por aqui, mas saí agora", e isso muda o que o colega faz. */
+.wpp-presenca-ausente {
+  color: #b8860b; background: rgba(212, 160, 23, 0.16);
+  border: 1px solid rgba(212, 160, 23, 0.5);
+}
+[data-tema="escuro"] .wpp-presenca-ausente { color: #e8c14a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema="claro"]) .wpp-presenca-ausente { color: #e8c14a; }
+}
+.botao-ausente-ligado {
+  border-color: rgba(212, 160, 23, 0.7) !important;
+  background: rgba(212, 160, 23, 0.14) !important;
+}
+.botao-sem-pendencia-ligado {
+  border-color: color-mix(in srgb, var(--verde) 60%, transparent) !important;
+  background: color-mix(in srgb, var(--verde) 14%, transparent) !important;
+}
+
+/* Prévia do print antes de enviar. A área de transferência guarda o
+   último print de qualquer programa — conferir antes evita mandar a
+   imagem errada pro cliente, que não tem desfazer bonito. */
+.wpp-previa-print {
+  background: var(--fundo); border: 1px solid var(--borda); border-radius: 10px;
+  padding: 8px; max-height: 46vh; overflow: auto; text-align: center;
+}
+.wpp-previa-print img { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0 auto; }

@@ -23,7 +23,8 @@ def _now_iso():
 def _online(u):
     ultimo = u["ultimo_acesso"] if "ultimo_acesso" in u.keys() else None
     forcado = u["offline_forcado"] if "offline_forcado" in u.keys() else 0
-    return whatsapp_service.usuario_esta_online(ultimo, forcado)
+    ausente = u["ausente"] if "ausente" in u.keys() else 0
+    return whatsapp_service.usuario_esta_online(ultimo, forcado, ausente)
 
 
 def _publico(u, setores=None):
@@ -42,6 +43,8 @@ def _publico(u, setores=None):
         "offline_forcado": bool(u["offline_forcado"]) if "offline_forcado" in u.keys() else False,
         "acesso_conversas": bool(u["acesso_conversas"]) if "acesso_conversas" in u.keys() else True,
         "online": _online(u),
+        "ausente": bool(u["ausente"]) if "ausente" in u.keys() else False,
+        "ausente_motivo": u["ausente_motivo"] if "ausente_motivo" in u.keys() else None,
     }
 
 
@@ -260,6 +263,30 @@ def definir_horario(usuario_id):
         raise ApiError("Usuário não encontrado.", status=404, codigo="nao_encontrado")
     conn.execute("UPDATE usuarios SET horario_permitido = ? WHERE id = ?", (horario_permitido, usuario_id))
     return jsonify({"ok": True})
+
+
+@bp.put("/ausente")
+@requires_auth
+def definir_ausente():
+    """A própria pessoa avisa que saiu ("almoço", "reunião").
+
+    Diferente de offline_forcado, que é do admin pra quem está de férias
+    ou afastado: aqui é autosserviço, do mesmo jeito que trocar a
+    própria foto ou senha. Quem está ausente sai das listas de quem
+    pode atender, e o menu automático deixa de oferecer o setor se todo
+    mundo dele estiver assim."""
+    usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
+    ausente = 1 if dados.get("ausente") else 0
+    motivo = (dados.get("motivo") or "").strip()[:60] or None
+    conn = get_db()
+    conn.execute(
+        "UPDATE usuarios SET ausente = ?, ausente_motivo = ?, ausente_ate = ? WHERE id = ?",
+        (ausente, motivo if ausente else None,
+         (dados.get("ate") or None) if ausente else None, usuario["id"]),
+    )
+    linha = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario["id"],)).fetchone()
+    return jsonify(_publico(linha, whatsapp_service.setores_do_usuario(conn, usuario["id"])))
 
 
 @bp.put("/perfil")

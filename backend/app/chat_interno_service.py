@@ -120,8 +120,16 @@ def _marcar_online(conversas):
     de acesso de ninguém, que é informação interna)."""
     from . import whatsapp_service
     for c in conversas:
-        c["criado_por_online"] = whatsapp_service.usuario_esta_online(c.pop("_uc_acesso", None), c.pop("_uc_off", 0))
-        c["participante_online"] = whatsapp_service.usuario_esta_online(c.pop("_up_acesso", None), c.pop("_up_off", 0))
+        c["criado_por_online"] = whatsapp_service.usuario_esta_online(
+            c.pop("_uc_acesso", None), c.pop("_uc_off", 0), c.get("_uc_ausente", 0))
+        c["participante_online"] = whatsapp_service.usuario_esta_online(
+            c.pop("_up_acesso", None), c.pop("_up_off", 0), c.get("_up_ausente", 0))
+        # O motivo vai junto ("almoço"), pra a ausência não virar um
+        # "offline" mudo que ninguém sabe explicar.
+        c["criado_por_ausente"] = bool(c.pop("_uc_ausente", 0))
+        c["participante_ausente"] = bool(c.pop("_up_ausente", 0))
+        c["criado_por_ausente_motivo"] = c.pop("_uc_motivo", None)
+        c["participante_ausente_motivo"] = c.pop("_up_motivo", None)
     return conversas
 
 
@@ -202,7 +210,9 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
         SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
                uc.foto_perfil AS criado_por_foto, up.foto_perfil AS participante_foto,
                uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
-               up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off
+               up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off,
+               uc.ausente AS _uc_ausente, up.ausente AS _up_ausente,
+               uc.ausente_motivo AS _uc_motivo, up.ausente_motivo AS _up_motivo
         FROM chat_interno_conversas c
         JOIN usuarios uc ON uc.id = c.criado_por_id
         LEFT JOIN usuarios up ON up.id = c.participante_id
@@ -227,7 +237,9 @@ def carregar_conversa(conn, conversa_id: int):
         SELECT c.*, uc.nome AS criado_por_nome, up.nome AS participante_nome, uc.empresa_id AS empresa_id,
                uc.foto_perfil AS criado_por_foto, up.foto_perfil AS participante_foto,
                uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
-               up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off
+               up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off,
+               uc.ausente AS _uc_ausente, up.ausente AS _up_ausente,
+               uc.ausente_motivo AS _uc_motivo, up.ausente_motivo AS _up_motivo
         FROM chat_interno_conversas c
         JOIN usuarios uc ON uc.id = c.criado_por_id
         LEFT JOIN usuarios up ON up.id = c.participante_id
