@@ -530,6 +530,24 @@ def pulso():
     return jsonify({"c": ultima_cliente, "i": ultima_interna, "v": vistos, "s": status})
 
 
+@bp.get("/conversas/<int:conversa_id>")
+@requires_auth
+def obter_conversa(conversa_id):
+    """Uma conversa específica, respeitando a permissão de quem pede.
+
+    Existe porque a tela precisa abrir uma conversa que não está na aba
+    atual (ex.: a pessoa assumiu o atendimento e voltou pra aba Fila).
+    Antes ela caía em ?escopo=todas — que é só de admin —, levava 403 e
+    abria sem o campo de digitar: dava a impressão de que a conversa
+    tinha travado, e só fechar e reabrir o sistema resolvia."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_visualizar(usuario, conversa, conn):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    return jsonify(_conversas_com_tags(conn, [conversa])[0])
+
+
 @bp.get("/conversas/buscar")
 @requires_auth
 def buscar_conversas():

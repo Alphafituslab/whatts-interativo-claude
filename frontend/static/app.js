@@ -480,6 +480,43 @@
     }, 350);
   });
 
+  // Ctrl+V com um print na área de transferência manda a imagem pra
+  // conversa aberta. Print é a coisa mais colada num atendimento — ter
+  // que salvar em arquivo antes, só pra depois anexar, é um passo a
+  // mais em algo que se faz dezenas de vezes por dia.
+  //
+  // Vale nas duas telas; a conversa é a que estiver aberta no momento.
+  document.addEventListener("paste", async (e) => {
+    const itens = [...((e.clipboardData || {}).items || [])];
+    const imagem = itens.find((i) => i.type && i.type.startsWith("image/"));
+    if (!imagem) return; // colar texto continua normal
+    const conversaId = Number(location.hash.split("/")[2]) || null;
+    const interna = location.hash.startsWith("#/chat-interno");
+    if (!conversaId || (!interna && !location.hash.startsWith("#/whatsapp"))) return;
+    const arquivo = imagem.getAsFile();
+    if (!arquivo) return;
+    e.preventDefault();
+    // Print vem sem nome de arquivo; dar um com a data ajuda depois, na
+    // hora de achar o anexo no histórico.
+    const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const comNome = new File([arquivo], `print-${carimbo}.png`, { type: arquivo.type || "image/png" });
+    if (comNome.size > 35 * 1024 * 1024) {
+      definirFlash("erro", "A imagem colada é maior que 35MB.");
+      return montarRota();
+    }
+    try {
+      const base = interna
+        ? `/chat-interno/conversas/${conversaId}/anexo`
+        : `/whatsapp/conversas/${conversaId}/anexo`;
+      await _subirAnexo(`${API}${base}`, comNome);
+      if (interna) await atualizarMensagensInternasNoDom(conversaId);
+      else await atualizarMensagensNoDom(conversaId);
+    } catch (erro) {
+      definirFlash("erro", erro.message || "Não consegui enviar a imagem colada.");
+      montarRota();
+    }
+  });
+
   function abrirModal(html) {
     const wrap = document.createElement("div");
     wrap.className = "fundo-modal";
@@ -2122,7 +2159,7 @@
         </div>
       </div>
       <div class="wpp-tags-linha">
-        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}
+        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
       ${htmlNotas(conversa.id, notas || [])}
@@ -2233,10 +2270,15 @@
     if (conversaId) {
       conversaAtual = conversas.find((c) => c.id === conversaId) || null;
       if (!conversaAtual) {
-        // A conversa pode existir mas não estar na aba atual (ex.: link
-        // direto para uma conversa de outra pessoa) — busca à parte; se
-        // o servidor recusar (403/404), o catch de montarRota mostra o erro.
-        conversaAtual = await chamarApi(`/whatsapp/conversas?escopo=todas`).then((todas) => todas.find((c) => c.id === conversaId)).catch(() => null);
+        // A conversa existe mas não está na aba atual — acontece o tempo
+        // todo: a pessoa assume o atendimento (a conversa sai da Fila) e
+        // continua com a aba Fila aberta.
+        //
+        // Antes isso caía em ?escopo=todas, que só admin pode pedir:
+        // atendente levava 403, a tela abria SEM o campo de digitar e
+        // parecia que a conversa tinha travado. Agora busca a conversa
+        // direto, num endereço que respeita a permissão de cada um.
+        conversaAtual = await chamarApi(`/whatsapp/conversas/${conversaId}`).catch(() => null);
       }
       if (conversaAtual) {
         [mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas] = await Promise.all([
@@ -2597,7 +2639,7 @@
         </div>
       </div>
       <div class="wpp-tags-linha">
-        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}
+        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="1" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
@@ -4026,6 +4068,19 @@
         await chamarApi(`/chat-interno/conversas/${id}/reabrir`, { method: "POST" });
         definirFlash("ok", "Conversa reaberta.");
         return renderChatInterno(id);
+      }
+      case "tirar-etiqueta": {
+        const interna = alvo.dataset.interna === "1";
+        const conversaId = alvo.dataset.id;
+        const tirar = Number(alvo.dataset.tag);
+        // Lê as que estão lá agora e regrava sem esta — o servidor
+        // espera a lista final, não "remova esta".
+        const botao = document.querySelector(`[data-acao="${interna ? "abrir-tags-interna" : "abrir-tags-conversa"}"]`);
+        const atuais = JSON.parse((botao && botao.dataset.tags) || "[]").map(Number);
+        await chamarApi(_urlTagsDaConversa(conversaId, interna), {
+          method: "PUT", body: { tag_ids: atuais.filter((x) => x !== tirar) },
+        });
+        return _redesenharCanal(interna);
       }
       case "alternar-etiqueta-conversa": {
         const tags = JSON.parse(alvo.dataset.tags || "[]");
