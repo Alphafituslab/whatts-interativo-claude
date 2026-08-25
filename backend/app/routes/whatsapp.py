@@ -262,6 +262,20 @@ def _conversas_com_tags(conn, rows):
     return [_conversa_para_json(r, mapa_tags.get(r["id"], [])) for r in rows]
 
 
+def _recusa_atribuida(conversa, complemento=""):
+    """Mensagem de recusa dizendo COM QUEM a conversa está.
+
+    Antes dizia só "está atribuída a outro usuário", e quem esbarrava
+    nisso não tinha como descobrir com quem falar — tinha que perguntar
+    de mesa em mesa."""
+    nome = None
+    if "atribuida_usuario_nome" in conversa.keys():
+        nome = conversa["atribuida_usuario_nome"]
+    if nome:
+        return f"Esta conversa está com {nome}.{complemento}"
+    return f"Esta conversa está atribuída a outro usuário.{complemento}"
+
+
 def _carregar_conversa(conn, empresa_id, conversa_id):
     """empresa_id sempre filtra aqui — é o único ponto que TODA rota de
     conversa passa antes de fazer qualquer coisa, então uma conversa de
@@ -269,8 +283,12 @@ def _carregar_conversa(conn, empresa_id, conversa_id):
     pediu (404, igual não existisse mesmo) — isolamento entre empresas
     depende inteiramente deste filtro."""
     conversa = conn.execute(
-        "SELECT c.*, ct.telefone, ct.nome AS contato_nome, ct.foto_url AS contato_foto FROM whatsapp_conversas c "
-        "JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE c.id = ? AND ct.empresa_id = ?",
+        "SELECT c.*, ct.telefone, ct.nome AS contato_nome, ct.foto_url AS contato_foto, "
+        "u.nome AS atribuida_usuario_nome "
+        "FROM whatsapp_conversas c "
+        "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+        "LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id "
+        "WHERE c.id = ? AND ct.empresa_id = ?",
         (conversa_id, empresa_id),
     ).fetchone()
     if conversa is None:
@@ -397,6 +415,68 @@ def listar_conversas():
         f"{base} {where} ORDER BY COALESCE(c.ultima_mensagem_em, c.criado_em) DESC LIMIT 300", params
     ).fetchall()
     return jsonify(_conversas_com_tags(conn, rows))
+
+
+@bp.get("/pulso")
+@requires_auth
+def pulso():
+    """Diz, em uma consulta minúscula, se apareceu alguma coisa nova.
+
+    Existe pra tela poder perguntar MUITAS vezes por segundo sem pesar:
+    buscar a lista de conversas inteira a cada meio segundo seria caro,
+    mas comparar dois números é barato. A tela só busca de verdade
+    quando um destes valores muda — e é isso que faz a mensagem aparecer
+    quase na hora, sem o servidor sentir.
+
+    Devolve o id da última mensagem (de cliente e interna) e a soma das
+    não-lidas. Qualquer coisa que importe pra tela mexe em pelo menos um
+    desses.
+    """
+    usuario = g.usuario_atual
+    conn = get_db()
+    ultima_cliente = conn.execute(
+        "SELECT COALESCE(MAX(m.id), 0) AS v FROM whatsapp_mensagens m "
+        "JOIN whatsapp_conversas c ON c.id = m.conversa_id "
+        "JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE ct.empresa_id = ?",
+        (g.empresa_id,),
+    ).fetchone()["v"]
+    ultima_interna = conn.execute(
+        "SELECT COALESCE(MAX(m.id), 0) AS v FROM chat_interno_mensagens m "
+        "JOIN chat_interno_conversas c ON c.id = m.conversa_id "
+        "JOIN usuarios u ON u.id = c.criado_por_id WHERE u.empresa_id = ?",
+        (g.empresa_id,),
+    ).fetchone()["v"]
+    # "visto" entra no pulso pra o ✓✓ do chat interno aparecer na hora
+    # em que o outro lado abre a conversa — sem isso, só na mensagem
+    # seguinte.
+    vistos = conn.execute(
+        "SELECT COALESCE(MAX(COALESCE(visto_criador_em, '')) || MAX(COALESCE(visto_participante_em, '')), '') AS v "
+        "FROM chat_interno_conversas c JOIN usuarios u ON u.id = c.criado_por_id WHERE u.empresa_id = ?",
+        (g.empresa_id,),
+    ).fetchone()["v"]
+    # Status das nossas mensagens (enviada -> entregue -> lida): muda sem
+    # criar mensagem nenhuma, então precisa entrar aqui — é o que faz o
+    # ✓✓ azul aparecer sozinho, sem esperar a próxima mensagem.
+    #
+    # Só da conversa ABERTA, não da empresa inteira: status de conversa
+    # que ninguém está olhando não muda nada na tela, e contar isso em
+    # todo o histórico era o passo mais caro do pulso — ficava mais
+    # pesado que buscar a lista inteira, justamente o que este endereço
+    # existe pra evitar.
+    status = ""
+    conversa_id = request.args.get("conversa_id")
+    if conversa_id:
+        linha = conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN m.status = 'lida' THEN 1 ELSE 0 END) AS lidas, "
+            "SUM(CASE WHEN m.status = 'entregue' THEN 1 ELSE 0 END) AS entregues "
+            "FROM whatsapp_mensagens m JOIN whatsapp_conversas c ON c.id = m.conversa_id "
+            "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE m.conversa_id = ? AND ct.empresa_id = ? AND m.direcao = 'saida'",
+            (conversa_id, g.empresa_id),
+        ).fetchone()
+        status = f"{linha['total']}.{linha['lidas'] or 0}.{linha['entregues'] or 0}"
+    return jsonify({"c": ultima_cliente, "i": ultima_interna, "v": vistos, "s": status})
 
 
 @bp.get("/conversas/buscar")
@@ -671,7 +751,7 @@ def listar_mensagens(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
 
     # Mensagem apagada some pro usuário comum, mas o ADMIN continua vendo
     # (marcada, com quem apagou) — sem isso alguém podia apagar algo e não
@@ -717,7 +797,7 @@ def enviar_mensagem(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário — encaminhe para si mesmo antes de responder.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa, " Encaminhe para si mesmo antes de responder."), status=403, codigo="sem_permissao")
 
     whatsapp_service.verificar_repeticao_mensagem(conn, g.empresa_id, texto)
 
@@ -783,7 +863,7 @@ def excluir_mensagem(conversa_id, mensagem_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     mensagem = conn.execute(
         "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
     ).fetchone()
@@ -810,7 +890,7 @@ def editar_mensagem(conversa_id, mensagem_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     mensagem = conn.execute(
         "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
     ).fetchone()
@@ -866,7 +946,7 @@ def transcrever_audio_mensagem(conversa_id, mensagem_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa, conn):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     mensagem = conn.execute(
         "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
     ).fetchone()
@@ -906,7 +986,7 @@ def reenviar_mensagem(conversa_id, mensagem_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     mensagem = conn.execute(
         "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
     ).fetchone()
@@ -940,12 +1020,18 @@ def assumir_conversa(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if conversa["atribuida_usuario_id"] is not None and not usuario["admin"]:
-        raise ApiError("Esta conversa já foi assumida por outro usuário.", status=409, codigo="ja_atribuida")
+        raise ApiError(_recusa_atribuida(conversa, " Peça pra ela encaminhar, ou fale com um administrador."),
+                       status=409, codigo="ja_atribuida")
     if not usuario["admin"]:
         if not conversa["menu_setor"]:
             raise ApiError("Essa conversa ainda não tem setor definido — só um administrador pode assumi-la.", status=403, codigo="sem_permissao")
-        if conversa["menu_setor"] != usuario["setor"]:
-            raise ApiError("Essa conversa é de outro setor — você só pode assumir conversas do seu setor.", status=403, codigo="sem_permissao")
+        # Compara com TODOS os setores da pessoa: quem atende Televendas
+        # e Financeiro pode assumir conversa dos dois. Antes olhava só o
+        # setor principal e barrava o segundo.
+        if conversa["menu_setor"] not in whatsapp_service.setores_do_usuario(conn, usuario["id"]):
+            raise ApiError(
+                f"Essa conversa é do setor {conversa['menu_setor']} — você só pode assumir conversas dos setores que atende.",
+                status=403, codigo="sem_permissao")
     whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
     whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_assumida", conversa["telefone"], conversa_id)
     return jsonify({"ok": True})
@@ -1113,7 +1199,7 @@ def salvar_resumo(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     whatsapp_service.salvar_resumo(conn, conversa_id, (dados.get("resumo") or "").strip() or None)
     return jsonify({"ok": True})
 
@@ -1125,7 +1211,7 @@ def atualizar_foto_contato(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
     foto_url = whatsapp_service.atualizar_foto_contato(conn, config, conversa["contato_id"], conversa["telefone"])
     return jsonify({"foto_url": foto_url})
@@ -1164,7 +1250,7 @@ def listar_notas(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     return jsonify(whatsapp_service.listar_notas(conn, conversa_id))
 
 
@@ -1179,7 +1265,7 @@ def criar_nota(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     whatsapp_service.criar_nota(conn, conversa_id, usuario["id"], texto)
     return jsonify({"ok": True}), 201
 
@@ -1279,7 +1365,7 @@ def definir_tags_conversa(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     whatsapp_service.definir_tags_da_conversa(conn, g.empresa_id, g.usuario_atual["id"], conversa_id, dados.get("tag_ids") or [])
     return jsonify({"ok": True})
 
@@ -1347,7 +1433,7 @@ def enviar_figurinha_conversa(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
 
     dados = request.get_json(silent=True) or {}
     figurinha = conn.execute(
@@ -1482,7 +1568,7 @@ def listar_agendadas(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     return jsonify(whatsapp_service.listar_agendadas(conn, conversa_id))
 
 
@@ -1506,7 +1592,7 @@ def agendar_mensagem(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
 
     tipo, midia_url, nome_arquivo = "texto", None, None
     arquivo = request.files.get("arquivo") if eh_multipart else None
@@ -1618,7 +1704,7 @@ def criar_lembrete(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_visualizar(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     # Por padrão o lembrete é pra quem está criando; um admin pode
     # delegar pra outro usuário passando usuario_id.
     usuario_alvo = dados.get("usuario_id") or usuario["id"]
@@ -1700,7 +1786,7 @@ def enviar_anexo(conversa_id):
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
-        raise ApiError("Esta conversa está atribuída a outro usuário — encaminhe para si mesmo antes de responder.", status=403, codigo="sem_permissao")
+        raise ApiError(_recusa_atribuida(conversa, " Encaminhe para si mesmo antes de responder."), status=403, codigo="sem_permissao")
 
     arquivo = request.files.get("arquivo")
     if not arquivo or not arquivo.filename:

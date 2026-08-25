@@ -39,4 +39,8 @@ if __name__ == "__main__":
     host = os.environ.get("WPP_HOST", "0.0.0.0")
     porta = int(os.environ.get("WPP_PORT", "5050"))
     print(f"Seja Alpha rodando em http://{host}:{porta}")
-    serve(app, host=host, port=porta)
+    # 4 threads (o padrão do waitress) é pouco pra uma equipe inteira com
+    # a tela aberta: cada pessoa consulta novidades várias vezes por
+    # segundo, e uma consulta um pouco mais lenta (envio de mídia,
+    # transcrição de áudio) segurava a fila de todo mundo.
+    serve(app, host=host, port=porta, threads=int(os.environ.get("WPP_THREADS", "24")))

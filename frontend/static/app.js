@@ -302,9 +302,10 @@
       .map((it) => {
         let extra = "";
         if (it.chave === "whatsapp") {
-          extra = '<span class="wpp-badge-sla" data-wpp-sla-badge hidden></span><span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-nao-lidas-badge hidden></span>';
+          extra = '<span class="wpp-badge-sla" data-wpp-sla-badge hidden title="Conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado"></span>'
+                + '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-nao-lidas-badge hidden title="Mensagens novas que você ainda não leu"></span>';
         } else if (it.chave === "chat-interno") {
-          extra = '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-chat-interno-nao-lidas-badge hidden></span>';
+          extra = '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-chat-interno-nao-lidas-badge hidden title="Mensagens novas de colegas que você ainda não leu"></span>';
         }
         return `<a class="link-nav ${it.chave === paginaAtiva ? "ativo" : ""}" href="${it.rota}"><span>${it.icone}</span> ${escapeHtml(it.label)}${extra}</a>`;
       })
@@ -1045,10 +1046,19 @@
   }
 
   // Cliente no WhatsApp: dois toques subindo, mais agudo e "chamativo".
+  // Cliente no WhatsApp: ~1,6s, subindo. Era um "ding" de 0,35s que se
+  // perdia em sala com movimento — quem estava de costas pro
+  // computador não pegava. Continua mais curto e mais agudo que o do
+  // chat interno, pra dar pra saber de qual dos dois é sem olhar.
   function tocarAvisoWhatsapp() {
     _tocarNotas([
-      { hz: 880, inicio: 0, duracao: 0.13 },
-      { hz: 1318, inicio: 0.14, duracao: 0.22 },
+      { hz: 880,  inicio: 0,    duracao: 0.15, volume: 0.13 },
+      { hz: 1318, inicio: 0.17, duracao: 0.15, volume: 0.13 },
+      { hz: 1046, inicio: 0.36, duracao: 0.15, volume: 0.12 },
+      { hz: 1318, inicio: 0.55, duracao: 0.17, volume: 0.13 },
+      { hz: 1568, inicio: 0.76, duracao: 0.20, volume: 0.14 },
+      { hz: 1318, inicio: 1.00, duracao: 0.18, volume: 0.12 },
+      { hz: 1760, inicio: 1.22, duracao: 0.40, volume: 0.14 },
     ]);
   }
 
@@ -1056,17 +1066,22 @@
   // descendo, ~1s). O toque do cliente é curto e agudo; alongar este
   // aqui deixa a diferença óbvia sem precisar olhar a tela.
   function tocarAvisoChatInterno() {
-    // ~2,4s: melodia de 7 notas que desce e sobe de volta. Bem mais
-    // longa que o toque do cliente (~0,4s) pra dar pra reconhecer sem
-    // olhar a tela, mesmo em sala barulhenta ou de longe.
+    // ~3,6s: melodia grave que desce, sobe e fecha com uma nota longa.
+    // Continua sendo a mais longa das duas — é assim que se sabe, sem
+    // olhar, que quem chamou foi um colega e não um cliente.
     _tocarNotas([
-      { hz: 659, inicio: 0,    duracao: 0.18, volume: 0.13 },
-      { hz: 587, inicio: 0.22, duracao: 0.18, volume: 0.13 },
-      { hz: 494, inicio: 0.44, duracao: 0.18, volume: 0.13 },
-      { hz: 440, inicio: 0.66, duracao: 0.22, volume: 0.13 },
-      { hz: 392, inicio: 0.92, duracao: 0.26, volume: 0.14 },
-      { hz: 494, inicio: 1.24, duracao: 0.26, volume: 0.13 },
-      { hz: 587, inicio: 1.54, duracao: 0.85, volume: 0.14 },
+      { hz: 659, inicio: 0,    duracao: 0.20, volume: 0.13 },
+      { hz: 587, inicio: 0.24, duracao: 0.20, volume: 0.13 },
+      { hz: 494, inicio: 0.48, duracao: 0.20, volume: 0.13 },
+      { hz: 440, inicio: 0.72, duracao: 0.24, volume: 0.13 },
+      { hz: 392, inicio: 1.00, duracao: 0.28, volume: 0.14 },
+      { hz: 349, inicio: 1.32, duracao: 0.28, volume: 0.14 },
+      { hz: 392, inicio: 1.64, duracao: 0.24, volume: 0.13 },
+      { hz: 440, inicio: 1.92, duracao: 0.24, volume: 0.13 },
+      { hz: 494, inicio: 2.20, duracao: 0.24, volume: 0.13 },
+      { hz: 587, inicio: 2.48, duracao: 0.28, volume: 0.14 },
+      { hz: 494, inicio: 2.80, duracao: 0.24, volume: 0.13 },
+      { hz: 587, inicio: 3.08, duracao: 0.55, volume: 0.15 },
     ]);
   }
 
@@ -1369,7 +1384,12 @@
       const alertas = await chamarApi("/whatsapp/sla-alertas");
       state.slaAlertasIds = new Set(alertas.map((c) => c.id));
       badge.hidden = alertas.length === 0;
-      badge.textContent = alertas.length > 99 ? "99+" : String(alertas.length);
+      // O ⏱ separa este número do verde ao lado: um é atraso, o outro é
+      // mensagem nova. Só a cor não bastava pra distinguir.
+      badge.textContent = "⏱ " + (alertas.length > 99 ? "99+" : String(alertas.length));
+      badge.title = alertas.length === 1
+        ? "1 conversa parada: o cliente falou e ninguém respondeu dentro do tempo combinado"
+        : `${alertas.length} conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado`;
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
@@ -1495,37 +1515,101 @@
   // =======================================================================
   // WHATSAPP — caixa de entrada (abas: Minhas / Fila / Todas)
   // =======================================================================
+  // ---------------------------------------------------------------
+  // Novidades quase na hora, sem pesar no servidor
+  //
+  // Buscar a lista inteira de conversas várias vezes por segundo seria
+  // caro. Em vez disso a tela pergunta "mudou alguma coisa?" — uma
+  // resposta de quatro números — e só busca de verdade quando a
+  // resposta muda. Assim dá pra perguntar a cada 400ms em vez de 1,2s,
+  // e a mensagem aparece quase no instante em que chega.
+  //
+  // Com a aba escondida o ritmo cai: ninguém está olhando, e continuar
+  // no mesmo ritmo só gastaria bateria e servidor à toa.
+  const PULSO_ATIVO_MS = 400;
+  const PULSO_ESCONDIDO_MS = 4000;
+  let _pulsoAnterior = null;
+
+  // Ao voltar pra aba, verifica imediatamente: quem estava em outra
+  // janela quer ver o que chegou no instante em que olha de volta.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    _pulsoAnterior = null; // força uma busca de verdade agora
+    if (location.hash.startsWith("#/whatsapp")) {
+      const id = Number(location.hash.split("/")[2]) || null;
+      atualizarListaConversasNoDom().catch(() => {});
+      if (id) atualizarMensagensNoDom(id).catch(() => {});
+    } else if (location.hash.startsWith("#/chat-interno")) {
+      const id = Number(location.hash.split("/")[2]) || null;
+      atualizarListaConversasInternasNoDom().catch(() => {});
+      if (id) atualizarMensagensInternasNoDom(id).catch(() => {});
+    }
+  });
+
+  async function mudouAlgo() {
+    try {
+      // Manda a conversa aberta junto: é a única em que o status das
+      // mensagens (o ✓✓) muda alguma coisa na tela.
+      const aberta = Number(location.hash.split("/")[2]) || null;
+      const ehCliente = location.hash.startsWith("#/whatsapp");
+      const p = await chamarApi(`/whatsapp/pulso${aberta && ehCliente ? `?conversa_id=${aberta}` : ""}`);
+      const assinatura = `${p.c}|${p.i}|${p.v}|${p.s}`;
+      const mudou = _pulsoAnterior !== null && assinatura !== _pulsoAnterior;
+      const primeira = _pulsoAnterior === null;
+      _pulsoAnterior = assinatura;
+      // Na primeira vez busca de qualquer jeito, pra tela não ficar
+      // esperando alguém mandar mensagem pra se preencher.
+      return mudou || primeira;
+    } catch (e) {
+      // Sem resposta (rede oscilou): tenta buscar mesmo assim, é melhor
+      // do que congelar a tela.
+      return true;
+    }
+  }
+
+  function _ritmoDoPulso() {
+    return document.hidden ? PULSO_ESCONDIDO_MS : PULSO_ATIVO_MS;
+  }
+
   let timerWhatsapp = null;
-  function pararPollingWhatsapp() { if (timerWhatsapp) { clearInterval(timerWhatsapp); timerWhatsapp = null; } }
+  function pararPollingWhatsapp() { if (timerWhatsapp) { clearTimeout(timerWhatsapp); clearInterval(timerWhatsapp); timerWhatsapp = null; } }
   function iniciarPollingWhatsapp(conversaId) {
     pararPollingWhatsapp();
     // 1.2s — pediram explicitamente pra mensagem do cliente aparecer sem
     // delay perceptível. Continua sendo polling (o servidor não empurra
     // nada sozinho), mas nesse intervalo já fica bem próximo de tempo
     // real pro olho humano notar.
-    timerWhatsapp = setInterval(async () => {
+    const tick = async () => {
       if (!location.hash.startsWith("#/whatsapp")) { pararPollingWhatsapp(); return; }
       try {
-        await atualizarListaConversasNoDom();
-        if (conversaId) await atualizarMensagensNoDom(conversaId);
+        if (await mudouAlgo()) {
+          await atualizarListaConversasNoDom();
+          if (conversaId) await atualizarMensagensNoDom(conversaId);
+        }
       } catch (e) { /* próxima tentativa corrige */ }
-    }, 1200);
+      // setTimeout encadeado (em vez de setInterval): o próximo só é
+      // marcado depois que este terminou, então uma resposta lenta nunca
+      // empilha pedidos em cima da anterior.
+      if (timerWhatsapp !== null) timerWhatsapp = setTimeout(tick, _ritmoDoPulso());
+    };
+    timerWhatsapp = setTimeout(tick, PULSO_ATIVO_MS);
   }
 
   let timerChatInterno = null;
-  function pararPollingChatInterno() { if (timerChatInterno) { clearInterval(timerChatInterno); timerChatInterno = null; } }
+  function pararPollingChatInterno() { if (timerChatInterno) { clearTimeout(timerChatInterno); clearInterval(timerChatInterno); timerChatInterno = null; } }
   function iniciarPollingChatInterno(conversaId) {
     pararPollingChatInterno();
-    timerChatInterno = setInterval(async () => {
+    const tick = async () => {
       if (!location.hash.startsWith("#/chat-interno")) { pararPollingChatInterno(); return; }
       try {
-        await atualizarListaConversasInternasNoDom();
-        if (conversaId) await atualizarMensagensInternasNoDom(conversaId);
+        if (await mudouAlgo()) {
+          await atualizarListaConversasInternasNoDom();
+          if (conversaId) await atualizarMensagensInternasNoDom(conversaId);
+        }
       } catch (e) { /* próxima tentativa corrige */ }
-      // 1,2s, mesmo ritmo das conversas de cliente: o "digitando…" e o
-      // "visualizado" precisam parecer instantâneos pra conversa entre
-      // colegas não dar sensação de atraso.
-    }, 1200);
+      if (timerChatInterno !== null) timerChatInterno = setTimeout(tick, _ritmoDoPulso());
+    };
+    timerChatInterno = setTimeout(tick, PULSO_ATIVO_MS);
   }
 
   // Placa de "Carregando…" só quando a pessoa está TROCANDO de tela.

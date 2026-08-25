@@ -47,6 +47,7 @@ SCHEMA_FILES = [
     "schema_032_acesso_conversas.sql",
     "schema_033_usuario_varios_setores.sql",
     "schema_034_transcricao_audio.sql",
+    "schema_035_indice_pulso.sql",
 ]
 
 
