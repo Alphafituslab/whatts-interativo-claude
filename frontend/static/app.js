@@ -2588,8 +2588,8 @@
     return state._catalogosCache;
   }
 
-  async function _mostrarBotaoCatalogo() {
-    const envolucro = document.querySelector("[data-wpp-catalogo-envolucro]");
+  async function _mostrarBotaoCatalogo(seletor) {
+    const envolucro = document.querySelector(seletor || "[data-wpp-catalogo-envolucro]");
     if (!envolucro) return;
     const catalogos = await obterCatalogos();
     envolucro.hidden = catalogos.length === 0;
@@ -2717,6 +2717,7 @@
                 </span>`).join("")
             : `<span class="texto-suave">ninguém ainda</span>`}
           <button type="button" class="wpp-tag-adicionar" data-acao="abrir-membros-grupo" data-id="${conversa.id}" title="Chamar um colega pra este grupo — só quem está aqui dentro vê a conversa">+ colega</button>
+          <button type="button" class="wpp-tag-adicionar" data-acao="ver-membros-whatsapp" data-id="${conversa.id}" title="Ver quem está neste grupo no WhatsApp">👤 Quem está no grupo</button>
         </div>` : ""}
       <div class="wpp-tags-linha">
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
@@ -3303,6 +3304,10 @@
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
         <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" multiple hidden>
+        <div class="wpp-emoji-envolucro" data-wpp-catalogo-envolucro-interno hidden>
+          <button type="button" class="botao-icone" data-acao="alternar-catalogos-interno" data-id="${conversa.id}" title="Enviar portfólio ou catálogo pro colega">📚</button>
+          <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
+        </div>
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
         <div class="wpp-emoji-envolucro">
           <button type="button" class="botao-icone" data-acao="alternar-emoji" title="Emoji">😀</button>
@@ -3379,6 +3384,7 @@
     );
 
     _irParaOFim(document.querySelector("[data-wpp-mensagens-interno]"));
+    _mostrarBotaoCatalogo("[data-wpp-catalogo-envolucro-interno]");
     iniciarPollingChatInterno(conversaId);
   }
 
@@ -4534,7 +4540,14 @@
         <td style="position:relative;"><button type="button" class="wpp-avatar-botao" data-acao="abrir-seletor-foto-usuario" data-id="${u.id}" title="Trocar a foto de ${escapeHtml(u.nome)}">${htmlAvatar(u, 28)}</button><span class="wpp-online-bolinha ${u.online ? "wpp-online-sim" : "wpp-online-nao"}" title="${u.online ? "Online agora" : "Offline"}"></span></td>
         <td>${escapeHtml(u.nome)}</td>
         <td class="texto-suave">${escapeHtml(u.email)}</td>
-        <td class="texto-suave">${(u.setores && u.setores.length) ? u.setores.map((s) => escapeHtml(s)).join(", ") : escapeHtml(u.setor || "—")}${u.acesso_conversas === false ? ' <span class="selo inativo" title="Não vê as conversas de clientes">só chat interno</span>' : ""}</td>
+        <td class="texto-suave">${(u.setores && u.setores.length) ? u.setores.map((s) => escapeHtml(s)).join(", ") : escapeHtml(u.setor || "—")}${u.acesso_conversas === false ? ' <span class="selo inativo" title="Não vê as conversas de clientes">só chat interno</span>' : ""}
+          ${u.ativo ? `<div style="margin-top:4px;">
+            <button type="button" class="botao secundario pequeno ${u.ausente ? "botao-ausente-ligado" : ""}"
+                    data-acao="ausencia-de-usuario" data-id="${u.id}" data-nome="${escapeHtml(u.nome)}" data-ausente="${u.ausente ? 1 : 0}"
+                    title="${u.ausente ? "Está ausente — clique pra marcar como disponível" : "Marcar como ausente (some das listas de quem pode atender)"}">
+              ${u.ausente ? `🟡 Ausente${u.ausente_motivo ? " — " + escapeHtml(u.ausente_motivo) : ""} · liberar` : "🟢 Disponível"}
+            </button>
+          </div>` : ""}</td>
         <td>${u.admin ? '<span class="selo ativo">Admin</span>' : '<span class="selo inativo">Padrão</span>'}</td>
         <td>${u.ativo ? '<span class="selo ativo">Ativo</span>' : '<span class="selo bloqueado">Inativo</span>'}</td>
         <td class="texto-suave">${u.admin ? "sem restrição" : (u.horario_permitido && u.horario_permitido.length ? u.horario_permitido.map((j) => `${j.inicio}–${j.fim}`).join(", ") : "sem restrição")}</td>
@@ -5405,6 +5418,48 @@
         definirFlash("ok", "Catálogo excluído.");
         return renderConfiguracao();
       }
+      case "ausencia-de-usuario": {
+        const id = Number(alvo.dataset.id);
+        const estaAusente = alvo.dataset.ausente === "1";
+        let motivo = null;
+        if (!estaAusente) {
+          motivo = prompt(`Marcar ${alvo.dataset.nome} como ausente. Motivo (opcional):`, "");
+          if (motivo === null) return;   // cancelou
+        }
+        await chamarApi(`/usuarios/${id}/ausente`, {
+          method: "PUT", body: { ausente: !estaAusente, motivo: (motivo || "").trim() },
+        });
+        definirFlash("ok", estaAusente
+          ? `${alvo.dataset.nome} voltou a aparecer como disponível.`
+          : `${alvo.dataset.nome} está marcado como ausente.`);
+        return renderUsuarios();
+      }
+      case "ver-membros-whatsapp": {
+        const id = Number(alvo.dataset.id);
+        const wrap = abrirModal(`
+          <h3 style="margin-top:0;">👤 Quem está neste grupo</h3>
+          <div class="wpp-encaminhar-lista" data-lista-membros><p class="dica">Carregando…</p></div>
+          <div class="rodape-modal">
+            <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
+            <button type="button" class="botao secundario" data-atualizar-membros>🔄 Buscar de novo</button>
+          </div>`);
+        const desenhar = (membros) => {
+          const lista = wrap.querySelector("[data-lista-membros]");
+          lista.innerHTML = membros.length ? membros.map((m) => `
+            <div class="wpp-encaminhar-item">
+              <span class="wpp-encaminhar-nome">${escapeHtml(m.nome || m.telefone || "sem nome")}${m.admin ? ` <span class="selo">${m.admin === "superadmin" ? "criador" : "admin"}</span>` : ""}</span>
+              <span class="wpp-encaminhar-tel">${escapeHtml(m.telefone || "")}</span>
+            </div>`).join("")
+            : `<p class="dica">Não consegui listar agora. Isso acontece quando o WhatsApp está desconectado.</p>`;
+        };
+        const buscar = async (forcar) => {
+          try { desenhar(await chamarApi(`/whatsapp/conversas/${id}/membros${forcar ? "?atualizar=1" : ""}`)); }
+          catch (e) { wrap.querySelector("[data-lista-membros]").innerHTML = `<p class="dica">${escapeHtml(e.message || "Não consegui carregar.")}</p>`; }
+        };
+        buscar(false);
+        wrap.querySelector("[data-atualizar-membros]").addEventListener("click", () => buscar(true));
+        return;
+      }
       case "abrir-membros-grupo": {
         const id = Number(alvo.dataset.id);
         const [participantes, usuarios] = await Promise.all([
@@ -5450,6 +5505,33 @@
         await chamarApi(`/whatsapp/conversas/${id}/participantes/${uid}`, { method: "DELETE" });
         definirFlash("ok", "Pronto.");
         return renderWhatsapp(id);
+      }
+      case "alternar-catalogos-interno": {
+        const painel = alvo.parentElement.querySelector("[data-wpp-catalogos-painel]");
+        if (!painel.hidden) { painel.hidden = true; return; }
+        painel.hidden = false;
+        painel.innerHTML = `<p class="dica" style="padding:10px;">Carregando…</p>`;
+        const catalogos = await obterCatalogos(true);
+        painel.innerHTML = catalogos.length
+          ? catalogos.map((c) => `
+              <button type="button" class="wpp-resposta-item" data-acao="enviar-catalogo-interno" data-id="${c.id}" data-conversa="${alvo.dataset.id}">
+                <strong>${c.tipo === "pdf" ? "📄" : "🌐"} ${escapeHtml(c.nome)}</strong>
+                ${c.descricao ? `<span class="texto-suave">${escapeHtml(c.descricao)}</span>` : ""}
+              </button>`).join("")
+          : `<p class="dica" style="padding:10px;">Nenhum catálogo liberado pra você.</p>`;
+        return;
+      }
+      case "enviar-catalogo-interno": {
+        const conversaId = Number(alvo.dataset.conversa);
+        const painel = alvo.closest("[data-wpp-catalogos-painel]");
+        if (painel) painel.hidden = true;
+        try {
+          const r = await chamarApi(`/chat-interno/conversas/${conversaId}/catalogo/${Number(alvo.dataset.id)}`, { method: "POST" });
+          definirFlash("ok", `${r.nome} enviado.`);
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não consegui enviar o catálogo.");
+        }
+        return renderChatInterno(conversaId);
       }
       case "alternar-catalogos": {
         const painel = alvo.parentElement.querySelector("[data-wpp-catalogos-painel]");

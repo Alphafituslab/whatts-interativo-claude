@@ -61,6 +61,14 @@ def _usuario_logado():
     ).fetchone()
 
 
+def _escapar(texto: str) -> str:
+    """O nome vem do cadastro, mas vai parar dentro do HTML — escapar é
+    barato e evita que um nome com < ou & quebre (ou pior) a página."""
+    return (str(texto or "")
+            .replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
 def _pagina(nome_arquivo: str):
     pasta = os.path.dirname(os.path.abspath(__file__))
     caminho = os.path.abspath(os.path.join(pasta, "..", "..", "..", "deploy", "downloads", nome_arquivo))
@@ -115,6 +123,7 @@ def pagina():
         html, status = _tela_login()
         return html, status
     html = _pagina("index.html")
+    html = html.replace("<!--NOME-->", _escapar(usuario["nome"] or usuario["email"]))
     if not apk_existe():
         html = re.sub(r"<!--APK-->.*?<!--/APK-->", "", html, flags=re.S)
     if not usuario["admin"]:

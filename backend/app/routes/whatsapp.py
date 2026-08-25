@@ -1713,6 +1713,31 @@ def _mandar_texto_simples(conn, config, conversa, usuario, texto, agora):
     )
 
 
+@bp.get("/conversas/<int:conversa_id>/membros")
+@requires_auth
+def listar_membros_grupo(conversa_id):
+    """Quem está no grupo do lado do cliente — os participantes do
+    WhatsApp, com nome quando a gente já conhece o número.
+
+    Diferente de /participantes, que é a NOSSA equipe dentro do grupo."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not conversa["eh_grupo"]:
+        raise ApiError("Esta conversa não é um grupo.", status=400)
+    if not _pode_visualizar(usuario, conversa, conn):
+        raise ApiError("Você não participa deste grupo.", status=403, codigo="sem_permissao")
+
+    # Atualiza se estiver velha (ou se a tela pedir explicitamente) — a
+    # lista muda pouco, mas quem abre a tela quer ver o estado de agora.
+    whatsapp_service.atualizar_membros_do_grupo(
+        conn, whatsapp_service.obter_configuracao(conn, g.empresa_id),
+        conversa["contato_id"], conversa["telefone"],
+        forcar=request.args.get("atualizar") == "1",
+    )
+    return jsonify(whatsapp_service.listar_membros_guardados(conn, g.empresa_id, conversa["contato_id"]))
+
+
 @bp.get("/conversas/<int:conversa_id>/participantes")
 @requires_auth
 def listar_participantes_grupo(conversa_id):

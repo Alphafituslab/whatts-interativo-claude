@@ -100,11 +100,28 @@
   .plataforma ol li { margin-bottom: 4px; }
   .plataforma strong { color: var(--texto); }
   @media (max-width: 560px) { .celular { flex-direction: column; } .qr { width: 100%; max-width: 180px; margin: 0 auto; } }
+  /* Quem está logado e a saída. Fica no alto e discreta: é informação
+     de contexto, não o assunto da página. */
+  .barra-sessao {
+    display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+    padding: 8px 18px; font-size: 12.5px; color: var(--texto-suave);
+    border-bottom: 1px solid rgba(128,128,128,0.22);
+  }
+  .barra-sessao strong { color: inherit; }
+  .botao-sair {
+    color: var(--leaf); text-decoration: none; font-weight: 600;
+    border: 1px solid currentColor; border-radius: 999px; padding: 3px 12px;
+  }
+  .botao-sair:hover { text-decoration: none; opacity: 0.75; }
   footer { text-align: center; padding: 20px; font-size: 12px; color: var(--texto-suave); }
   footer a { color: var(--leaf); }
 </style>
 </head>
 <body>
+<div class="barra-sessao">
+  <span>Conectado como <strong><!--NOME--></strong></span>
+  <a class="botao-sair" href="/downloads/sair">Sair</a>
+</div>
 <header>
   <h1>Downloads Alphafitus</h1>
   <p>Instaladores e ferramentas dos sistemas internos da empresa</p>

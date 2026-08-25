@@ -149,8 +149,12 @@ def normalizar_telefone(numero: str) -> str:
         raise ApiError("Telefone inválido.", status=400)
     if len(digitos) in (10, 11):
         digitos = "55" + digitos
-    # 55 + DDD (2) + número sem o 9 (8) = 12 dígitos -> insere o 9.
-    if len(digitos) == 12 and digitos.startswith("55"):
+    # 55 + DDD (2) + 8 dígitos = 12. Aqui mora a ambiguidade: pode ser um
+    # CELULAR que veio sem o 9 (aí falta o 9) ou um FIXO (aí está certo
+    # como está). Quem decide é o primeiro dígito do número:
+    #   9, 8, 7, 6 -> celular (o 6/7/8 é de antes da mudança de 2016)
+    #   2, 3, 4, 5 -> fixo, não mexe
+    if len(digitos) == 12 and digitos.startswith("55") and digitos[4] in "6789":
         digitos = digitos[:4] + "9" + digitos[4:]
     return digitos
 
@@ -482,6 +486,98 @@ def reagir_mensagem(config, telefone: str, externo_id: str, emoji: str, minha: b
         headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
     )
     return _tratar_resposta(resp)
+
+
+def participantes_do_grupo(config, jid: str):
+    """Quem está no grupo, direto do WhatsApp: lid, telefone, nome e se é
+    administrador do grupo."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento.", status=400)
+    requests = _requests()
+    resp = requests.get(
+        f"{config['evolution_url']}/group/participants/{config['instancia_nome']}",
+        params={"groupJid": jid if "@" in jid else f"{_somente_digitos(jid)}@g.us"},
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    corpo = _tratar_resposta(resp)
+    saida = []
+    for p in (corpo.get("participants") or []):
+        bruto = (p.get("phoneNumber") or "").split("@")[0].split(":")[0]
+        telefone = None
+        if bruto:
+            try:
+                telefone = normalizar_telefone(bruto)
+            except ApiError:
+                telefone = bruto
+        saida.append({
+            "lid": (p.get("id") or "").split("@")[0],
+            "telefone": telefone,
+            "nome": p.get("name") or None,
+            "admin": p.get("admin") or None,
+            "foto_url": p.get("imgUrl") or None,
+        })
+    return saida
+
+
+MINUTOS_RELISTAR_GRUPO = 30
+
+
+def atualizar_membros_do_grupo(conn, config, contato_id: int, jid: str, forcar: bool = False):
+    """Guarda a lista de participantes do grupo.
+
+    Só vai ao WhatsApp de vez em quando (ver MINUTOS_RELISTAR_GRUPO): a
+    lista muda pouco e uma consulta por mensagem recebida seria caro.
+    forcar=True ignora o intervalo — usado quando a tela pede a lista e
+    quando chega uma mensagem de alguém que ainda não conhecemos."""
+    if not forcar:
+        linha = conn.execute(
+            "SELECT membros_atualizados_em FROM whatsapp_contatos WHERE id = ?", (contato_id,)
+        ).fetchone()
+        quando = linha["membros_atualizados_em"] if linha else None
+        if quando:
+            import datetime as _dt
+            limite = (_dt.datetime.utcnow() - _dt.timedelta(minutes=MINUTOS_RELISTAR_GRUPO))
+            if quando > limite.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z":
+                return None
+
+    try:
+        membros = participantes_do_grupo(config, jid)
+    except ApiError:
+        return None
+
+    agora = _now_iso()
+    for m in membros:
+        if not m["lid"]:
+            continue
+        conn.execute(
+            "INSERT INTO whatsapp_grupo_membros (contato_id, lid, telefone, nome, admin, foto_url, atualizado_em) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(contato_id, lid) DO UPDATE SET telefone = excluded.telefone, "
+            "nome = COALESCE(excluded.nome, whatsapp_grupo_membros.nome), admin = excluded.admin, "
+            "foto_url = COALESCE(excluded.foto_url, whatsapp_grupo_membros.foto_url), atualizado_em = excluded.atualizado_em",
+            (contato_id, m["lid"], m["telefone"], m["nome"], m["admin"], m["foto_url"], agora),
+        )
+    conn.execute("UPDATE whatsapp_contatos SET membros_atualizados_em = ? WHERE id = ?", (agora, contato_id))
+    return membros
+
+
+def listar_membros_guardados(conn, empresa_id: int, contato_id: int):
+    """A lista de participantes já guardada, com o nome que a equipe usa
+    pro contato quando ele é conhecido — ver 'Fulano' vale mais do que
+    ver o número."""
+    rows = conn.execute(
+        """
+        SELECT m.lid, m.telefone, m.admin, m.foto_url,
+               COALESCE(ct.nome, m.nome) AS nome
+        FROM whatsapp_grupo_membros m
+        LEFT JOIN whatsapp_contatos ct ON ct.telefone = m.telefone AND ct.empresa_id = ?
+        WHERE m.contato_id = ?
+        ORDER BY (m.admin IS NULL), COALESCE(ct.nome, m.nome, m.telefone)
+        """,
+        (empresa_id, contato_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def criar_grupo(config, nome: str, participantes: list, descricao: str = None):
@@ -1285,7 +1381,8 @@ def _processar_status_mensagem(conn, empresa_id: int, dados):
     return {"processado": True, "tipo": "status_mensagem", "quantidade": atualizados}
 
 
-def _autor_da_mensagem_de_grupo(dados: dict, chave: dict, conn=None, empresa_id=None):
+def _autor_da_mensagem_de_grupo(dados: dict, chave: dict, conn=None, empresa_id=None,
+                                contato_grupo_id=None, jid_grupo=None, config=None):
     """Quem falou, numa mensagem de grupo.
 
     A Evolution API não põe isso sempre no mesmo lugar — muda com a
@@ -1317,8 +1414,13 @@ def _autor_da_mensagem_de_grupo(dados: dict, chave: dict, conn=None, empresa_id=
             if bruto:
                 break
 
+    # "lid" não é telefone: é o identificador interno que o WhatsApp usa
+    # pra participante de grupo. Passar ele por normalizar_telefone só
+    # produzia um número inventado — a tradução verdadeira está na lista
+    # de participantes do grupo, consultada logo abaixo.
+    eh_lid = any(isinstance(c, str) and "@lid" in c for c in candidatos if c) or len(bruto) > 14
     telefone = None
-    if bruto:
+    if bruto and not eh_lid:
         try:
             telefone = normalizar_telefone(bruto)
         except ApiError:
@@ -1330,6 +1432,22 @@ def _autor_da_mensagem_de_grupo(dados: dict, chave: dict, conn=None, empresa_id=
     # Se o WhatsApp não mandou o nome mas mandou o número, e essa pessoa
     # já é contato conhecido, mostra o nome que a equipe já usa pra ela —
     # ver "Tabata" no grupo vale muito mais do que ver um número.
+    # Traduz o lid usando os participantes do grupo. Se o participante
+    # ainda não está guardado (entrou agora), busca a lista na hora — é o
+    # único momento em que vale a pena pagar essa consulta.
+    if eh_lid and bruto and conn is not None:
+        membro = conn.execute(
+            "SELECT telefone, nome FROM whatsapp_grupo_membros WHERE lid = ?", (bruto,)
+        ).fetchone()
+        if membro is None and contato_grupo_id is not None and config is not None:
+            atualizar_membros_do_grupo(conn, config, contato_grupo_id, jid_grupo or "", forcar=True)
+            membro = conn.execute(
+                "SELECT telefone, nome FROM whatsapp_grupo_membros WHERE lid = ?", (bruto,)
+            ).fetchone()
+        if membro is not None:
+            telefone = membro["telefone"] or telefone
+            nome = nome or membro["nome"]
+
     if telefone and not nome and conn is not None and empresa_id is not None:
         try:
             achado = conn.execute(
@@ -2090,7 +2208,6 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     autor_nome, autor_telefone = None, None
     if de_grupo:
         telefone = _somente_digitos(telefone_bruto)
-        autor_nome, autor_telefone = _autor_da_mensagem_de_grupo(dados, chave, conn, empresa_id)
     else:
         # Normaliza pro formato completo com o 9 (ver normalizar_telefone)
         # — sem isso, a mesma pessoa vira dois contatos diferentes
@@ -2130,6 +2247,12 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     if de_grupo and not contato.get("eh_grupo"):
         conn.execute("UPDATE whatsapp_contatos SET eh_grupo = 1 WHERE id = ?", (contato["id"],))
         contato["eh_grupo"] = 1
+    if de_grupo:
+        # Só aqui, e não lá em cima: traduzir o lid de quem falou exige
+        # saber de QUAL grupo é a mensagem, e o grupo é este contato.
+        autor_nome, autor_telefone = _autor_da_mensagem_de_grupo(
+            dados, chave, conn, empresa_id,
+            contato_grupo_id=contato["id"], jid_grupo=remote_jid, config=config)
     # Não busca a foto em toda mensagem: quem já tem foto não é
     # consultado de novo, e quem não tem só é tentado a cada poucos dias
     # (ver _precisa_tentar_foto).

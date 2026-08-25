@@ -60,6 +60,7 @@ SCHEMA_FILES = [
     "schema_045_chat_interno_reacao.sql",
     "schema_046_grupo_participantes.sql",
     "schema_047_catalogos.sql",
+    "schema_048_grupo_membros.sql",
 ]
 
 

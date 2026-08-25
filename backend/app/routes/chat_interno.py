@@ -442,6 +442,36 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
     return jsonify({"ok": enviados > 0, "enviados": enviados, "resultados": resultados})
 
 
+@bp.post("/conversas/<int:conversa_id>/catalogo/<int:catalogo_id>")
+@requires_auth
+def enviar_catalogo_interno(conversa_id, catalogo_id):
+    """Manda um catálogo pro colega, no chat interno.
+
+    Mesma permissão do envio pro cliente: quem não pode mandar o catálogo
+    pra fora também não o distribui por dentro."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    if not rotas_whatsapp._catalogo_visivel(conn, usuario, catalogo_id):
+        raise ApiError("Você não tem permissão para enviar este catálogo.", status=403, codigo="sem_permissao")
+
+    catalogo = conn.execute("SELECT * FROM catalogos WHERE id = ?", (catalogo_id,)).fetchone()
+    if catalogo["tipo"] == "link":
+        texto = f"*{catalogo['nome']}*"
+        if catalogo["descricao"]:
+            texto += f"\n{catalogo['descricao']}"
+        texto += f"\n\n{catalogo['url']}"
+        chat_interno_service.enviar_mensagem(conn, conversa_id, usuario["id"], texto)
+    else:
+        chat_interno_service.enviar_mensagem(
+            conn, conversa_id, usuario["id"], catalogo["nome"],
+            tipo="documento", midia_url=catalogo["url"],
+            nome_arquivo=catalogo["nome_arquivo"] or "catalogo.pdf")
+    return jsonify({"ok": True, "nome": catalogo["nome"]})
+
+
 @bp.post("/conversas/<int:conversa_id>/digitando")
 @requires_auth
 def marcar_digitando(conversa_id):

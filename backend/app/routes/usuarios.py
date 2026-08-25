@@ -88,6 +88,37 @@ def listar_setores():
     return jsonify(whatsapp_service.obter_setores(conn, g.empresa_id))
 
 
+@bp.put("/<int:usuario_id>/ausente")
+@requires_admin
+def definir_ausencia_de(usuario_id):
+    """Marca ou tira a ausência de OUTRA pessoa.
+
+    Fica registrado no histórico de atividades: mexer no status de
+    alguém é uma decisão, não um detalhe, e a pessoa tem direito de saber
+    quem mexeu."""
+    conn = get_db()
+    alvo = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE id = ? AND ativo = 1 AND empresa_id = ?",
+        (usuario_id, g.empresa_id),
+    ).fetchone()
+    if alvo is None:
+        raise ApiError("Usuário não encontrado.", status=404, codigo="nao_encontrado")
+
+    dados = request.get_json(silent=True) or {}
+    ausente = 1 if dados.get("ausente") else 0
+    motivo = (dados.get("motivo") or "").strip() or None
+    conn.execute(
+        "UPDATE usuarios SET ausente = ?, ausente_motivo = ?, ausente_ate = NULL WHERE id = ?",
+        (ausente, motivo if ausente else None, usuario_id),
+    )
+    whatsapp_service.registrar_atividade(
+        conn, g.usuario_atual["id"],
+        "ausencia_alterada_por_admin",
+        f"{alvo['nome']}: {'ausente' + (' (' + motivo + ')' if motivo else '') if ausente else 'disponível'}",
+    )
+    return jsonify({"ok": True, "id": usuario_id, "ausente": bool(ausente), "ausente_motivo": motivo})
+
+
 @bp.get("/setores/detalhado")
 @requires_admin
 def listar_setores_detalhado():
