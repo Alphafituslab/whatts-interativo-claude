@@ -330,7 +330,7 @@
               </div>
             </div>
             ${usuario && usuario.admin ? `
-              ${state.podeInstalarApp ? `<button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>` : ""}
+              <button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
               <a class="botao secundario pequeno" href="/downloads/" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
             <div class="barra-acoes" style="margin-top:10px;">
               <button class="botao-icone" data-acao="alternar-tema" title="Alternar tema">🌓</button>
@@ -3638,11 +3638,38 @@
         // e é usado aqui, não na hora em que ele chega.
         const evt = state._promptInstalar;
         if (!evt) {
+          // Sem atalho automático. É o caso NORMAL no iPhone (o Safari
+          // nunca oferece), e também acontece no Android quando o app já
+          // está instalado ou o aviso já foi dispensado antes. Em vez de
+          // esconder o botão — que era o pior dos mundos, some justo
+          // quando a pessoa mais precisa da instrução — mostramos o
+          // caminho manual, com o do aparelho dela em destaque.
+          const ua = navigator.userAgent;
+          const ehApple = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+          const jaInstalado = matchMedia("(display-mode: standalone)").matches;
+          const passoApple = `
+            <div class="escolha-item" style="cursor:default; align-items:flex-start;">
+              <span class="escolha-texto"><strong>🍎 iPhone e iPad (Safari)</strong>
+                <span class="escolha-ajuda">1. Toque no botão <strong>Compartilhar</strong> (o quadrado com a seta pra cima, embaixo).<br>
+                2. Role a lista e escolha <strong>Adicionar à Tela de Início</strong>.<br>
+                3. Toque em <strong>Adicionar</strong>.<br>
+                <em>Só funciona pelo Safari — pelo Chrome do iPhone essa opção não existe.</em></span></span>
+            </div>`;
+          const passoAndroid = `
+            <div class="escolha-item" style="cursor:default; align-items:flex-start;">
+              <span class="escolha-texto"><strong>🤖 Android (Chrome)</strong>
+                <span class="escolha-ajuda">1. Toque em <strong>⋮</strong> no canto superior direito.<br>
+                2. Escolha <strong>Instalar app</strong> (ou "Adicionar à tela inicial").<br>
+                3. Confirme.</span></span>
+            </div>`;
           return abrirModal(`
             <h3 style="margin-top:0;">📲 Instalar no aparelho</h3>
-            <p>Pelo menu do navegador:</p>
-            <p><strong>Android (Chrome):</strong> toque em ⋮ → <strong>Adicionar à tela inicial</strong> / Instalar app.</p>
-            <p><strong>iPhone (Safari):</strong> toque no botão Compartilhar → <strong>Adicionar à Tela de Início</strong>.</p>
+            ${jaInstalado
+              ? `<p class="dica">Você já está usando o app instalado — não precisa instalar de novo.</p>`
+              : `<p class="dica">Este navegador não ofereceu o atalho automático, então é pelo menu dele. Leva uns 10 segundos:</p>`}
+            <div class="escolha-lista">
+              ${ehApple ? passoApple + passoAndroid : passoAndroid + passoApple}
+            </div>
             <div class="rodape-modal"><button type="button" class="botao" data-acao="fechar-modal">Entendi</button></div>`);
         }
         evt.prompt();
