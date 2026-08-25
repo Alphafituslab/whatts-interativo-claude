@@ -1000,6 +1000,41 @@
 
   // Sobe um arquivo pra uma conversa (de cliente ou interna) — as duas
   // telas mandam do mesmo jeito, só muda o endereço.
+  const LIMITE_ANEXO_MB = 35;
+
+  async function _enviarVariosAnexos(campo, url) {
+    const arquivos = [...(campo.files || [])];
+    if (!arquivos.length) return;
+
+    // Grandes demais saem da fila aqui, com nome e tudo: antes o arquivo
+    // sumia calado e a pessoa só descobria não vendo ele na conversa.
+    const grandes = arquivos.filter((a) => a.size > LIMITE_ANEXO_MB * 1024 * 1024);
+    const fila = arquivos.filter((a) => a.size <= LIMITE_ANEXO_MB * 1024 * 1024);
+    if (grandes.length) {
+      definirFlash("erro", `Passaram de ${LIMITE_ANEXO_MB}MB e não foram enviados: ${grandes.map((a) => a.name).join(", ")}.`);
+    }
+    if (!fila.length) { campo.value = ""; return; }
+
+    campo.disabled = true;
+    // Um de cada vez, na ordem em que foram escolhidos. Em paralelo
+    // seria mais rápido e chegaria fora de ordem — numa conversa, a
+    // ordem é a informação.
+    const falhas = [];
+    for (let i = 0; i < fila.length; i++) {
+      if (fila.length > 1) definirFlash("ok", `Enviando ${i + 1} de ${fila.length}…`);
+      try {
+        await _subirAnexo(url, fila[i]);
+      } catch (erro) {
+        falhas.push(`${fila[i].name} (${erro.message || "falhou"})`);
+      }
+    }
+    campo.disabled = false;
+    campo.value = "";   // sem isso, escolher os mesmos arquivos de novo não dispara nada
+
+    if (falhas.length) definirFlash("erro", `Não consegui enviar: ${falhas.join("; ")}.`);
+    else if (fila.length > 1) definirFlash("ok", `${fila.length} arquivos enviados.`);
+  }
+
   async function _subirAnexo(url, arquivo, tipoForcado, legenda) {
     const formData = new FormData();
     formData.append("arquivo", arquivo, arquivo.name || "arquivo");
@@ -2647,7 +2682,7 @@
       ${htmlAgendadas(agendadas)}
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem" data-conversa-id="${conversa.id}">
-        <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo" data-conversa-id="${conversa.id}" hidden>
+        <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo" data-conversa-id="${conversa.id}" multiple hidden>
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
         <div class="wpp-emoji-envolucro">
           <button type="button" class="botao-icone" data-acao="alternar-emoji" title="Emoji">😀</button>
@@ -3194,7 +3229,7 @@
       <div class="wpp-mensagens" data-wpp-mensagens-interno>${mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("")}</div>
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
-        <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" hidden>
+        <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" multiple hidden>
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
         <div class="wpp-emoji-envolucro">
           <button type="button" class="botao-icone" data-acao="alternar-emoji" title="Emoji">😀</button>
@@ -5123,27 +5158,8 @@
         return;
       }
       case "anexar-arquivo": {
-        const arquivo = alvo.files[0];
-        if (!arquivo) return;
-        if (arquivo.size > 35 * 1024 * 1024) { definirFlash("erro", "Arquivo maior que 35MB."); return renderWhatsapp(Number(alvo.dataset.conversaId)); }
         const conversaId = Number(alvo.dataset.conversaId);
-        const formData = new FormData();
-        formData.append("arquivo", arquivo);
-        alvo.disabled = true;
-        try {
-          await fetch(`${API}/whatsapp/conversas/${conversaId}/anexo`, {
-            method: "POST",
-            headers: { Authorization: "Bearer " + state.accessToken },
-            body: formData,
-          }).then(async (resp) => {
-            if (!resp.ok) {
-              const corpo = await resp.json().catch(() => ({}));
-              throw Object.assign(new Error(corpo.mensagem || `Erro ${resp.status}`), { status: resp.status });
-            }
-          });
-        } finally {
-          alvo.disabled = false;
-        }
+        await _enviarVariosAnexos(alvo, `${API}/whatsapp/conversas/${conversaId}/anexo`);
         return renderWhatsapp(conversaId);
       }
       case "alternar-gravacao-audio":
@@ -5159,16 +5175,8 @@
           () => renderChatInterno(Number(alvo.dataset.id)),
         );
       case "anexar-arquivo-interno": {
-        const arquivo = alvo.files[0];
-        if (!arquivo) return;
         const conversaId = Number(alvo.dataset.conversaId);
-        if (arquivo.size > 35 * 1024 * 1024) { definirFlash("erro", "Arquivo maior que 35MB."); return renderChatInterno(conversaId); }
-        alvo.disabled = true;
-        try {
-          await _subirAnexo(`${API}/chat-interno/conversas/${conversaId}/anexo`, arquivo);
-        } finally {
-          alvo.disabled = false;
-        }
+        await _enviarVariosAnexos(alvo, `${API}/chat-interno/conversas/${conversaId}/anexo`);
         return renderChatInterno(conversaId);
       }
       case "excluir-mensagem-interna": {

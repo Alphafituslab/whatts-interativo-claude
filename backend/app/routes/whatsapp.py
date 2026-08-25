@@ -328,7 +328,7 @@ def _carregar_conversa(conn, empresa_id, conversa_id):
     depende inteiramente deste filtro."""
     conversa = conn.execute(
         "SELECT c.*, ct.telefone, ct.nome AS contato_nome, ct.foto_url AS contato_foto, "
-        "u.nome AS atribuida_usuario_nome "
+        "ct.eh_grupo AS eh_grupo, u.nome AS atribuida_usuario_nome "
         "FROM whatsapp_conversas c "
         "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
         "LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id "
@@ -380,6 +380,10 @@ def _pode_visualizar(usuario, conversa, conn=None):
     a lista dela, não contra um valor único."""
     if usuario["admin"]:
         return True
+    # Grupo não tem dono. Ele é um lugar onde várias pessoas conversam —
+    # dar dono a um grupo é o mesmo que tirar o grupo de todo mundo.
+    if "eh_grupo" in conversa.keys() and conversa["eh_grupo"]:
+        return True
     if conversa["atribuida_usuario_id"] is not None:
         return conversa["atribuida_usuario_id"] == usuario["id"]
     conn = conn or get_db()
@@ -414,6 +418,8 @@ def _sql_visivel_nao_admin(conn, usuario):
     # Mesma regra do _pode_visualizar: setor do menu sem ninguém
     # cadastrado é fila de todos, e na hora — não adianta esperar, não
     # existe ninguém pra quem esperar.
+    # Grupo aparece pra todo mundo, sempre — ver _pode_visualizar.
+    grupo = " OR ct.eh_grupo = 1"
     orfaos = _setores_orfaos(conn)
     if orfaos:
         marcadores_orfaos = ",".join("?" * len(orfaos))
@@ -421,13 +427,13 @@ def _sql_visivel_nao_admin(conn, usuario):
     else:
         sem_dono, orfaos = "", []
     if not setores:
-        return (f"(c.atribuida_usuario_id = ? OR {sem_menu}{sem_dono})",
+        return (f"(c.atribuida_usuario_id = ? OR {sem_menu}{sem_dono}{grupo})",
                 [usuario["id"], limite, *orfaos])
     marcadores = ",".join("?" * len(setores))
     sql = (
         f"(c.atribuida_usuario_id = ? "
         f"OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IN ({marcadores})) "
-        f"OR {sem_menu}{sem_dono})"
+        f"OR {sem_menu}{sem_dono}{grupo})"
     )
     return sql, [usuario["id"], *setores, limite, *orfaos]
 
@@ -483,6 +489,7 @@ def listar_conversas():
             sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
             condicoes = [sql_visivel]
         condicoes.append("c.atribuida_usuario_id IS NULL")
+        condicoes.append("ct.eh_grupo = 0")
     elif escopo == "sem_menu":
         # Quem entrou em contato e não escolheu nenhum número do menu.
         # Aba própria pra dar pra ver de uma vez quem está travado aí —
@@ -494,6 +501,7 @@ def listar_conversas():
             condicoes = [sql_visivel]
         condicoes.append("c.menu_setor IS NULL")
         condicoes.append("c.atribuida_usuario_id IS NULL")
+        condicoes.append("ct.eh_grupo = 0")
     elif escopo == "todas":
         if not usuario["admin"]:
             raise ApiError("Só um administrador pode ver todas as conversas.", status=403, codigo="sem_permissao")
@@ -503,7 +511,12 @@ def listar_conversas():
         # falado por último. Se é meu atendimento, ele não sai daqui
         # porque o cliente respondeu — quem avisa que há algo novo é o
         # contador de não lidas.
-        condicoes = ["c.atribuida_usuario_id = ?"]
+        #
+        # Grupo entra aqui pra TODO MUNDO: ele não tem dono, mas também
+        # não é "fila esperando alguém pegar" — é um lugar onde a equipe
+        # conversa, e some da vista se não ficar em nenhuma aba. É onde o
+        # WhatsApp também põe: junto das suas conversas.
+        condicoes = ["(c.atribuida_usuario_id = ? OR ct.eh_grupo = 1)"]
         params = [usuario["id"]]
     condicoes.append("ct.empresa_id = ?")
     params.append(g.empresa_id)
@@ -667,20 +680,27 @@ def contagem_abas():
             [g.empresa_id, *pv, *params_extra],
         ).fetchone()["n"]
 
+    # Mesmo critério da lista de "Minhas": o que é meu MAIS os grupos,
+    # que são de todo mundo.
+    meu_ou_grupo = "AND (c.atribuida_usuario_id = ? OR ct.eh_grupo = 1)"
     minhas = conn.execute(
-        f"SELECT COUNT(*) AS n {base} AND c.atribuida_usuario_id = ?",
+        f"SELECT COUNT(*) AS n {base} {meu_ou_grupo}",
         (g.empresa_id, usuario["id"]),
     ).fetchone()["n"]
     # Não lidas: é o que de fato pede atenção agora.
     nao_lidas_minhas = conn.execute(
-        f"SELECT COALESCE(SUM(c.nao_lidas), 0) AS n {base} AND c.atribuida_usuario_id = ?",
+        f"SELECT COALESCE(SUM(c.nao_lidas), 0) AS n {base} {meu_ou_grupo}",
         (g.empresa_id, usuario["id"]),
     ).fetchone()["n"]
     return jsonify({
         "minhas": minhas,
         "minhas_nao_lidas": nao_lidas_minhas,
-        "fila": contar("AND c.atribuida_usuario_id IS NULL"),
-        "sem_menu": contar("AND c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL"),
+        # eh_grupo = 0 nas duas: grupo não entra em Fila nem em "Sem
+        # escolha" (não há o que assumir num grupo, e ele não passa pelo
+        # menu). Sem esta condição o número contava um grupo que a lista
+        # não mostrava — a aba piscava "1" e abria vazia.
+        "fila": contar("AND c.atribuida_usuario_id IS NULL AND ct.eh_grupo = 0"),
+        "sem_menu": contar("AND c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL AND ct.eh_grupo = 0"),
         "todas": conn.execute(f"SELECT COUNT(*) AS n {base}", (g.empresa_id,)).fetchone()["n"] if usuario["admin"] else None,
     })
 
@@ -1110,7 +1130,9 @@ def enviar_mensagem(conversa_id):
 
     # Responder uma conversa da fila assume ela automaticamente — evita
     # a etapa extra de "Assumir" antes de simplesmente responder.
-    if conversa["atribuida_usuario_id"] is None:
+    # Num grupo, ninguém assume nada ao responder: o grupo continua de
+    # todos. Só a conversa um a um ganha dono na primeira resposta.
+    if conversa["atribuida_usuario_id"] is None and not conversa["eh_grupo"]:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
     # Citada precisa ser desta MESMA conversa: sem conferir, dava pra
@@ -1489,7 +1511,7 @@ def _encaminhar_para_clientes(conn, usuario, destinos_conversas, telefones, mens
                                "nome": destino["contato_nome"] or destino["telefone"],
                                "motivo": _recusa_atribuida(destino)})
             continue
-        if destino["atribuida_usuario_id"] is None:
+        if destino["atribuida_usuario_id"] is None and not destino["eh_grupo"]:
             whatsapp_service.atribuir_conversa(conn, destino_id, usuario["id"], usuario["id"])
 
         # O comentário vai ANTES do encaminhamento, como mensagem própria:
@@ -1660,6 +1682,9 @@ def assumir_conversa(conversa_id):
     usuario = g.usuario_atual
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if conversa["eh_grupo"]:
+        raise ApiError("Grupo não tem responsável — todo mundo da equipe já pode ler e escrever nele.",
+                       status=400, codigo="grupo_sem_dono")
     if conversa["atribuida_usuario_id"] is not None and not usuario["admin"]:
         raise ApiError(_recusa_atribuida(conversa),
                        status=409, codigo="conversa_atribuida", extra=_dados_do_dono(conversa))
@@ -2098,7 +2123,9 @@ def enviar_figurinha_conversa(conversa_id):
     if figurinha is None:
         raise ApiError("Figurinha não encontrada.", status=404, codigo="nao_encontrado")
 
-    if conversa["atribuida_usuario_id"] is None:
+    # Num grupo, ninguém assume nada ao responder: o grupo continua de
+    # todos. Só a conversa um a um ganha dono na primeira resposta.
+    if conversa["atribuida_usuario_id"] is None and not conversa["eh_grupo"]:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
@@ -2465,7 +2492,9 @@ def enviar_anexo(conversa_id):
         f.write(dados_bytes)
     midia_url = f"/api/v1/whatsapp/uploads/{nome_seguro}"
 
-    if conversa["atribuida_usuario_id"] is None:
+    # Num grupo, ninguém assume nada ao responder: o grupo continua de
+    # todos. Só a conversa um a um ganha dono na primeira resposta.
+    if conversa["atribuida_usuario_id"] is None and not conversa["eh_grupo"]:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
