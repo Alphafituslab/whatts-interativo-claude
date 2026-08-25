@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "br.com.alphafitus.sejaalpha",
+      "sha256_cert_fingerprints": [
+        "88:15:4B:14:34:B0:DE:48:05:8F:1E:29:2D:C8:35:85:86:0A:7B:80:97:F7:7A:D5:CC:CB:00:76:64:1D:DD:F2"
+      ]
+    }
+  }
+]

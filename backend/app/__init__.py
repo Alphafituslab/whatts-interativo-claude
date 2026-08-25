@@ -125,6 +125,21 @@ def create_app(test_config: dict = None) -> Flask:
         página de downloads, atrás do login do sistema."""
         return redirect("/downloads/WhattsInbox-instalador.zip", code=302)
 
+    @app.get("/.well-known/assetlinks.json")
+    def assetlinks():
+        """Diz ao Android que o app instalado e este site sao da mesma
+        dona — o Android confere a assinatura do app contra a impressão
+        digital daqui.
+
+        Sem isso o app até abre, mas com a barra de endereço do
+        navegador em cima, e deixa de parecer um aplicativo. Tem que
+        ficar exatamente neste endereço, em HTTPS e sem redirecionamento:
+        é onde o Android procura."""
+        return send_from_directory(
+            os.path.join(FRONTEND_DIR, "well-known"), "assetlinks.json",
+            mimetype="application/json", max_age=0,
+        )
+
     @app.get("/manifest.webmanifest")
     def manifesto_pwa():
         """Ficha do app pro celular (nome, ícone, cor) — é o que faz o
