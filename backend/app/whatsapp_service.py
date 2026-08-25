@@ -16,6 +16,7 @@ import csv
 import datetime
 import io
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -455,6 +456,32 @@ def _registrar_webhook(config):
         )
     except Exception:
         pass
+
+
+def reagir_mensagem(config, telefone: str, externo_id: str, emoji: str, minha: bool = False):
+    """Cola um emoji numa mensagem, como o botão de reagir do WhatsApp.
+
+    Emoji vazio TIRA a reação — é assim que o próprio WhatsApp faz, e
+    manter a mesma regra evita precisar de uma segunda chamada só pra
+    desfazer."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento.", status=400)
+    requests = _requests()
+    resp = requests.post(
+        f"{config['evolution_url']}/message/sendReaction/{config['instancia_nome']}",
+        json={
+            "key": {
+                "remoteJid": destino_whatsapp(telefone) if "@" in destino_whatsapp(telefone)
+                             else f"{destino_whatsapp(telefone)}@s.whatsapp.net",
+                "fromMe": bool(minha),
+                "id": externo_id,
+            },
+            "reaction": emoji or "",
+        },
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    return _tratar_resposta(resp)
 
 
 def criar_grupo(config, nome: str, participantes: list, descricao: str = None):
@@ -1184,6 +1211,60 @@ def _processar_status_mensagem(conn, empresa_id: int, dados):
     return {"processado": True, "tipo": "status_mensagem", "quantidade": atualizados}
 
 
+def _autor_da_mensagem_de_grupo(dados: dict, chave: dict):
+    """Quem falou, numa mensagem de grupo.
+
+    A Evolution API não põe isso sempre no mesmo lugar — muda com a
+    versão e com o tipo da mensagem. Em vez de apostar num campo só (o
+    que deixava toda fala do grupo sem dono), procura em todos os lugares
+    conhecidos, na ordem do mais específico pro mais genérico.
+
+    Se não achar em nenhum, registra o formato recebido no log: é a
+    única forma de descobrir um campo novo sem ficar adivinhando.
+    """
+    candidatos = [
+        chave.get("participant"),
+        chave.get("participantPn"),
+        chave.get("participantAlt"),
+        dados.get("participant"),
+        dados.get("participantPn"),
+        (dados.get("message") or {}).get("participant"),
+        ((dados.get("message") or {}).get("extendedTextMessage") or {})
+            .get("contextInfo", {}).get("participant"),
+        (dados.get("contextInfo") or {}).get("participant"),
+        (dados.get("key") or {}).get("senderPn"),
+        dados.get("senderPn"),
+        dados.get("sender"),
+    ]
+    bruto = ""
+    for c in candidatos:
+        if isinstance(c, str) and c.strip():
+            bruto = c.split("@")[0].split(":")[0].strip()
+            if bruto:
+                break
+
+    telefone = None
+    if bruto:
+        try:
+            telefone = normalizar_telefone(bruto)
+        except ApiError:
+            telefone = bruto
+
+    # pushName, num grupo, é o nome de quem FALOU (não o do grupo).
+    nome = dados.get("pushName") or dados.get("notifyName") or dados.get("verifiedBizName") or None
+
+    if not telefone and not nome:
+        try:
+            import json as _json
+            logging.getLogger(__name__).warning(
+                "Mensagem de grupo sem autor identificado. Campos recebidos: %s",
+                _json.dumps({k: v for k, v in dados.items() if k != "message"}, ensure_ascii=False)[:900],
+            )
+        except Exception:
+            pass
+    return nome, telefone
+
+
 def _extrair_reacao(dados: dict):
     """Devolve (id_da_mensagem_reagida, emoji) quando o que chegou é uma
     reação, ou None.
@@ -1887,15 +1968,7 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     autor_nome, autor_telefone = None, None
     if de_grupo:
         telefone = _somente_digitos(telefone_bruto)
-        participante = chave.get("participant") or dados.get("participant") or ""
-        bruto_autor = participante.split("@")[0].split(":")[0]
-        if bruto_autor:
-            try:
-                autor_telefone = normalizar_telefone(bruto_autor)
-            except ApiError:
-                autor_telefone = bruto_autor
-        # pushName no grupo é o nome de quem FALOU, não o do grupo.
-        autor_nome = dados.get("pushName") or None
+        autor_nome, autor_telefone = _autor_da_mensagem_de_grupo(dados, chave)
     else:
         # Normaliza pro formato completo com o 9 (ver normalizar_telefone)
         # — sem isso, a mesma pessoa vira dois contatos diferentes

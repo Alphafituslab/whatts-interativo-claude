@@ -1225,3 +1225,44 @@ nav { perspective: 800px; }
 .botao-perigo-suave {
   background: var(--vermelho) !important; color: #fff !important; border-color: var(--vermelho) !important;
 }
+
+/* =====================================================================
+   Reagir a uma mensagem
+   ===================================================================== */
+.wpp-reacao-painel {
+  position: absolute; bottom: 100%; right: 0; z-index: 30;
+  display: flex; gap: 2px; padding: 4px;
+  background: var(--superficie); border: 1px solid var(--borda);
+  border-radius: 999px; box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+  margin-bottom: 4px;
+}
+.wpp-reacao-opcao {
+  border: none; background: none; cursor: pointer; font-size: 18px;
+  width: 30px; height: 30px; border-radius: 50%; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.wpp-reacao-opcao:hover { transform: scale(1.25); background: var(--superficie-2, var(--fundo)); }
+.wpp-reacao-tirar { font-size: 13px; color: var(--texto-suave); }
+.wpp-bolha-rodape { position: relative; }
+
+/* Lembrete de encerrar um atendimento esquecido aberto */
+.wpp-lembrar-encerrar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin: 0 18px 8px;
+  padding: 10px 14px; border-radius: 9px; font-size: 12.5px; line-height: 1.45;
+  background: color-mix(in srgb, #d4a017 14%, transparent);
+  border: 1px solid color-mix(in srgb, #d4a017 45%, transparent);
+}
+
+/* Contador em cada aba de Conversas. Fila e "Sem escolha" piscam quando
+   têm gente esperando — é onde o tempo conta e ninguém fica olhando. */
+.wpp-aba-contador {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 5px; margin-left: 6px;
+  border-radius: 999px; font-size: 10.5px; font-weight: 700;
+  background: color-mix(in srgb, var(--texto-suave) 22%, transparent);
+  color: var(--texto);
+}
+.wpp-aba-contador-novas { background: var(--primaria); color: #fff; }
+.wpp-aba-contador-urgente { background: var(--vermelho); color: #fff; }

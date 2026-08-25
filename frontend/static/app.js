@@ -1796,6 +1796,9 @@
         if (await mudouAlgo()) {
           await atualizarListaConversasNoDom();
           if (conversaId) await atualizarMensagensNoDom(conversaId);
+          // Sem isto o número da aba só mudaria ao trocar de tela — e o
+          // aviso de "caiu alguém na fila" chegaria tarde demais.
+          await atualizarContagemAbas();
         }
       } catch (e) { /* próxima tentativa corrige */ }
       // setTimeout encadeado (em vez de setInterval): o próximo só é
@@ -2197,6 +2200,7 @@
       ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
       ${m.reacao ? `<span class="wpp-reacao" title="O cliente reagiu a esta mensagem${m.reacao_em ? " em " + fmtData(m.reacao_em) : ""}">${escapeHtml(m.reacao)}</span>` : ""}
       <div class="wpp-bolha-rodape">
+        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="abrir-reacao" data-id="${m.id}" title="Reagir a esta mensagem">😊</button>` : ""}
         ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="0" title="Responder citando esta mensagem">↩️</button>` : ""}
         ${saida && !m.excluida_em && m.tipo === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem" data-id="${m.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
         ${htmlEditada(m)}
@@ -2339,6 +2343,11 @@
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
       ${htmlNotas(conversa.id, notas || [])}
+      ${conversa.sugerir_encerrar ? `
+        <div class="wpp-lembrar-encerrar">
+          <span>Este atendimento está parado há mais de ${conversa.horas_sugerir_encerrar || 24}h. Se já terminou, encerre — assim o cliente passa pelo menu de novo quando voltar.</span>
+          <button type="button" class="botao pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>
+        </div>` : ""}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens>${mensagens.map(htmlBolha).join("")}</div>
       ${htmlAgendadas(agendadas)}
@@ -2375,7 +2384,19 @@
     ];
     if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
     abas.push({ chave: "arquivadas", label: "Arquivadas" });
-    return `<div class="wpp-abas">${abas.map((a) => `<button type="button" class="wpp-aba ${state.escopoConversas === a.chave ? "ativa" : ""}" data-acao="trocar-escopo-conversas" data-escopo="${a.chave}"${a.dica ? ` title="${escapeHtml(a.dica)}"` : ""}>${a.label}</button>`).join("")}</div>`;
+    // O número em cada aba evita ter que clicar pra descobrir se caiu
+    // alguém. Fila e "Sem escolha" piscam quando têm gente esperando:
+    // ali o tempo conta, e ninguém está olhando pra aba o tempo todo.
+    const cont = state.contagemAbas || {};
+    return `<div class="wpp-abas">${abas.map((a) => {
+      const n = cont[a.chave];
+      const urgente = (a.chave === "fila" || a.chave === "sem_menu") && n > 0;
+      const naoLidas = a.chave === "minhas" && cont.minhas_nao_lidas > 0;
+      const selo = (n === null || n === undefined || n === 0)
+        ? ""
+        : `<span class="wpp-aba-contador ${urgente ? "wpp-aba-contador-urgente piscando" : ""} ${naoLidas ? "wpp-aba-contador-novas" : ""}">${n > 99 ? "99+" : n}</span>`;
+      return `<button type="button" class="wpp-aba ${state.escopoConversas === a.chave ? "ativa" : ""}" data-acao="trocar-escopo-conversas" data-escopo="${a.chave}"${a.dica ? ` title="${escapeHtml(a.dica)}"` : ""}>${a.label}${selo}</button>`;
+    }).join("")}</div>`;
   }
 
   // Barra de etiquetas: clicar filtra a lista, clicar de novo tira o
@@ -2437,10 +2458,12 @@
 
     // Etiquetas e a contagem de cada uma alimentam a barra de filtro.
     // Falhar aqui não pode derrubar a tela de conversas inteira.
-    const [etiquetas, contagemEtiquetas] = await Promise.all([
+    const [etiquetas, contagemEtiquetas, contagemAbas] = await Promise.all([
       chamarApi("/whatsapp/tags").catch(() => []),
       chamarApi("/whatsapp/tags/contagem").catch(() => ({})),
+      chamarApi("/whatsapp/contagem-abas").catch(() => ({})),
     ]);
+    state.contagemAbas = contagemAbas;
 
     let conversaAtual = null, mensagens = [], agendadas = [], respostasProntas = [], notas = [];
     let emojisSalvos = [], figurinhas = [];
@@ -2497,6 +2520,20 @@
     const painelMensagens = document.querySelector("[data-wpp-mensagens]");
     if (painelMensagens) painelMensagens.scrollTop = painelMensagens.scrollHeight;
     iniciarPollingWhatsapp(conversaId);
+  }
+
+  async function atualizarContagemAbas() {
+    try {
+      const nova = await chamarApi("/whatsapp/contagem-abas");
+      if (JSON.stringify(nova) === JSON.stringify(state.contagemAbas)) return;
+      state.contagemAbas = nova;
+      const barra = document.querySelector(".wpp-abas");
+      if (!barra) return;
+      const molde = document.createElement("div");
+      molde.innerHTML = htmlAbasConversas();
+      const nova_barra = molde.firstElementChild;
+      if (nova_barra && barra.innerHTML !== nova_barra.innerHTML) barra.innerHTML = nova_barra.innerHTML;
+    } catch (e) { /* próxima tentativa corrige */ }
   }
 
   async function atualizarListaConversasNoDom() {
@@ -4211,6 +4248,41 @@
         document.querySelector(".barra-lateral").classList.toggle("aberta");
         document.querySelector(".fundo-menu-mobile").classList.toggle("visivel");
         return;
+      case "abrir-reacao": {
+        // Os seis do WhatsApp, na mesma ordem — quem já usa o aplicativo
+        // acha o que quer sem procurar.
+        const rapidas = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+        const id = Number(alvo.dataset.id);
+        const bolha = alvo.closest(".wpp-bolha");
+        const jaTem = bolha && bolha.querySelector(".wpp-reacao");
+        document.querySelectorAll(".wpp-reacao-painel").forEach((p) => p.remove());
+        const painel = document.createElement("div");
+        painel.className = "wpp-reacao-painel";
+        painel.innerHTML = rapidas.map((e) =>
+          `<button type="button" class="wpp-reacao-opcao" data-acao="reagir" data-id="${id}" data-emoji="${e}">${e}</button>`
+        ).join("") + (jaTem
+          ? `<button type="button" class="wpp-reacao-opcao wpp-reacao-tirar" data-acao="reagir" data-id="${id}" data-emoji="" title="Tirar a reação">✕</button>`
+          : "");
+        alvo.parentElement.appendChild(painel);
+        setTimeout(() => document.addEventListener("click", function fechar(ev) {
+          if (painel.contains(ev.target)) return;
+          painel.remove();
+          document.removeEventListener("click", fechar);
+        }), 0);
+        return;
+      }
+      case "reagir": {
+        const conversaId = Number(location.hash.split("/")[2]);
+        const id = Number(alvo.dataset.id);
+        document.querySelectorAll(".wpp-reacao-painel").forEach((p) => p.remove());
+        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens/${id}/reagir`, {
+          method: "POST", body: { emoji: alvo.dataset.emoji },
+        });
+        if (!r.enviada_ao_cliente && alvo.dataset.emoji) {
+          definirFlash("erro", "A reação ficou registrada aqui, mas o WhatsApp não aceitou enviá-la ao cliente.");
+        }
+        return atualizarMensagensNoDom(conversaId);
+      }
       case "gravar-video": {
         const id = Number(alvo.dataset.id);
         return _gravarVideo(`${API}/whatsapp/conversas/${id}/anexo`, () => atualizarMensagensNoDom(id));

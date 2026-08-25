@@ -8,6 +8,7 @@ não lidas dele (só o próprio dono zera, ao abrir a conversa que é dele).
 """
 import csv
 import io
+import datetime
 import os
 import re
 import secrets
@@ -240,6 +241,8 @@ def _conversa_para_json(row, tags=None):
     d = dict(row)
     d["nao_lidas"] = int(d.get("nao_lidas") or 0)
     d["tags"] = tags or []
+    d["sugerir_encerrar"] = _sugerir_encerrar(row)
+    d["horas_sugerir_encerrar"] = HORAS_SUGERIR_ENCERRAR
     # Nome que ESTE usuário deu pro contato ganha da versão compartilhada
     # (o nome de cadastro segue guardado, só não é o que ele vê).
     apelido = _apelidos_contatos().get(d.get("contato_id"))
@@ -255,6 +258,28 @@ def _conversa_para_json(row, tags=None):
         d.pop("_u_offline_forcado", None)
         d["atribuida_usuario_online"] = None
     return d
+
+
+# Depois de quantas horas paradas o sistema sugere encerrar. Não é
+# alerta de atraso (isso é o SLA, em minutos): é o lembrete de fechar um
+# atendimento que já acabou e ficou aberto por esquecimento.
+HORAS_SUGERIR_ENCERRAR = int(os.environ.get("WPP_HORAS_SUGERIR_ENCERRAR", "24"))
+
+
+def _sugerir_encerrar(conversa) -> bool:
+    """Conversa aberta, com dono, parada há tempo demais.
+
+    Sem isso, atendimento terminado fica aberto para sempre: some da
+    cabeça de quem atende, continua contando como conversa ativa e o
+    cliente, quando volta, cai no atendimento antigo em vez de passar
+    pelo menu."""
+    if conversa["status"] != "aberta" or conversa["atribuida_usuario_id"] is None:
+        return False
+    quando = conversa["ultima_mensagem_em"]
+    if not quando:
+        return False
+    limite = (datetime.datetime.utcnow() - datetime.timedelta(hours=HORAS_SUGERIR_ENCERRAR))
+    return quando <= limite.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _conversas_com_tags(conn, rows):
@@ -546,6 +571,48 @@ def obter_conversa(conversa_id):
     if not _pode_visualizar(usuario, conversa, conn):
         raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     return jsonify(_conversas_com_tags(conn, [conversa])[0])
+
+
+@bp.get("/contagem-abas")
+@requires_auth
+def contagem_abas():
+    """Quantas conversas há em cada aba, pra quem está pedindo.
+
+    Serve pra mostrar o número na própria aba: sem isso, saber que caiu
+    alguém na Fila exige clicar em Fila. Respeita a mesma régua de
+    visibilidade das listas — ninguém conta o que não pode ver."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    base = ("FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0")
+    if usuario["admin"]:
+        visivel, pv = "", []
+    else:
+        sql, pv = _sql_visivel_nao_admin(conn, usuario)
+        visivel = " AND " + sql
+
+    def contar(extra, params_extra=()):
+        return conn.execute(
+            f"SELECT COUNT(*) AS n {base}{visivel} {extra}",
+            [g.empresa_id, *pv, *params_extra],
+        ).fetchone()["n"]
+
+    minhas = conn.execute(
+        f"SELECT COUNT(*) AS n {base} AND c.atribuida_usuario_id = ?",
+        (g.empresa_id, usuario["id"]),
+    ).fetchone()["n"]
+    # Não lidas: é o que de fato pede atenção agora.
+    nao_lidas_minhas = conn.execute(
+        f"SELECT COALESCE(SUM(c.nao_lidas), 0) AS n {base} AND c.atribuida_usuario_id = ?",
+        (g.empresa_id, usuario["id"]),
+    ).fetchone()["n"]
+    return jsonify({
+        "minhas": minhas,
+        "minhas_nao_lidas": nao_lidas_minhas,
+        "fila": contar("AND c.atribuida_usuario_id IS NULL"),
+        "sem_menu": contar("AND c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL"),
+        "todas": conn.execute(f"SELECT COUNT(*) AS n {base}", (g.empresa_id,)).fetchone()["n"] if usuario["admin"] else None,
+    })
 
 
 @bp.get("/conversas/buscar")
@@ -1168,6 +1235,46 @@ def reenviar_mensagem(conversa_id, mensagem_id):
     return jsonify({"ok": True})
 
 
+@bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/reagir")
+@requires_auth
+def reagir_mensagem(conversa_id, mensagem_id):
+    """Reage a uma mensagem com um emoji, como no WhatsApp.
+
+    A reação vale nos dois sentidos: aparece no celular do cliente e fica
+    guardada aqui, na própria mensagem. Emoji vazio tira a reação."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    mensagem = conn.execute(
+        "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    emoji = ((request.get_json(silent=True) or {}).get("emoji") or "").strip()
+
+    # Guarda primeiro: o cliente ver a reação é bom, mas o registro aqui
+    # é o que a equipe usa. Se o WhatsApp recusar, a marca local fica e a
+    # tela avisa — melhor que perder as duas coisas.
+    conn.execute(
+        "UPDATE whatsapp_mensagens SET reacao = ?, reacao_em = ? WHERE id = ?",
+        (emoji or None, _now_iso() if emoji else None, mensagem_id),
+    )
+    enviada = False
+    if mensagem["externo_id"]:
+        try:
+            whatsapp_service.reagir_mensagem(
+                whatsapp_service.obter_configuracao(conn, g.empresa_id),
+                conversa["telefone"], mensagem["externo_id"], emoji,
+                minha=(mensagem["direcao"] == "saida"),
+            )
+            enviada = True
+        except ApiError:
+            enviada = False
+    return jsonify({"ok": True, "emoji": emoji or None, "enviada_ao_cliente": enviada})
+
+
 @bp.post("/conversas/<int:conversa_id>/sem-pendencia")
 @requires_auth
 def marcar_sem_pendencia(conversa_id):
@@ -1308,6 +1415,15 @@ def arquivar_conversa(conversa_id):
     if not _pode_agir(usuario, conversa):
         raise ApiError("Só o responsável por esta conversa (ou um administrador) pode arquivá-la.", status=403, codigo="sem_permissao")
     whatsapp_service.arquivar_conversa(conn, conversa_id, bool(arquivar))
+    # Arquivar é o gesto de "terminei com este". Deixar a conversa aberta
+    # depois disso significava que o cliente, ao voltar, caía direto no
+    # atendimento antigo — sem passar pelo menu e sem ninguém saber que
+    # ele voltou. Encerrar junto faz o próximo contato começar do zero.
+    if arquivar and conversa["status"] == "aberta":
+        whatsapp_service.fechar_conversa(conn, conversa_id)
+        whatsapp_service.registrar_atividade(
+            conn, usuario["id"], "conversa_fechada_ao_arquivar", conversa["telefone"], conversa_id
+        )
     whatsapp_service.registrar_atividade(
         conn, usuario["id"], "conversa_arquivada" if arquivar else "conversa_desarquivada", conversa["telefone"], conversa_id
     )
