@@ -1989,6 +1989,7 @@
       const aberta = Number(location.hash.split("/")[2]) || null;
       const ehCliente = location.hash.startsWith("#/whatsapp");
       const p = await chamarApi(`/whatsapp/pulso${aberta && ehCliente ? `?conversa_id=${aberta}` : ""}`);
+      _marcarNaBarraDeTarefas(p.n || 0, p.nc || 0, p.ni || 0);
       const assinatura = `${p.c}|${p.i}|${p.v}|${p.s}`;
       const mudou = _pulsoAnterior !== null && assinatura !== _pulsoAnterior;
       const primeira = _pulsoAnterior === null;
@@ -2001,6 +2002,32 @@
       // do que congelar a tela.
       return true;
     }
+  }
+
+  // O número no ícone da barra de tarefas, como o do WhatsApp.
+  //
+  // Vale só pro sistema instalado como aplicativo (é o navegador que
+  // desenha o balãozinho no ícone). Aberto numa aba comum, o número vai
+  // pro título — que é o que aparece na aba e ao passar o mouse na barra.
+  let _ultimoTotalNaBarra = -1;
+  const TITULO_BASE = "Seja Alpha";
+
+  function _marcarNaBarraDeTarefas(total, deClientes, doChatInterno) {
+    if (total === _ultimoTotalNaBarra) return;   // não repinta à toa
+    _ultimoTotalNaBarra = total;
+
+    document.title = total ? `(${total}) ${TITULO_BASE}` : TITULO_BASE;
+
+    if (!("setAppBadge" in navigator)) return;
+    // Falha aqui não é problema de ninguém: navegador que não suporta,
+    // ou aplicativo ainda não instalado. O título acima já cobre.
+    try {
+      if (total > 0) navigator.setAppBadge(total);
+      else navigator.clearAppBadge();
+    } catch (e) { /* sem balãozinho, segue com o título */ }
+
+    // Guarda a divisão pra tela poder mostrar de onde vêm, se precisar.
+    state.naoLidas = { total, clientes: deClientes, interno: doChatInterno };
   }
 
   function _ritmoDoPulso() {

@@ -597,7 +597,32 @@ def pulso():
             (conversa_id,),
         ).fetchone()["v"]
         status = f"{linha['total']}.{linha['lidas'] or 0}.{linha['entregues'] or 0}.{reagidas}"
-    return jsonify({"c": ultima_cliente, "i": ultima_interna, "v": vistos, "s": status})
+    # Não-lidas DESTA pessoa, somando as duas telas. Vai no pulso (e não
+    # numa consulta à parte) porque é a única chamada que já roda sempre:
+    # um número a mais aqui é de graça, uma requisição a mais não seria.
+    nao_lidas_cliente = conn.execute(
+        f"""
+        SELECT COALESCE(SUM(c.nao_lidas), 0) AS v
+        FROM whatsapp_conversas c
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0
+          AND c.atribuida_usuario_id = ?
+        """,
+        (g.empresa_id, usuario["id"]),
+    ).fetchone()["v"]
+    nao_lidas_interna = conn.execute(
+        """
+        SELECT COALESCE(SUM(CASE WHEN c.criado_por_id = ? THEN c.nao_lidas_criador
+                                 ELSE c.nao_lidas_participante END), 0) AS v
+        FROM chat_interno_conversas c
+        WHERE (c.criado_por_id = ? OR c.participante_id = ?) AND c.status = 'aberta'
+        """,
+        (usuario["id"], usuario["id"], usuario["id"]),
+    ).fetchone()["v"]
+
+    return jsonify({"c": ultima_cliente, "i": ultima_interna, "v": vistos, "s": status,
+                    "n": int(nao_lidas_cliente) + int(nao_lidas_interna),
+                    "nc": int(nao_lidas_cliente), "ni": int(nao_lidas_interna)})
 
 
 @bp.get("/conversas/<int:conversa_id>")
