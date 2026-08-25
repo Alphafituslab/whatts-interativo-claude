@@ -1419,3 +1419,11 @@ nav { perspective: 800px; }
 .wpp-catalogo-pessoa { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .wpp-catalogo-pessoa input { width: 16px; height: 16px; }
 .wpp-catalogo-quem .dica { flex-basis: 100%; }
+
+/* "Ver de: [pessoa]" no topo do painel de follow-up. */
+.followup-quem {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 0; font-size: 12.5px;
+}
+.followup-quem label { color: var(--texto-suave); flex-shrink: 0; }
+.followup-quem select { flex: 1; font-size: 12.5px; padding: 5px 8px; }

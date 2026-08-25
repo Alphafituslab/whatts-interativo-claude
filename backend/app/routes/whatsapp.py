@@ -70,7 +70,18 @@ def _barrar_sem_acesso_a_conversas():
 
 
 PASTA_UPLOADS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "uploads")
+# Limite de anexo. O do WhatsApp pra documento é bem maior que o nosso;
+# 35MB é o que cobre foto, vídeo e PDF do dia a dia sem encher o disco.
+#
+# Administrador vai até 90MB: é quem manda instalador e catálogo pesado,
+# e barrar isso obrigava a usar outro caminho pra mandar um arquivo que
+# o próprio sistema distribui.
 MAX_ANEXO_MB = 35
+MAX_ANEXO_MB_ADMIN = 90
+
+
+def _limite_anexo_mb(usuario) -> int:
+    return MAX_ANEXO_MB_ADMIN if usuario and usuario["admin"] else MAX_ANEXO_MB
 EXTENSOES_TIPO = {
     "imagem": {"jpg", "jpeg", "png", "gif", "webp"},
     "video": {"mp4", "mov", "avi", "webm", "mkv"},
@@ -1867,8 +1878,9 @@ def subir_catalogo_pdf():
         raise ApiError("Envie um PDF (ou outro documento).", status=400)
 
     dados_bytes = arquivo.read()
-    if len(dados_bytes) > MAX_ANEXO_MB * 1024 * 1024:
-        raise ApiError(f"Arquivo maior que o limite de {MAX_ANEXO_MB}MB.", status=400)
+    limite_mb = _limite_anexo_mb(usuario)
+    if len(dados_bytes) > limite_mb * 1024 * 1024:
+        raise ApiError(f"Arquivo maior que o limite de {limite_mb}MB.", status=400)
 
     os.makedirs(PASTA_UPLOADS, exist_ok=True)
     nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
@@ -2649,6 +2661,18 @@ def excluir_resposta_pronta(resposta_id):
 # ============================================================
 # MENSAGENS AGENDADAS
 # ============================================================
+def _de_quem(usuario, todos):
+    """De quem é a lista pedida: minha, de todos, ou de uma pessoa
+    específica (?usuario_id=N, só admin). Devolve None pra 'de todos'."""
+    pedido = request.args.get("usuario_id")
+    if pedido and usuario["admin"]:
+        try:
+            return int(pedido)
+        except ValueError:
+            raise ApiError("Usuário inválido.", status=400)
+    return None if todos else usuario["id"]
+
+
 @bp.get("/agendadas")
 @requires_auth
 def listar_todas_agendadas():
@@ -2661,7 +2685,8 @@ def listar_todas_agendadas():
     if todos and not usuario["admin"]:
         raise ApiError("Só um administrador pode ver os agendamentos de todos.", status=403, codigo="sem_permissao")
     conn = get_db()
-    return jsonify(whatsapp_service.listar_todas_agendadas(conn, g.empresa_id, None if todos else usuario["id"]))
+    return jsonify(whatsapp_service.listar_todas_agendadas(
+        conn, g.empresa_id, _de_quem(usuario, todos)))
 
 
 @bp.get("/conversas/<int:conversa_id>/agendadas")
@@ -2793,7 +2818,7 @@ def listar_lembretes():
     if todos and not usuario["admin"]:
         raise ApiError("Só um administrador pode ver os lembretes de todos.", status=403, codigo="sem_permissao")
     conn = get_db()
-    return jsonify(whatsapp_service.listar_lembretes(conn, g.empresa_id, None if todos else usuario["id"]))
+    return jsonify(whatsapp_service.listar_lembretes(conn, g.empresa_id, _de_quem(usuario, todos)))
 
 
 @bp.post("/conversas/<int:conversa_id>/lembretes")
@@ -2896,8 +2921,9 @@ def enviar_anexo(conversa_id):
         raise ApiError("Nenhum arquivo enviado.", status=400)
 
     dados_bytes = arquivo.read()
-    if len(dados_bytes) > MAX_ANEXO_MB * 1024 * 1024:
-        raise ApiError(f"Arquivo maior que o limite de {MAX_ANEXO_MB}MB.", status=400)
+    limite_mb = _limite_anexo_mb(usuario)
+    if len(dados_bytes) > limite_mb * 1024 * 1024:
+        raise ApiError(f"Arquivo maior que o limite de {limite_mb}MB.", status=400)
 
     # A gravação de áudio do navegador manda tipo="audio" explicitamente
     # — o nome do arquivo sozinho (ex.: "audio.webm") não dá pra

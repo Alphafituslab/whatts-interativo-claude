@@ -212,7 +212,11 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
                uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
                up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off,
                uc.ausente AS _uc_ausente, up.ausente AS _up_ausente,
-               uc.ausente_motivo AS _uc_motivo, up.ausente_motivo AS _up_motivo
+               uc.ausente_motivo AS _uc_motivo, up.ausente_motivo AS _up_motivo,
+               (SELECT GROUP_CONCAT(s.setor, ', ') FROM usuario_setores s
+                 WHERE s.usuario_id = uc.id) AS criado_por_setores,
+               (SELECT GROUP_CONCAT(s.setor, ', ') FROM usuario_setores s
+                 WHERE s.usuario_id = up.id) AS participante_setores
         FROM chat_interno_conversas c
         JOIN usuarios uc ON uc.id = c.criado_por_id
         LEFT JOIN usuarios up ON up.id = c.participante_id
@@ -239,7 +243,11 @@ def carregar_conversa(conn, conversa_id: int):
                uc.ultimo_acesso AS _uc_acesso, uc.offline_forcado AS _uc_off,
                up.ultimo_acesso AS _up_acesso, up.offline_forcado AS _up_off,
                uc.ausente AS _uc_ausente, up.ausente AS _up_ausente,
-               uc.ausente_motivo AS _uc_motivo, up.ausente_motivo AS _up_motivo
+               uc.ausente_motivo AS _uc_motivo, up.ausente_motivo AS _up_motivo,
+               (SELECT GROUP_CONCAT(s.setor, ', ') FROM usuario_setores s
+                 WHERE s.usuario_id = uc.id) AS criado_por_setores,
+               (SELECT GROUP_CONCAT(s.setor, ', ') FROM usuario_setores s
+                 WHERE s.usuario_id = up.id) AS participante_setores
         FROM chat_interno_conversas c
         JOIN usuarios uc ON uc.id = c.criado_por_id
         LEFT JOIN usuarios up ON up.id = c.participante_id

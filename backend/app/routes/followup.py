@@ -16,9 +16,20 @@ bp = Blueprint("followup", __name__, url_prefix="/api/v1/followup")
 
 def _escopo():
     """Admin enxerga a empresa toda; os demais, só o que é deles — o que
-    está atribuído a eles mais a fila de TODOS os setores que atendem."""
+    está atribuído a eles mais a fila de TODOS os setores que atendem.
+
+    ?usuario_id=N (só admin) estreita a visão pra uma pessoa: é como o
+    admin responde "o que está com a Andreia?" sem entrar na conta dela.
+    """
     usuario = g.usuario_atual
     if usuario["admin"]:
+        pedido = request.args.get("usuario_id")
+        if pedido:
+            try:
+                alvo = int(pedido)
+            except ValueError:
+                raise ApiError("Usuário inválido.", status=400)
+            return alvo, whatsapp_service.setores_do_usuario(get_db(), alvo)
         return None, None
     return usuario["id"], whatsapp_service.setores_do_usuario(get_db(), usuario["id"])
 

@@ -45,7 +45,7 @@ def create_app(test_config: dict = None) -> Flask:
         static_folder=os.path.join(FRONTEND_DIR, "static"),
         static_url_path="/static",
     )
-    app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 40MB — folga sobre o limite de 35MB de anexo (ver routes/whatsapp.py)
+    app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100MB — folga sobre o limite de anexo (35MB, 90MB para admin — ver routes/whatsapp.py)
     # Sem isso o navegador cacheia app.js/styles.css "pra sempre" e quem já
     # tinha a aba aberta (ou nunca deu Ctrl+F5) fica preso numa versão
     # antiga do front-end mesmo depois do servidor já ter a mudança nova —

@@ -1700,10 +1700,18 @@
       //  - Agendamento: mensagem que o sistema ENVIA ao contato na hora
       //    marcada, e some daqui depois de enviada.
       //  - Lembrete: aviso só pra você, não vai pra ninguém.
-      const [itens, agendadas, lembretes] = await Promise.all([
-        chamarApi("/followup"),
-        chamarApi("/whatsapp/agendadas").catch(() => []),
-        chamarApi("/whatsapp/lembretes").catch(() => []),
+      // Admin pode olhar o de uma pessoa só. O parâmetro vai nas três
+      // listas juntas — meio painel filtrado e meio não seria pior do
+      // que não filtrar nada.
+      const souAdmin = !!(state.usuarioAtual && state.usuarioAtual.admin);
+      const dePessoa = souAdmin ? (state.followupUsuario || "") : "";
+      const q = dePessoa ? `?usuario_id=${dePessoa}` : (souAdmin ? "?todos=1" : "");
+      const qFollow = dePessoa ? `?usuario_id=${dePessoa}` : "";
+      const [itens, agendadas, lembretes, colegas] = await Promise.all([
+        chamarApi(`/followup${qFollow}`),
+        chamarApi(`/whatsapp/agendadas${q}`).catch(() => []),
+        chamarApi(`/whatsapp/lembretes${q}`).catch(() => []),
+        souAdmin ? chamarApi("/usuarios").catch(() => []) : Promise.resolve([]),
       ]);
       const followups = itens.filter((i) => i.situacao !== "adiado");
       const tudo = [
@@ -1736,7 +1744,18 @@
                         : `<p class="texto-suave" style="padding:10px 12px; font-size:12.5px;">${vazio}</p>`);
       };
 
+      const seletor = souAdmin ? `
+        <div class="followup-quem">
+          <label>Ver de:</label>
+          <select data-acao-change="filtrar-followup-usuario">
+            <option value="">Todo mundo</option>
+            ${colegas.filter((u) => u.ativo).map((u) => `
+              <option value="${u.id}" ${String(dePessoa) === String(u.id) ? "selected" : ""}>${escapeHtml(u.nome)}</option>`).join("")}
+          </select>
+        </div>` : "";
+
       alvo.innerHTML = `
+        ${seletor}
         <div class="followup-resumo">${chips}</div>
         ${filtro ? `<div class="followup-filtro-aviso">Mostrando só <strong>${FILTROS_FOLLOWUP[filtro].rotulo}</strong> · <button type="button" class="followup-limpar" data-acao="filtrar-followup" data-filtro="">ver tudo</button></div>` : ""}
         ${filtro && !mostrados.length ? `<p class="texto-suave" style="padding:12px;">${FILTROS_FOLLOWUP[filtro].vazio}</p>` : ""}
@@ -3182,7 +3201,16 @@
               : `<span class="wpp-conversa-preview">${escapeHtml(c.ultima_mensagem_preview || "")}</span>`}
             ${naoLidas > 0 ? `<span class="wpp-badge-nao-lidas piscando">${naoLidas > 99 ? "99+" : naoLidas}</span>` : ""}
           </div>
-          ${c.setor_destino || c.status === "fechada" ? `<div class="wpp-conversa-dono">${c.setor_destino ? `🏷️ ${escapeHtml(c.setor_destino)}` : ""}${c.status === "fechada" ? ' · <span class="selo inativo">Fechada</span>' : ""}</div>` : ""}
+          ${(() => {
+            // O setor de QUEM ESTÁ DO OUTRO LADO desta conversa — não o
+            // setor_destino, que é só o filtro usado pra achar a pessoa
+            // e mostrava a função trocada embaixo do nome.
+            const eu = state.usuarioAtual.id;
+            const doOutro = c.criado_por_id === eu ? c.participante_setores : c.criado_por_setores;
+            const fechada = c.status === "fechada";
+            if (!doOutro && !fechada) return "";
+            return `<div class="wpp-conversa-dono">${doOutro ? `🏷️ ${escapeHtml(doOutro)}` : ""}${fechada ? `${doOutro ? " · " : ""}<span class="selo inativo">Fechada</span>` : ""}</div>`;
+          })()}
           ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
         </div>
       </a>`;
@@ -3250,7 +3278,11 @@
           <div class="wpp-chat-nome">${escapeHtml(outroNome)}${souAlheio ? "" : ` <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="abrir-apelido-interno" data-conversa-id="${conversa.id}" data-apelido="${escapeHtml(outroNome)}" title="Definir apelido (só você vê)">✏️</button>`}</div>
           <div class="texto-suave wpp-chat-telefone">
             ${htmlSeloPresenca(souCriador ? conversa.participante_online : conversa.criado_por_online, souCriador ? conversa.participante_ausente : conversa.criado_por_ausente, souCriador ? conversa.participante_ausente_motivo : conversa.criado_por_ausente_motivo)}
-            ${souAlheio ? " · 👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${conversa.setor_destino ? ` · 🏷️ ${escapeHtml(conversa.setor_destino)}` : ""}
+            ${souAlheio ? " · 👁️ supervisionando — a leitura não marca a mensagem como vista pra eles" : ""}${(() => {
+              const eu = state.usuarioAtual.id;
+              const doOutro = conversa.criado_por_id === eu ? conversa.participante_setores : conversa.criado_por_setores;
+              return doOutro ? ` · 🏷️ ${escapeHtml(doOutro)}` : "";
+            })()}
           </div>
         </div>
         <div class="wpp-chat-acoes">
@@ -5669,6 +5701,10 @@
         await chamarApi(`/usuarios/${alvo.dataset.id}/reativar`, { method: "POST" });
         definirFlash("ok", "Usuário reativado.");
         return renderUsuarios();
+      }
+      case "filtrar-followup-usuario": {
+        state.followupUsuario = alvo.value || null;
+        return carregarPainelFollowup();
       }
       case "renomear-catalogo": {
         const nome = alvo.value.trim();
