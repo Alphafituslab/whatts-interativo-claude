@@ -260,27 +260,42 @@ def _carregar_conversa(conn, empresa_id, conversa_id):
     return conversa
 
 
-def _pode_visualizar(usuario, conversa):
-    """Atribuída: só o dono (e o admin). Sem dono (na fila): só quem é do
-    MESMO setor pra onde o cliente foi direcionado — mesma régua do botão
-    Assumir. Enquanto o setor não está definido (cliente ainda não
-    respondeu o menu), só o admin vê: não dá pra saber de quem é."""
+def _pode_visualizar(usuario, conversa, conn=None):
+    """Atribuída: só o dono (e o admin). Sem dono (na fila): só quem
+    atende o setor pra onde o cliente foi direcionado — mesma régua do
+    botão Assumir. Enquanto o setor não está definido (cliente ainda não
+    respondeu o menu), só o admin vê: não dá pra saber de quem é.
+
+    Uma pessoa pode atender vários setores, então a comparação é contra
+    a lista dela, não contra um valor único."""
     if usuario["admin"]:
         return True
     if conversa["atribuida_usuario_id"] is not None:
         return conversa["atribuida_usuario_id"] == usuario["id"]
-    return bool(conversa["menu_setor"]) and conversa["menu_setor"] == usuario["setor"]
+    if not conversa["menu_setor"]:
+        return False
+    setores = whatsapp_service.setores_do_usuario(conn or get_db(), usuario["id"])
+    return conversa["menu_setor"] in setores
 
 
 # Mesma regra do _pode_visualizar, em SQL, pra filtrar as listas direto no
 # banco (o usuário nunca chega a receber a conversa de outro setor).
-_SQL_VISIVEL_NAO_ADMIN = (
-    "(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IS NOT NULL AND c.menu_setor = ?))"
-)
+def _sql_visivel_nao_admin(conn, usuario):
+    """Condição SQL + parâmetros do que esta pessoa pode ver: o que está
+    atribuído a ela, mais a fila dos setores que ela atende.
 
-
-def _params_visivel(usuario):
-    return [usuario["id"], usuario["setor"]]
+    Vira função (em vez de constante) porque a pessoa pode atender vários
+    setores — a quantidade de marcadores muda de um usuário pro outro."""
+    setores = whatsapp_service.setores_do_usuario(conn, usuario["id"])
+    if not setores:
+        # Sem setor nenhum: só enxerga o que for atribuído a ela.
+        return "(c.atribuida_usuario_id = ?)", [usuario["id"]]
+    marcadores = ",".join("?" * len(setores))
+    sql = (
+        f"(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL "
+        f"AND c.menu_setor IS NOT NULL AND c.menu_setor IN ({marcadores})))"
+    )
+    return sql, [usuario["id"], *setores]
 
 
 # Direção da última mensagem da conversa: 'entrada' = o cliente falou por
@@ -325,8 +340,8 @@ def listar_conversas():
         if usuario["admin"]:
             condicoes, params = [], []
         else:
-            condicoes = [_SQL_VISIVEL_NAO_ADMIN]
-            params = _params_visivel(usuario)
+            sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
+            condicoes = [sql_visivel]
         condicoes.append(f"({_SQL_ULTIMA_DIRECAO} IS NULL OR {_SQL_ULTIMA_DIRECAO} = 'entrada')")
     elif escopo == "todas":
         if not usuario["admin"]:
@@ -383,8 +398,9 @@ def buscar_conversas():
     ]
     params = [g.empresa_id, termo, termo, termo]
     if not usuario["admin"]:
-        condicoes.append(_SQL_VISIVEL_NAO_ADMIN)
-        params.extend(_params_visivel(usuario))
+        sql_visivel, params_visivel = _sql_visivel_nao_admin(conn, usuario)
+        condicoes.append(sql_visivel)
+        params.extend(params_visivel)
     where = "WHERE " + " AND ".join(condicoes)
     rows = conn.execute(
         f"""

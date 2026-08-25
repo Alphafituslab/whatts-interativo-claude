@@ -15,11 +15,12 @@ bp = Blueprint("followup", __name__, url_prefix="/api/v1/followup")
 
 
 def _escopo():
-    """Admin enxerga a empresa toda; os demais, só o que é deles."""
+    """Admin enxerga a empresa toda; os demais, só o que é deles — o que
+    está atribuído a eles mais a fila de TODOS os setores que atendem."""
     usuario = g.usuario_atual
     if usuario["admin"]:
         return None, None
-    return usuario["id"], usuario["setor"]
+    return usuario["id"], whatsapp_service.setores_do_usuario(get_db(), usuario["id"])
 
 
 def _carregar_conversa(conn, conversa_id):
@@ -37,16 +38,16 @@ def _carregar_conversa(conn, conversa_id):
 @requires_auth
 def resumo():
     """Números do sino — chamado com frequência, então é só contagem."""
-    usuario_id, setor = _escopo()
-    return jsonify(followup_service.resumo(get_db(), g.empresa_id, usuario_id, setor))
+    usuario_id, setores = _escopo()
+    return jsonify(followup_service.resumo(get_db(), g.empresa_id, usuario_id, setores))
 
 
 @bp.get("")
 @requires_auth
 def listar():
-    usuario_id, setor = _escopo()
+    usuario_id, setores = _escopo()
     apenas_pendentes = request.args.get("pendentes") == "1"
-    itens = followup_service.listar(get_db(), g.empresa_id, usuario_id, setor, apenas_pendentes)
+    itens = followup_service.listar(get_db(), g.empresa_id, usuario_id, setores, apenas_pendentes)
     situacao = request.args.get("situacao")
     if situacao:
         itens = [i for i in itens if i["situacao"] == situacao]

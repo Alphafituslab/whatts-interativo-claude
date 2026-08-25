@@ -1937,16 +1937,60 @@ def excluir_setor(conn, empresa_id: int, setor_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def setores_do_usuario(conn, usuario_id: int) -> list:
+    """Todos os setores que a pessoa atende. Uma pessoa pode estar em
+    mais de um (ex.: Televendas e Financeiro) e recebe as conversas de
+    todos eles."""
+    rows = conn.execute(
+        "SELECT setor FROM usuario_setores WHERE usuario_id = ? ORDER BY setor", (usuario_id,)
+    ).fetchall()
+    return [r["setor"] for r in rows]
+
+
+def definir_setores_do_usuario(conn, usuario_id: int, setores: list):
+    """Regrava a lista inteira. usuarios.setor fica com o primeiro, como
+    setor principal — é o rótulo usado onde só cabe um (ver a migration
+    schema_033)."""
+    limpos, vistos = [], set()
+    for s in setores or []:
+        nome = (s or "").strip()
+        if nome and nome.lower() not in vistos:
+            vistos.add(nome.lower())
+            limpos.append(nome)
+    conn.execute("DELETE FROM usuario_setores WHERE usuario_id = ?", (usuario_id,))
+    for nome in limpos:
+        conn.execute("INSERT INTO usuario_setores (usuario_id, setor) VALUES (?, ?)", (usuario_id, nome))
+    conn.execute("UPDATE usuarios SET setor = ? WHERE id = ?", (limpos[0] if limpos else None, usuario_id))
+    return limpos
+
+
+def setores_por_usuario(conn, usuario_ids: list):
+    """Setores de vários usuários de uma vez — evita uma consulta por
+    linha na tela de Usuários."""
+    if not usuario_ids:
+        return {}
+    marcadores = ",".join("?" * len(usuario_ids))
+    rows = conn.execute(
+        f"SELECT usuario_id, setor FROM usuario_setores WHERE usuario_id IN ({marcadores}) ORDER BY setor",
+        list(usuario_ids),
+    ).fetchall()
+    mapa = {}
+    for r in rows:
+        mapa.setdefault(r["usuario_id"], []).append(r["setor"])
+    return mapa
+
+
 def setores_com_alguem_online(conn, empresa_id: int):
     """Quais setores têm pelo menos uma pessoa disponível agora. Uma
     consulta só (em vez de uma por setor) porque isso roda a cada menu
-    enviado."""
+    enviado. Quem atende dois setores conta nos dois."""
     limite = (datetime.datetime.utcnow() - datetime.timedelta(minutes=MINUTOS_ONLINE)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     rows = conn.execute(
         """
-        SELECT DISTINCT setor FROM usuarios
-        WHERE empresa_id = ? AND setor IS NOT NULL AND setor != ''
-          AND ativo = 1 AND ultimo_acesso >= ? AND offline_forcado = 0
+        SELECT DISTINCT us.setor FROM usuario_setores us
+        JOIN usuarios u ON u.id = us.usuario_id
+        WHERE u.empresa_id = ? AND u.ativo = 1
+          AND u.ultimo_acesso >= ? AND u.offline_forcado = 0
         """,
         (empresa_id, limite),
     ).fetchall()

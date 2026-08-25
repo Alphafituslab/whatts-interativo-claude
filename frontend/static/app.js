@@ -237,6 +237,44 @@
     return !!u.admin || u.acesso_conversas !== false;
   }
 
+  // Setores que a pessoa atende. Vários de uma vez: quem faz Televendas
+  // e Financeiro recebe a fila dos dois, sem precisar de dois cadastros.
+  function htmlEscolhaSetores(todos, marcados) {
+    const escolhidos = (marcados || []).map(String);
+    if (!todos.length) {
+      return `<label class="rotulo-forte">Setores que atende</label>
+        <p class="dica">Nenhum setor cadastrado ainda — crie em <strong>Configuração → Setores</strong>.</p>`;
+    }
+    return `
+      <label class="rotulo-forte">Setores que esta pessoa atende</label>
+      <p class="dica" style="margin-top:0;">Pode marcar mais de um. Quando o cliente escolher um desses números no menu do WhatsApp, a conversa cai para ela.</p>
+      <div class="escolha-lista">
+        ${todos.map((s, i) => `
+          <label class="escolha-item">
+            <input type="checkbox" name="setores" value="${escapeHtml(s)}" ${escolhidos.includes(s) ? "checked" : ""}>
+            <span class="escolha-numero">${i + 1}</span>
+            <span class="escolha-texto">${escapeHtml(s)}</span>
+          </label>`).join("")}
+      </div>`;
+  }
+
+  function htmlEscolhaAcesso(temAcesso, ehAdmin) {
+    return `
+      <div class="campo" data-campo-acesso style="${ehAdmin ? "display:none;" : ""}">
+        <label class="rotulo-forte">O que esta pessoa pode acessar</label>
+        <div class="escolha-lista">
+          <label class="escolha-item escolha-item-grande">
+            <input type="checkbox" name="acesso_conversas" ${temAcesso ? "checked" : ""}>
+            <span class="escolha-texto">
+              <strong>Conversas de WhatsApp</strong>
+              <span class="escolha-ajuda">Marcado: atende os clientes normalmente, nos setores escolhidos abaixo.<br>
+              Desmarcado: <strong>só o chat interno</strong> — fala com a equipe, mas não vê nenhuma conversa de cliente. Dá pra liberar de novo a qualquer momento.</span>
+            </span>
+          </label>
+        </div>
+      </div>`;
+  }
+
   function htmlAvatar(u, tamanho = 34) {
     const estilo = `width:${tamanho}px;height:${tamanho}px;font-size:${Math.round(tamanho * 0.35)}px;`;
     if (u && u.foto_perfil) return `<img class="wpp-avatar wpp-avatar-foto" style="${estilo}" src="${u.foto_perfil}" alt="">`;
@@ -3456,7 +3494,7 @@
         <td style="position:relative;"><button type="button" class="wpp-avatar-botao" data-acao="abrir-seletor-foto-usuario" data-id="${u.id}" title="Trocar a foto de ${escapeHtml(u.nome)}">${htmlAvatar(u, 28)}</button><span class="wpp-online-bolinha ${u.online ? "wpp-online-sim" : "wpp-online-nao"}" title="${u.online ? "Online agora" : "Offline"}"></span></td>
         <td>${escapeHtml(u.nome)}</td>
         <td class="texto-suave">${escapeHtml(u.email)}</td>
-        <td class="texto-suave">${escapeHtml(u.setor || "—")}</td>
+        <td class="texto-suave">${(u.setores && u.setores.length) ? u.setores.map((s) => escapeHtml(s)).join(", ") : escapeHtml(u.setor || "—")}${u.acesso_conversas === false ? ' <span class="selo inativo" title="Não vê as conversas de clientes">só chat interno</span>' : ""}</td>
         <td>${u.admin ? '<span class="selo ativo">Admin</span>' : '<span class="selo inativo">Padrão</span>'}</td>
         <td>${u.ativo ? '<span class="selo ativo">Ativo</span>' : '<span class="selo bloqueado">Inativo</span>'}</td>
         <td class="texto-suave">${u.admin ? "sem restrição" : (u.horario_permitido && u.horario_permitido.length ? u.horario_permitido.map((j) => `${j.inicio}–${j.fim}`).join(", ") : "sem restrição")}</td>
@@ -3499,13 +3537,9 @@
             <button type="button" class="botao-mostrar-senha" data-acao="alternar-mostrar-senha" title="Mostrar/ocultar" tabindex="-1">👁️</button>
           </div></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="admin" data-acao-change="alternar-campo-setor"> Administrador (pode configurar a conexão e gerenciar usuários)</label></div>
-        <div class="campo campo-checkbox" data-campo-acesso><label><input type="checkbox" name="acesso_conversas" checked> Pode ver e atender as <strong>conversas de WhatsApp</strong> — desmarque para criar alguém só com o chat interno</label></div>
+        ${htmlEscolhaAcesso(true)}
         <div class="campo" data-campo-setor>
-          <label>Setor</label>
-          <select name="setor" required>
-            <option value="">Selecione…</option>
-            ${setores.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("")}
-          </select>
+          ${htmlEscolhaSetores(setores, [])}
         </div>
         <div class="campo">
           <label>Horário de login permitido (opcional — em branco = sem restrição)</label>
@@ -3533,14 +3567,10 @@
         <div class="campo"><label>Email</label><input name="email" type="email" required value="${escapeHtml(u.email)}"></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="admin" data-acao-change="alternar-campo-setor" ${u.admin ? "checked" : ""} ${souEu ? "disabled" : ""}> Administrador (pode configurar a conexão e gerenciar usuários)</label></div>
         ${souEu ? `<input type="hidden" name="admin" value="${u.admin ? "1" : ""}">` : ""}
+        ${htmlEscolhaAcesso(u.acesso_conversas !== false, u.admin)}
         <div class="campo" data-campo-setor style="${u.admin ? "display:none;" : ""}">
-          <label>Setor</label>
-          <select name="setor" ${u.admin ? "" : "required"}>
-            <option value="">Selecione…</option>
-            ${setores.map((s) => `<option value="${escapeHtml(s)}" ${u.setor === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
-          </select>
+          ${htmlEscolhaSetores(setores, u.setores || (u.setor ? [u.setor] : []))}
         </div>
-        <div class="campo campo-checkbox" data-campo-acesso style="${u.admin ? "display:none;" : ""}"><label><input type="checkbox" name="acesso_conversas" ${u.acesso_conversas !== false ? "checked" : ""}> Pode ver e atender as <strong>conversas de WhatsApp</strong> — desmarque para deixar esta pessoa só com o chat interno (dá pra liberar de novo quando quiser)</label></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="offline_forcado" ${u.offline_forcado ? "checked" : ""}> Marcar como offline manualmente (afastado/férias — some das listas de "online" e do menu automático mesmo se ele estiver logado)</label></div>
         <div class="campo">
           <label>Redefinir senha (opcional — deixe em branco pra não mexer)</label>
@@ -3771,10 +3801,9 @@
       case "fechar-codigos-2fa": return renderSeguranca();
       case "alternar-campo-setor": {
         const campo = document.querySelector("[data-campo-setor]");
-        const select = campo.querySelector("select");
         const ehAdmin = alvo.checked;
+        // Admin não tem fila de setor: ele vê a empresa inteira.
         campo.style.display = ehAdmin ? "none" : "";
-        select.required = !ehAdmin;
         // Administrador enxerga tudo por definição — deixar a caixa de
         // "pode ver as conversas" à mostra só criaria a impressão de que
         // dá pra tirar isso dele.
@@ -4797,7 +4826,7 @@
           method: "POST",
           body: {
             nome: dados.get("nome"), email: dados.get("email"), senha: dados.get("senha"), admin: !!dados.get("admin"),
-            setor: dados.get("setor") || undefined,
+            setores: dados.getAll("setores"),
             acesso_conversas: !!dados.get("acesso_conversas"),
             horario_permitido: _janelasDoFormulario(dados),
           },
@@ -4812,7 +4841,7 @@
           method: "PUT",
           body: {
             nome: dados.get("nome"), email: dados.get("email"), admin: !!dados.get("admin"),
-            setor: dados.get("setor") || undefined,
+            setores: dados.getAll("setores"),
             offline_forcado: !!dados.get("offline_forcado"),
             acesso_conversas: !!dados.get("acesso_conversas"),
           },

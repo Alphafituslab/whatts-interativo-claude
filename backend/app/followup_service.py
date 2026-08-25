@@ -158,17 +158,27 @@ def avaliar_conversa(conversa, padrao, excecoes, agora=None):
 SITUACOES_PENDENTES = {"atrasado", "agendado_vencido"}
 
 
-def listar(conn, empresa_id, usuario_id=None, setor=None, apenas_pendentes=False):
-    """Situação de follow-up das conversas abertas. usuario_id/setor
+def listar(conn, empresa_id, usuario_id=None, setores=None, apenas_pendentes=False):
+    """Situação de follow-up das conversas abertas. usuario_id/setores
     aplicam a mesma régua de visibilidade do resto do sistema: cada um
-    vê o que é dele, admin (usuario_id=None) vê tudo."""
+    vê o que é dele, admin (usuario_id=None) vê tudo.
+
+    setores é uma LISTA porque a mesma pessoa pode atender mais de um
+    setor do menu (ex.: Televendas e Financeiro)."""
     condicoes = ["ct.empresa_id = ?", "c.excluida_em IS NULL", "c.arquivada = 0", "c.status = 'aberta'"]
     params = [empresa_id]
     if usuario_id is not None:
-        condicoes.append(
-            "(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IS NOT NULL AND c.menu_setor = ?))"
-        )
-        params.extend([usuario_id, setor])
+        meus = [x for x in (setores or []) if x]
+        if meus:
+            marcadores = ",".join("?" * len(meus))
+            condicoes.append(
+                f"(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL "
+                f"AND c.menu_setor IS NOT NULL AND c.menu_setor IN ({marcadores})))"
+            )
+            params.extend([usuario_id, *meus])
+        else:
+            condicoes.append("c.atribuida_usuario_id = ?")
+            params.append(usuario_id)
 
     linhas = conn.execute(
         f"""
@@ -207,9 +217,9 @@ def listar(conn, empresa_id, usuario_id=None, setor=None, apenas_pendentes=False
     return resultado
 
 
-def resumo(conn, empresa_id, usuario_id=None, setor=None):
+def resumo(conn, empresa_id, usuario_id=None, setores=None):
     """Números do sino: o que precisa de ação, o que está agendado."""
-    itens = listar(conn, empresa_id, usuario_id, setor)
+    itens = listar(conn, empresa_id, usuario_id, setores)
     hoje = _now().date()
 
     def _mesmo_dia(iso):

@@ -26,17 +26,46 @@ def _online(u):
     return whatsapp_service.usuario_esta_online(ultimo, forcado)
 
 
-def _publico(u):
+def _publico(u, setores=None):
     horario = u["horario_permitido"] if "horario_permitido" in u.keys() else None
+    if setores is not None:
+        u = dict(u)
+        u["_setores"] = setores
     return {
         "id": u["id"], "nome": u["nome"], "email": u["email"], "admin": bool(u["admin"]), "ativo": bool(u["ativo"]),
         "foto_perfil": u["foto_perfil"] if "foto_perfil" in u.keys() else None,
         "horario_permitido": json.loads(horario) if horario else [],
         "setor": u["setor"] if "setor" in u.keys() else None,
+        # setores: todos os que a pessoa atende. "setor" (singular) é o
+        # principal, mantido pra onde só cabe um rótulo.
+        "setores": u["_setores"] if "_setores" in u.keys() else None,
         "offline_forcado": bool(u["offline_forcado"]) if "offline_forcado" in u.keys() else False,
         "acesso_conversas": bool(u["acesso_conversas"]) if "acesso_conversas" in u.keys() else True,
         "online": _online(u),
     }
+
+
+def _setores_do_pedido(conn, dados, admin):
+    """Aceita a lista nova (setores) e continua aceitando o campo antigo
+    (setor), pra não quebrar nada que ainda mande um só.
+
+    Admin não precisa de setor: ele vê a empresa toda, não uma fila."""
+    brutos = dados.get("setores")
+    if brutos is None:
+        um = (dados.get("setor") or "").strip()
+        brutos = [um] if um else []
+    if not isinstance(brutos, list):
+        raise ApiError("Formato de setores inválido.", status=400)
+    escolhidos = [(x or "").strip() for x in brutos if (x or "").strip()]
+    if admin:
+        return escolhidos  # pode ficar vazio
+    if not escolhidos:
+        raise ApiError("Escolha pelo menos um setor — é por ele que as conversas chegam nesta pessoa.", status=400)
+    validos = whatsapp_service.obter_setores(conn, g.empresa_id)
+    for nome in escolhidos:
+        if nome not in validos:
+            raise ApiError(f"O setor '{nome}' não existe.", status=400)
+    return escolhidos
 
 
 def _validar_horario_permitido(janelas):
@@ -101,7 +130,8 @@ def excluir_setor(setor_id):
 def listar():
     conn = get_db()
     rows = conn.execute("SELECT * FROM usuarios WHERE empresa_id = ? ORDER BY nome", (g.empresa_id,)).fetchall()
-    return jsonify([_publico(r) for r in rows])
+    mapa = whatsapp_service.setores_por_usuario(conn, [r["id"] for r in rows])
+    return jsonify([_publico(r, mapa.get(r["id"], [])) for r in rows])
 
 
 @bp.post("")
@@ -112,13 +142,11 @@ def criar():
     email = (dados.get("email") or "").strip().lower()
     senha = dados.get("senha") or ""
     admin = 1 if dados.get("admin") else 0
-    setor = (dados.get("setor") or "").strip()
 
     if not nome or not email or not senha:
         raise ApiError("Informe nome, email e senha.", status=400)
     conn = get_db()
-    if not admin and setor not in whatsapp_service.obter_setores(conn, g.empresa_id):
-        raise ApiError("Informe um setor válido.", status=400)
+    setores = _setores_do_pedido(conn, dados, admin)
     problemas = security.validar_politica_senha(senha)
     if problemas:
         raise ApiError(" ".join(problemas), status=400)
@@ -131,11 +159,12 @@ def criar():
     cur = conn.execute(
         "INSERT INTO usuarios (nome, email, senha_hash, admin, ativo, horario_permitido, setor, criado_em, empresa_id, acesso_conversas) "
         "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
-        (nome, email, security.hash_password(senha), admin, horario_permitido, setor or None, _now_iso(), g.empresa_id,
-         1 if (admin or dados.get("acesso_conversas", True)) else 0),
+        (nome, email, security.hash_password(senha), admin, horario_permitido, setores[0] if setores else None,
+         _now_iso(), g.empresa_id, 1 if (admin or dados.get("acesso_conversas", True)) else 0),
     )
+    whatsapp_service.definir_setores_do_usuario(conn, cur.lastrowid, setores)
     usuario = conn.execute("SELECT * FROM usuarios WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return jsonify(_publico(usuario)), 201
+    return jsonify(_publico(usuario, setores)), 201
 
 
 @bp.put("/<int:usuario_id>")
@@ -146,14 +175,12 @@ def editar(usuario_id):
     nome = (dados.get("nome") or "").strip()
     email = (dados.get("email") or "").strip().lower()
     admin = 1 if dados.get("admin") else 0
-    setor = (dados.get("setor") or "").strip()
     offline_forcado = 1 if dados.get("offline_forcado") else 0
 
     if not nome or not email:
         raise ApiError("Informe nome e email.", status=400)
     conn = get_db()
-    if not admin and setor not in whatsapp_service.obter_setores(conn, g.empresa_id):
-        raise ApiError("Informe um setor válido.", status=400)
+    setores = _setores_do_pedido(conn, dados, admin)
     if usuario_id == usuario_atual["id"] and not admin:
         raise ApiError("Você não pode remover seu próprio acesso de administrador.", status=400)
 
@@ -168,11 +195,13 @@ def editar(usuario_id):
     # criaria um estado contraditório (menu escondido, API liberada).
     acesso_conversas = 1 if (admin or dados.get("acesso_conversas")) else 0
     conn.execute(
-        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, setor = ?, offline_forcado = ?, acesso_conversas = ? WHERE id = ?",
-        (nome, email, admin, setor or None, offline_forcado, acesso_conversas, usuario_id),
+        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, offline_forcado = ?, acesso_conversas = ? WHERE id = ?",
+        (nome, email, admin, offline_forcado, acesso_conversas, usuario_id),
     )
+    # Regrava a lista e acerta o setor principal (usuarios.setor) junto.
+    whatsapp_service.definir_setores_do_usuario(conn, usuario_id, setores)
     usuario = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
-    return jsonify(_publico(usuario))
+    return jsonify(_publico(usuario, setores))
 
 
 @bp.put("/<int:usuario_id>/senha")
