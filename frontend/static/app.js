@@ -197,6 +197,7 @@
         switch (pagina) {
           case "whatsapp": return renderWhatsapp(param ? Number(param) : null);
           case "chat-interno": return renderChatInterno(param ? Number(param) : null);
+          case "_sem_acesso_conversas": break; // nunca casa; só pra deixar o switch legível
           case "agendamentos": return renderAgendamentos();
           case "lembretes": return renderLembretes();
           case "dashboard": return renderDashboard();
@@ -216,7 +217,7 @@
   // Layout
   // ---------------------------------------------------------------------
   const ITENS_MENU = [
-    { rota: "#/whatsapp", chave: "whatsapp", label: "Conversas", icone: "💬" },
+    { rota: "#/whatsapp", chave: "whatsapp", label: "Conversas", icone: "💬", exigeConversas: true },
     { rota: "#/chat-interno", chave: "chat-interno", label: "Chat interno", icone: "🗨️" },
     { rota: "#/agendamentos", chave: "agendamentos", label: "Agendamentos", icone: "🕒" },
     { rota: "#/lembretes", chave: "lembretes", label: "Lembretes", icone: "🔔" },
@@ -226,6 +227,15 @@
     { rota: "#/configuracao", chave: "configuracao", label: "Configuração", icone: "⚙️", admin: true },
     { rota: "#/usuarios", chave: "usuarios", label: "Usuários", icone: "👥", admin: true },
   ];
+
+  // Colaborador que só usa o chat interno. Esconder o menu é conforto;
+  // a trava de verdade é no servidor (ver o before_request em
+  // routes/whatsapp.py), senão bastaria digitar o endereço.
+  function _podeVerConversas() {
+    const u = state.usuarioAtual;
+    if (!u) return false;
+    return !!u.admin || u.acesso_conversas !== false;
+  }
 
   function htmlAvatar(u, tamanho = 34) {
     const estilo = `width:${tamanho}px;height:${tamanho}px;font-size:${Math.round(tamanho * 0.35)}px;`;
@@ -237,6 +247,7 @@
     const usuario = state.usuarioAtual;
     const linksHtml = ITENS_MENU
       .filter((it) => !it.admin || (usuario && usuario.admin))
+      .filter((it) => !it.exigeConversas || _podeVerConversas())
       .map((it) => {
         let extra = "";
         if (it.chave === "whatsapp") {
@@ -1223,6 +1234,9 @@
   }
 
   async function atualizarBadgesNaoLidos() {
+    // Sem acesso às conversas, não há o que contar — e chamar a API só
+    // renderia 403 a cada 4 segundos.
+    if (!_podeVerConversas()) return;
     try {
       // Conta pelas duas abas: "fila" é onde ficam as que estão
       // esperando resposta (é lá que a mensagem nova cai), e "minhas"
@@ -1956,6 +1970,14 @@
   }
 
   async function renderWhatsapp(conversaId) {
+    if (!_podeVerConversas()) {
+      // Chegou aqui digitando o endereço ou por um link antigo — manda
+      // pro chat interno em vez de deixar a tela quebrada carregando
+      // algo que o servidor vai recusar.
+      definirFlash("erro", "Seu acesso é só ao chat interno. Fale com um administrador se precisar das conversas.");
+      location.hash = "#/chat-interno";
+      return;
+    }
     _limparCitacaoSeTrocou(`cliente:${conversaId}`);
     _carregandoSeTrocouDeTela("whatsapp");
     let conversas;
@@ -3477,6 +3499,7 @@
             <button type="button" class="botao-mostrar-senha" data-acao="alternar-mostrar-senha" title="Mostrar/ocultar" tabindex="-1">👁️</button>
           </div></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="admin" data-acao-change="alternar-campo-setor"> Administrador (pode configurar a conexão e gerenciar usuários)</label></div>
+        <div class="campo campo-checkbox" data-campo-acesso><label><input type="checkbox" name="acesso_conversas" checked> Pode ver e atender as <strong>conversas de WhatsApp</strong> — desmarque para criar alguém só com o chat interno</label></div>
         <div class="campo" data-campo-setor>
           <label>Setor</label>
           <select name="setor" required>
@@ -3517,6 +3540,7 @@
             ${setores.map((s) => `<option value="${escapeHtml(s)}" ${u.setor === s ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
           </select>
         </div>
+        <div class="campo campo-checkbox" data-campo-acesso style="${u.admin ? "display:none;" : ""}"><label><input type="checkbox" name="acesso_conversas" ${u.acesso_conversas !== false ? "checked" : ""}> Pode ver e atender as <strong>conversas de WhatsApp</strong> — desmarque para deixar esta pessoa só com o chat interno (dá pra liberar de novo quando quiser)</label></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="offline_forcado" ${u.offline_forcado ? "checked" : ""}> Marcar como offline manualmente (afastado/férias — some das listas de "online" e do menu automático mesmo se ele estiver logado)</label></div>
         <div class="campo">
           <label>Redefinir senha (opcional — deixe em branco pra não mexer)</label>
@@ -3751,6 +3775,14 @@
         const ehAdmin = alvo.checked;
         campo.style.display = ehAdmin ? "none" : "";
         select.required = !ehAdmin;
+        // Administrador enxerga tudo por definição — deixar a caixa de
+        // "pode ver as conversas" à mostra só criaria a impressão de que
+        // dá pra tirar isso dele.
+        const acesso = document.querySelector("[data-campo-acesso]");
+        if (acesso) {
+          acesso.style.display = ehAdmin ? "none" : "";
+          if (ehAdmin) acesso.querySelector("input").checked = true;
+        }
         return;
       }
       case "enviar-foto-perfil": {
@@ -4766,6 +4798,7 @@
           body: {
             nome: dados.get("nome"), email: dados.get("email"), senha: dados.get("senha"), admin: !!dados.get("admin"),
             setor: dados.get("setor") || undefined,
+            acesso_conversas: !!dados.get("acesso_conversas"),
             horario_permitido: _janelasDoFormulario(dados),
           },
         });
@@ -4781,6 +4814,7 @@
             nome: dados.get("nome"), email: dados.get("email"), admin: !!dados.get("admin"),
             setor: dados.get("setor") || undefined,
             offline_forcado: !!dados.get("offline_forcado"),
+            acesso_conversas: !!dados.get("acesso_conversas"),
           },
         });
         const senhaNova = dados.get("senha_nova");

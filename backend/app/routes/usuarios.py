@@ -34,6 +34,7 @@ def _publico(u):
         "horario_permitido": json.loads(horario) if horario else [],
         "setor": u["setor"] if "setor" in u.keys() else None,
         "offline_forcado": bool(u["offline_forcado"]) if "offline_forcado" in u.keys() else False,
+        "acesso_conversas": bool(u["acesso_conversas"]) if "acesso_conversas" in u.keys() else True,
         "online": _online(u),
     }
 
@@ -128,8 +129,10 @@ def criar():
         raise ApiError("Já existe um usuário com este email.", status=409, codigo="email_duplicado")
 
     cur = conn.execute(
-        "INSERT INTO usuarios (nome, email, senha_hash, admin, ativo, horario_permitido, setor, criado_em, empresa_id) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
-        (nome, email, security.hash_password(senha), admin, horario_permitido, setor or None, _now_iso(), g.empresa_id),
+        "INSERT INTO usuarios (nome, email, senha_hash, admin, ativo, horario_permitido, setor, criado_em, empresa_id, acesso_conversas) "
+        "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+        (nome, email, security.hash_password(senha), admin, horario_permitido, setor or None, _now_iso(), g.empresa_id,
+         1 if (admin or dados.get("acesso_conversas", True)) else 0),
     )
     usuario = conn.execute("SELECT * FROM usuarios WHERE id = ?", (cur.lastrowid,)).fetchone()
     return jsonify(_publico(usuario)), 201
@@ -161,9 +164,12 @@ def editar(usuario_id):
     if duplicado:
         raise ApiError("Já existe um usuário com este email.", status=409, codigo="email_duplicado")
 
+    # Admin sempre enxerga as conversas — guardar 0 aqui pra um admin só
+    # criaria um estado contraditório (menu escondido, API liberada).
+    acesso_conversas = 1 if (admin or dados.get("acesso_conversas")) else 0
     conn.execute(
-        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, setor = ?, offline_forcado = ? WHERE id = ?",
-        (nome, email, admin, setor or None, offline_forcado, usuario_id),
+        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, setor = ?, offline_forcado = ?, acesso_conversas = ? WHERE id = ?",
+        (nome, email, admin, setor or None, offline_forcado, acesso_conversas, usuario_id),
     )
     usuario = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
     return jsonify(_publico(usuario))

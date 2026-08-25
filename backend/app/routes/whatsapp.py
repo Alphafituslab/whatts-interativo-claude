@@ -16,9 +16,57 @@ from flask import Blueprint, Response, g, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 from .. import whatsapp_service
-from ..context import ApiError, get_db, requires_admin, requires_auth
+from ..context import ApiError, ForbiddenError, get_current_user, get_db, requires_admin, requires_auth
 
 bp = Blueprint("whatsapp", __name__, url_prefix="/api/v1/whatsapp")
+
+# ============================================================
+# QUEM SÓ TEM CHAT INTERNO NÃO PASSA DAQUI
+#
+# A trava é no blueprint inteiro, não rota a rota, por um motivo
+# prático: rota nova nasce protegida por padrão. Esconder o menu não
+# bastaria — sem isso, bastava digitar o endereço (ou chamar a API) pra
+# ler o atendimento dos clientes.
+#
+# A lista abaixo é a exceção: coisas que moram neste arquivo mas servem
+# aos DOIS lados do sistema. Lembretes, agendamentos e etiquetas são
+# compartilhados com o chat interno (e cada consulta desses já filtra
+# pelo próprio usuário). Anexos idem: o chat interno guarda e serve os
+# arquivos dele por esta mesma pasta. Logo da empresa aparece na tela de
+# login, antes de existir sessão. Webhook é a Evolution API chamando de
+# fora, sem usuário nenhum.
+# ============================================================
+ENDPOINTS_LIBERADOS_SEM_CONVERSAS = {
+    "listar_tags", "criar_tag", "editar_tag", "excluir_tag", "contar_por_tag",
+    "listar_lembretes", "concluir_lembrete", "adiar_lembrete",
+    "listar_todas_agendadas", "cancelar_agendada", "editar_agendada",
+    "baixar_anexo", "baixar_logo",
+    "listar_emojis", "salvar_emoji", "excluir_emoji",
+    "listar_figurinhas", "salvar_figurinha", "excluir_figurinha",
+    "webhook", "status_resumido",
+}
+
+
+@bp.before_request
+def _barrar_sem_acesso_a_conversas():
+    endpoint = (request.endpoint or "").rsplit(".", 1)[-1]
+    if endpoint in ENDPOINTS_LIBERADOS_SEM_CONVERSAS:
+        return None
+    # Este gancho roda ANTES do @requires_auth da rota, então g.usuario_atual
+    # ainda não existe: é preciso resolver a sessão aqui. Se não houver
+    # sessão válida, sai calado — quem recusa (com 401) é o @requires_auth,
+    # que roda logo em seguida.
+    try:
+        usuario = get_current_user()
+    except ApiError:
+        return None
+    if usuario["admin"]:
+        return None
+    liberado = "acesso_conversas" not in usuario.keys() or usuario["acesso_conversas"]
+    if liberado:
+        return None
+    raise ForbiddenError("Seu acesso é só ao chat interno. Peça a um administrador para liberar as conversas.")
+
 
 PASTA_UPLOADS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "uploads")
 MAX_ANEXO_MB = 35

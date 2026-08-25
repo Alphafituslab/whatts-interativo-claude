@@ -105,6 +105,26 @@ def requires_auth(view_func):
     return wrapper
 
 
+def requires_conversas(view_func):
+    """Barra quem só tem acesso ao chat interno.
+
+    Não basta esconder o menu: sem esta trava, bastaria digitar o
+    endereço da conversa (ou chamar a API direto) pra ler o atendimento
+    dos clientes. Administrador passa sempre — quem administra vê tudo.
+    """
+    import functools
+
+    @functools.wraps(view_func)
+    def wrapper(*args, **kwargs):
+        usuario = get_current_user()
+        liberado = "acesso_conversas" not in usuario.keys() or usuario["acesso_conversas"]
+        if not usuario["admin"] and not liberado:
+            raise ForbiddenError("Seu acesso é só ao chat interno. Peça a um administrador para liberar as conversas.")
+        return view_func(*args, **kwargs)
+
+    return wrapper
+
+
 def requires_admin(view_func):
     import functools
 
