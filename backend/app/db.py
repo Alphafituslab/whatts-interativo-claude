@@ -50,6 +50,8 @@ SCHEMA_FILES = [
     "schema_035_indice_pulso.sql",
     "schema_036_fila_sem_menu.sql",
     "schema_037_grupos.sql",
+    "schema_038_reacoes.sql",
+    "schema_039_tipo_figurinha.sql",
 ]
 
 

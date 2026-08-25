@@ -1184,6 +1184,45 @@ def _processar_status_mensagem(conn, empresa_id: int, dados):
     return {"processado": True, "tipo": "status_mensagem", "quantidade": atualizados}
 
 
+def _extrair_reacao(dados: dict):
+    """Devolve (id_da_mensagem_reagida, emoji) quando o que chegou é uma
+    reação, ou None.
+
+    Reação é o emoji que a pessoa cola numa mensagem já existente. Ela
+    chega pelo mesmo evento das mensagens normais, mas não tem texto nem
+    mídia — era por isso que virava uma bolha em branco na conversa.
+    Emoji vazio significa que a pessoa REMOVEU a reação."""
+    conteudo = (dados.get("message") or {})
+    reacao = conteudo.get("reactionMessage")
+    if not isinstance(reacao, dict):
+        return None
+    alvo = (reacao.get("key") or {}).get("id")
+    if not alvo:
+        return None
+    return alvo, (reacao.get("text") or "")
+
+
+def _aplicar_reacao(conn, empresa_id: int, id_alvo: str, emoji: str):
+    """Cola (ou tira) a reação na mensagem que ela aponta. Se a mensagem
+    reagida não está aqui — o cliente pode reagir a algo muito antigo —,
+    simplesmente ignora: melhor não registrar nada do que inventar uma
+    mensagem só pra pendurar um emoji."""
+    linha = conn.execute(
+        "SELECT m.id FROM whatsapp_mensagens m "
+        "JOIN whatsapp_conversas c ON c.id = m.conversa_id "
+        "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+        "WHERE m.externo_id = ? AND ct.empresa_id = ?",
+        (id_alvo, empresa_id),
+    ).fetchone()
+    if linha is None:
+        return False
+    conn.execute(
+        "UPDATE whatsapp_mensagens SET reacao = ?, reacao_em = ? WHERE id = ?",
+        (emoji or None, _now_iso() if emoji else None, linha["id"]),
+    )
+    return True
+
+
 def _extrair_texto(mensagem: dict) -> str:
     conteudo = mensagem.get("message") or {}
     return (
@@ -1858,6 +1897,14 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         ).fetchone()
         if ja_existe:
             return {"processado": True, "tipo": "duplicada_ignorada"}
+
+    # Reação: atualiza a mensagem reagida e encerra. Antes disso caía no
+    # fluxo comum e virava uma bolha em branco no meio da conversa.
+    reacao = _extrair_reacao(dados)
+    if reacao is not None:
+        id_alvo, emoji = reacao
+        aplicada = _aplicar_reacao(conn, empresa_id, id_alvo, emoji)
+        return {"processado": True, "tipo": "reacao", "aplicada": aplicada}
 
     nome_contato = dados.get("pushName")
     contato = obter_ou_criar_contato(conn, empresa_id, telefone, nome_contato)

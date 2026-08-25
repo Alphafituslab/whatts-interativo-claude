@@ -514,7 +514,11 @@ def pulso():
             "WHERE m.conversa_id = ? AND ct.empresa_id = ? AND m.direcao = 'saida'",
             (conversa_id, g.empresa_id),
         ).fetchone()
-        status = f"{linha['total']}.{linha['lidas'] or 0}.{linha['entregues'] or 0}"
+        reagidas = conn.execute(
+            "SELECT COUNT(*) AS v FROM whatsapp_mensagens WHERE conversa_id = ? AND reacao IS NOT NULL",
+            (conversa_id,),
+        ).fetchone()["v"]
+        status = f"{linha['total']}.{linha['lidas'] or 0}.{linha['entregues'] or 0}.{reagidas}"
     return jsonify({"c": ultima_cliente, "i": ultima_interna, "v": vistos, "s": status})
 
 
@@ -2063,7 +2067,18 @@ def baixar_anexo(nome_arquivo):
     clicar no anexo, o navegador executaria esse script NO NOSSO
     endereço, com acesso à sessão do atendente (roubo de conta). O
     cabeçalho de sandbox e o nosniff cobrem o resto."""
-    inline = _classificar_tipo(nome_arquivo) in ("imagem", "video", "audio")
+    # PDF entra na lista do que abre dentro da página: é o documento que
+    # mais chega no atendimento, e obrigar a baixar cada um só pra dar
+    # uma olhada enche a pasta de downloads de arquivo que ninguém
+    # queria guardar.
+    #
+    # Continua valendo a regra de segurança: só formatos que o navegador
+    # exibe sem executar nada. Nada de .html ou .svg, que podem trazer
+    # script dentro — clicar num deles rodaria esse script NO NOSSO
+    # endereço, com acesso à sessão do atendente. O sandbox do CSP
+    # abaixo é a segunda barreira, não a única.
+    extensao = nome_arquivo.rsplit(".", 1)[-1].lower() if "." in nome_arquivo else ""
+    inline = _classificar_tipo(nome_arquivo) in ("imagem", "video", "audio") or extensao == "pdf"
     resp = send_from_directory(PASTA_UPLOADS, nome_arquivo, as_attachment=not inline)
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Content-Security-Policy"] = "sandbox; default-src 'none'"

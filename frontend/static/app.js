@@ -1840,7 +1840,7 @@
     if (m.tipo === "figurinha") return `
       <div class="wpp-bolha-midia-envolucro">
         <img class="wpp-bolha-figurinha" src="${urlImagemSegura(m.midia_url)}" alt="Figurinha">
-        <button type="button" class="wpp-bolha-baixar" data-acao="salvar-figurinha" data-url="${escapeHtml(m.midia_url)}" title="Guardar no banco de figurinhas da empresa">💾</button>
+        <button type="button" class="wpp-bolha-baixar wpp-salvar-figurinha" data-acao="salvar-figurinha" data-url="${escapeHtml(m.midia_url)}" title="Guardar esta figurinha para usar depois em qualquer conversa">💾 Salvar</button>
       </div>`;
     if (m.tipo === "imagem") return `
       <div class="wpp-bolha-midia-envolucro">
@@ -1861,10 +1861,18 @@
       </div>
       ${htmlTranscricao(m)}`;
     const rotulo = { documento: "📄 Documento" }[m.tipo] || "📎 Anexo";
+    const extensao = ((m.midia_url || "").split("?")[0].split(".").pop() || "").toLowerCase();
+    // PDF e imagens abrem na hora, sem baixar. Os outros formatos o
+    // navegador não sabe exibir, então ali "abrir" é baixar mesmo — e é
+    // melhor o botão dizer isso do que prometer o que não faz.
+    const abreNaTela = ["pdf", "png", "jpg", "jpeg", "gif", "webp"].includes(extensao);
     return `
       <div class="wpp-bolha-anexo-linha">
-        <a class="wpp-bolha-anexo" href="${urlImagemSegura(m.midia_url)}" target="_blank" rel="noopener" title="Abrir (PDFs abrem direto no navegador)">${rotulo} — visualizar</a>
-        <a class="wpp-bolha-baixar" href="${urlImagemSegura(m.midia_url)}" download title="Baixar">⬇</a>
+        <span class="wpp-bolha-anexo-rotulo">${rotulo}</span>
+        ${abreNaTela
+          ? `<a class="wpp-bolha-anexo" href="${urlImagemSegura(m.midia_url)}" target="_blank" rel="noopener" title="Abrir aqui, sem baixar">👁 Visualizar</a>`
+          : `<span class="wpp-bolha-anexo-aviso" title="Este formato o navegador não exibe — só dá pra baixar">só download</span>`}
+        <a class="wpp-bolha-baixar" href="${urlImagemSegura(m.midia_url)}" download title="Salvar o arquivo no computador">⬇ Salvar</a>
       </div>`;
   }
 
@@ -1973,6 +1981,7 @@
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
       ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
+      ${m.reacao ? `<span class="wpp-reacao" title="O cliente reagiu a esta mensagem${m.reacao_em ? " em " + fmtData(m.reacao_em) : ""}">${escapeHtml(m.reacao)}</span>` : ""}
       <div class="wpp-bolha-rodape">
         ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="0" title="Responder citando esta mensagem">↩️</button>` : ""}
         ${saida && !m.excluida_em && m.tipo === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem" data-id="${m.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
