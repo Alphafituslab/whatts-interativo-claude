@@ -83,6 +83,29 @@ def _tela_login(erro: str = None):
 # endereço do servidor e o caminho do arquivo do banco.
 SO_ADMIN = ("DBBrowserForSQLite-instalador.msi",)
 
+# Onde a compilação deixa o APK. Servido de lá direto, sem cópia: assim
+# uma recompilação já entrega a versão nova, sem ninguém lembrar de
+# copiar arquivo.
+APK_DIR = os.environ.get("WPP_APK_DIR", "/opt/apk-sejaalpha")
+APK_NOME = "app-release-signed.apk"
+
+
+@bp.get("/SejaAlpha.apk")
+def baixar_apk():
+    """App do Android. Fica atrás do mesmo login do resto da página —
+    é o sistema da empresa, não um app público."""
+    if _usuario_logado() is None:
+        return redirect("/downloads/")
+    caminho = os.path.join(APK_DIR, APK_NOME)
+    if not os.path.exists(caminho):
+        return redirect("/downloads/")
+    return send_file(caminho, mimetype="application/vnd.android.package-archive",
+                     as_attachment=True, download_name="SejaAlpha.apk", max_age=0)
+
+
+def apk_existe() -> bool:
+    return os.path.exists(os.path.join(APK_DIR, APK_NOME))
+
 
 @bp.get("/")
 @bp.get("")
@@ -92,6 +115,8 @@ def pagina():
         html, status = _tela_login()
         return html, status
     html = _pagina("index.html")
+    if not apk_existe():
+        html = re.sub(r"<!--APK-->.*?<!--/APK-->", "", html, flags=re.S)
     if not usuario["admin"]:
         # O bloco de ferramentas técnicas mostra IP do servidor, usuário
         # root e onde fica o arquivo do banco. Colaborador entra pra

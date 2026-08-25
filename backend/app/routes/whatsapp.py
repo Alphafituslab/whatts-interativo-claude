@@ -134,6 +134,24 @@ def conectar():
         if len(numero) in (10, 11) and not numero.startswith("55"):
             numero = "55" + numero
     conn = get_db()
+    # Descobre sozinho por onde a Evolution API deve devolver as
+    # mensagens.
+    #
+    # O padrão antigo (host.docker.internal) só funciona no Docker de
+    # Windows/Mac; no Linux o container não alcança esse nome, e o
+    # resultado era o pior tipo de falha: mandar mensagem funcionava,
+    # receber não — sem erro nenhum na tela, só silêncio.
+    #
+    # O endereço certo é justamente aquele pelo qual o administrador
+    # está acessando agora (o domínio público), então é ele que fica
+    # gravado quando ninguém configurou nada ainda.
+    if not (whatsapp_service.obter_configuracao(conn, g.empresa_id).get("webhook_base_url") or "").strip():
+        base = request.host_url.rstrip("/")
+        if base.startswith("https://"):
+            conn.execute(
+                "UPDATE configuracoes_whatsapp SET webhook_base_url = ? WHERE empresa_id = ?",
+                (base, g.empresa_id),
+            )
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
     resultado = whatsapp_service.conectar_instancia(conn, config, numero=numero)
     return jsonify(resultado)
