@@ -1008,6 +1008,133 @@
   // Primeiro clique começa a gravar, segundo para e envia. Serve pras
   // duas telas: quem chama diz pra onde mandar e o que redesenhar
   // depois.
+  // Gravar vídeo pela câmera do próprio aparelho e mandar pro cliente.
+  //
+  // Sempre com prévia: vídeo é o anexo mais fácil de sair errado
+  // (enquadramento, som, alguém passando atrás) e o mais constrangedor
+  // de mandar por engano. E tem limite de tempo — 2 minutos já passa
+  // do limite de anexo do WhatsApp e a gravação seria perdida no fim.
+  const SEGUNDOS_MAX_VIDEO = 120;
+  let _gravadorVideo = null;
+  let _videoChunks = [];
+  let _videoTimer = null;
+
+  async function _gravarVideo(url, aoTerminar) {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: true,
+      });
+    } catch (e) {
+      definirFlash("erro", "Não consegui acessar a câmera — verifique a permissão do navegador pra este site.");
+      return montarRota();
+    }
+
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🎥 Gravar vídeo</h3>
+      <div class="wpp-video-palco">
+        <video data-camera autoplay muted playsinline></video>
+        <span class="wpp-video-tempo" data-tempo hidden>● 0:00</span>
+      </div>
+      <div class="campo" style="margin-top:10px;">
+        <label class="rotulo-forte">Escrever junto (opcional)</label>
+        <textarea name="legenda" rows="2" placeholder="Ex.: olha como fica montado"></textarea>
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-fechar-camera>Cancelar</button>
+        <button type="button" class="botao" data-gravar>● Gravar</button>
+      </div>`);
+
+    const video = wrap.querySelector("[data-camera]");
+    const tempo = wrap.querySelector("[data-tempo]");
+    const botaoGravar = wrap.querySelector("[data-gravar]");
+    const botaoFechar = wrap.querySelector("[data-fechar-camera]");
+    video.srcObject = stream;
+
+    // A câmera fica ligada enquanto a janela existe — desligar sempre
+    // que ela sair, por qualquer caminho, senão a luz do aparelho fica
+    // acesa e a pessoa (com razão) acha que está sendo filmada.
+    const desligar = () => {
+      try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* já parou */ }
+      clearInterval(_videoTimer);
+    };
+    botaoFechar.addEventListener("click", () => { desligar(); fecharModais(); });
+    wrap.addEventListener("click", (e) => { if (e.target === wrap) desligar(); });
+
+    let gravando = false;
+    botaoGravar.addEventListener("click", () => {
+      if (gravando) { _gravadorVideo.stop(); return; }
+      gravando = true;
+      _videoChunks = [];
+      _gravadorVideo = new MediaRecorder(stream, { mimeType: _tipoDeVideoSuportado() });
+      _gravadorVideo.ondataavailable = (e) => { if (e.data.size > 0) _videoChunks.push(e.data); };
+      _gravadorVideo.onstop = () => {
+        gravando = false;
+        clearInterval(_videoTimer);
+        desligar();
+        const gravado = new Blob(_videoChunks, { type: _tipoDeVideoSuportado() });
+        fecharModais();
+        if (gravado.size < 2000) { definirFlash("erro", "Gravação muito curta — tente de novo."); return montarRota(); }
+        const nome = `video-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.webm`;
+        _previaVideoGravado(new File([gravado], nome, { type: gravado.type }), url, aoTerminar,
+                            wrap.querySelector('textarea[name="legenda"]').value.trim());
+      };
+      _gravadorVideo.start();
+      const inicio = Date.now();
+      tempo.hidden = false;
+      botaoGravar.textContent = "■ Parar";
+      botaoGravar.classList.add("botao-perigo-suave");
+      _videoTimer = setInterval(() => {
+        const seg = Math.floor((Date.now() - inicio) / 1000);
+        tempo.textContent = `● ${Math.floor(seg / 60)}:${String(seg % 60).padStart(2, "0")}`;
+        if (seg >= SEGUNDOS_MAX_VIDEO) _gravadorVideo.stop();
+      }, 250);
+    });
+  }
+
+  function _tipoDeVideoSuportado() {
+    // Nem todo navegador aceita os mesmos formatos; pega o primeiro que
+    // este aqui grava, em vez de assumir um e falhar em silêncio.
+    for (const t of ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"]) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return "video/webm";
+  }
+
+  function _previaVideoGravado(arquivo, url, aoTerminar, legendaInicial) {
+    const endereco = URL.createObjectURL(arquivo);
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🎥 Conferir antes de enviar</h3>
+      <div class="wpp-video-palco"><video src="${endereco}" controls playsinline></video></div>
+      <div class="campo" style="margin-top:10px;">
+        <label class="rotulo-forte">Escrever junto (opcional)</label>
+        <textarea name="legenda" rows="2" placeholder="Ex.: olha como fica montado"></textarea>
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Descartar</button>
+        <button type="button" class="botao" data-enviar-video>Enviar</button>
+      </div>`);
+    const legenda = wrap.querySelector('textarea[name="legenda"]');
+    legenda.value = legendaInicial || "";
+    wrap.querySelector("[data-enviar-video]").addEventListener("click", async (ev) => {
+      const botao = ev.currentTarget;
+      botao.disabled = true;
+      botao.textContent = "Enviando…";
+      try {
+        await _subirAnexo(url, arquivo, "video", legenda.value.trim());
+        URL.revokeObjectURL(endereco);
+        fecharModais();
+        if (aoTerminar) await aoTerminar();
+      } catch (erro) {
+        botao.disabled = false;
+        botao.textContent = "Enviar";
+        definirFlash("erro", erro.message || "Não consegui enviar o vídeo.");
+        montarRota();
+      }
+    });
+  }
+
   async function _alternarGravacaoAudio(botao, url, aoTerminar) {
     if (_gravador && _gravador.state === "recording") {
       _gravador.stop(); // o resto acontece no onstop, registrado abaixo
@@ -2233,6 +2360,7 @@
         </div>
         <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1"></textarea>
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
+        <button type="button" class="botao-icone" data-acao="gravar-video" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
         <button type="button" class="botao-icone" data-acao="abrir-agendar" data-id="${conversa.id}" title="Agendar envio">🕒</button>
         <button type="submit" class="botao wpp-botao-enviar" title="Enviar">➤</button>
       </form>`;
@@ -2741,6 +2869,7 @@
         </div>
         <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1"></textarea>
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio-interno" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
+        <button type="button" class="botao-icone" data-acao="gravar-video-interno" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
         <button type="submit" class="botao wpp-botao-enviar" title="Enviar">➤</button>
       </form>`;
   }
@@ -4082,6 +4211,14 @@
         document.querySelector(".barra-lateral").classList.toggle("aberta");
         document.querySelector(".fundo-menu-mobile").classList.toggle("visivel");
         return;
+      case "gravar-video": {
+        const id = Number(alvo.dataset.id);
+        return _gravarVideo(`${API}/whatsapp/conversas/${id}/anexo`, () => atualizarMensagensNoDom(id));
+      }
+      case "gravar-video-interno": {
+        const id = Number(alvo.dataset.id);
+        return _gravarVideo(`${API}/chat-interno/conversas/${id}/anexo`, () => atualizarMensagensInternasNoDom(id));
+      }
       case "sem-pendencia": {
         const id = Number(alvo.dataset.id);
         const desmarcar = alvo.dataset.desmarcar === "1";
