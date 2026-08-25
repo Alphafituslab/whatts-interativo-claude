@@ -1266,3 +1266,76 @@ nav { perspective: 800px; }
 }
 .wpp-aba-contador-novas { background: var(--primaria); color: #fff; }
 .wpp-aba-contador-urgente { background: var(--vermelho); color: #fff; }
+
+/* ============================================================
+   Encaminhar mensagem, telefone clicável e selo de encaminhada
+   ============================================================ */
+
+/* Telefone escrito no meio do texto: parece link, não botão — a bolha
+   já tem botões demais no rodapé e mais um retângulo ali competiria com
+   a leitura da mensagem. */
+.wpp-telefone-no-texto {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.wpp-telefone-no-texto:hover {
+  text-decoration-style: solid;
+  opacity: 0.75;
+}
+
+.wpp-bolha-encaminhada {
+  font-size: 11px;
+  opacity: 0.6;
+  font-style: italic;
+  margin-bottom: 3px;
+}
+
+.wpp-encaminhar-lista {
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid var(--borda);
+  border-radius: var(--raio-peq);
+  padding: 4px;
+}
+.wpp-encaminhar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--raio-peq);
+  cursor: pointer;
+}
+.wpp-encaminhar-item:hover { background: var(--fundo); }
+.wpp-encaminhar-item input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; }
+.wpp-encaminhar-nome { flex: 1; font-weight: 600; font-size: 14px; }
+.wpp-encaminhar-tel { font-size: 12px; opacity: 0.65; font-variant-numeric: tabular-nums; }
+
+/* Setor do menu sem ninguém cadastrado. Amarelo de aviso, não vermelho
+   de erro: não está quebrado, está desatendido — e quem configura é
+   quem resolve. */
+.selo-setor-vazio {
+  font-size: 12px;
+  white-space: nowrap;
+  padding: 3px 9px;
+  border-radius: var(--raio-pilula);
+  background: color-mix(in srgb, var(--amarelo) 20%, transparent);
+  color: var(--amarelo);
+  border: 1px solid color-mix(in srgb, var(--amarelo) 45%, transparent);
+  font-weight: 600;
+}
+.aviso-setor-vazio {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border-left: 3px solid var(--amarelo);
+  border-radius: 0 var(--raio-peq) var(--raio-peq) 0;
+  background: color-mix(in srgb, var(--amarelo) 12%, transparent);
+  font-size: 13.5px;
+  line-height: 1.55;
+}

@@ -610,6 +610,98 @@
     return wrap;
   }
 
+  // Encaminhar sem sair da conversa: escolhe um ou vários contatos, com
+  // busca (a lista de conversas é longa demais pra rolar procurando).
+  async function modalEncaminharMensagem(conversaId, mensagemId) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">📨 Encaminhar mensagem</h3>
+      <div class="campo">
+        <input data-busca-encaminhar placeholder="Procurar por nome ou número…" autofocus>
+      </div>
+      <div class="wpp-encaminhar-lista" data-lista-encaminhar><p class="dica">Carregando contatos…</p></div>
+      <div class="campo" style="margin-top:10px;">
+        <label class="rotulo-forte">Escrever algo antes (opcional)</label>
+        <input name="comentario" maxlength="300" placeholder="Ex.: segue o laudo que a Tabata mandou">
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-enviar-encaminhar disabled>Encaminhar</button>
+      </div>`);
+
+    const lista = wrap.querySelector("[data-lista-encaminhar]");
+    const botao = wrap.querySelector("[data-enviar-encaminhar]");
+    const escolhidos = new Map();
+
+    function atualizarBotao() {
+      botao.disabled = escolhidos.size === 0;
+      botao.textContent = escolhidos.size ? `Encaminhar para ${escolhidos.size}` : "Encaminhar";
+    }
+
+    function desenhar(contatos) {
+      if (!contatos.length) {
+        lista.innerHTML = `<p class="dica">Nenhum contato encontrado. Você também pode digitar um número novo na busca.</p>`;
+        return;
+      }
+      lista.innerHTML = contatos.map((c) => `
+        <label class="wpp-encaminhar-item">
+          <input type="checkbox" data-conversa="${c.conversa_id || ""}" data-telefone="${escapeHtml(c.telefone)}" ${escolhidos.has(c.telefone) ? "checked" : ""}>
+          <span class="wpp-encaminhar-nome">${escapeHtml(c.nome || c.telefone)}</span>
+          <span class="wpp-encaminhar-tel">${escapeHtml(c.telefone)}</span>
+        </label>`).join("");
+      lista.querySelectorAll("input[type=checkbox]").forEach((cx) => {
+        cx.addEventListener("change", () => {
+          const tel = cx.dataset.telefone;
+          if (cx.checked) escolhidos.set(tel, cx.dataset.conversa ? Number(cx.dataset.conversa) : null);
+          else escolhidos.delete(tel);
+          atualizarBotao();
+        });
+      });
+    }
+
+    async function buscar(termo) {
+      try {
+        const r = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(termo || "")}`);
+        desenhar((r.contatos || r || []).slice(0, 60));
+      } catch (e) {
+        lista.innerHTML = `<p class="dica">Não consegui carregar os contatos agora.</p>`;
+      }
+    }
+    buscar("");
+
+    let debounce = null;
+    wrap.querySelector("[data-busca-encaminhar]").addEventListener("input", (e) => {
+      clearTimeout(debounce);
+      const termo = e.target.value.trim();
+      debounce = setTimeout(() => buscar(termo), 250);
+    });
+
+    botao.addEventListener("click", async () => {
+      botao.disabled = true;
+      botao.textContent = "Encaminhando…";
+      const conversas = [...escolhidos.values()].filter((v) => v);
+      const telefones = [...escolhidos.entries()].filter(([, v]) => !v).map(([t]) => t);
+      try {
+        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens/${mensagemId}/encaminhar`, {
+          method: "POST",
+          body: { conversas, telefones, comentario: wrap.querySelector('input[name="comentario"]').value.trim() },
+        });
+        fecharModais();
+        const falhas = (r.resultados || []).filter((x) => !x.ok);
+        if (!falhas.length) {
+          definirFlash("ok", `Encaminhada para ${r.enviados} contato(s).`);
+        } else {
+          definirFlash(r.enviados ? "erro" : "erro",
+            `Encaminhada para ${r.enviados}. Não deu certo em: ` +
+            falhas.map((f) => `${f.nome || f.conversa_id} (${f.motivo || "falhou"})`).join("; "));
+        }
+      } catch (e) {
+        definirFlash("erro", e.message || "Não consegui encaminhar.");
+      }
+      montarRota();
+    });
+    return wrap;
+  }
+
   function abrirModal(html) {
     const wrap = document.createElement("div");
     wrap.className = "fundo-modal";
@@ -2244,6 +2336,29 @@
     return `<div class="wpp-bolha-apagada-selo">🗑️ Apagada${quem} · ${fmtData(m.excluida_em)}</div>`;
   }
 
+  // Telefone escrito dentro de uma mensagem vira botão.
+  //
+  // "liga pro 48 99867-8983" é uma das coisas mais comuns que um cliente
+  // manda, e até agora dava trabalho: selecionar, copiar, abrir nova
+  // conversa, colar. Aqui é um clique.
+  //
+  // Aceita os formatos que as pessoas realmente escrevem — com DDD entre
+  // parênteses, com traço, com espaços, com +55 — e ignora o que só
+  // parece telefone: CNPJ, valores, número de pedido. Por isso a regra é
+  // 10 ou 11 dígitos (fixo ou celular com DDD), ou 12/13 com o 55 na
+  // frente; qualquer outro tamanho fica como texto comum.
+  const RE_TELEFONE = /(\+?55[\s.-]?)?\(?\d{2}\)?[\s.-]?9?\d{4}[\s.-]?\d{4}/g;
+
+  function textoComTelefones(texto) {
+    const escapado = escapeHtml(texto);
+    return escapado.replace(RE_TELEFONE, (achado) => {
+      const digitos = achado.replace(/\D/g, "");
+      const nu = digitos.startsWith("55") ? digitos.slice(2) : digitos;
+      if (nu.length !== 10 && nu.length !== 11) return achado;
+      return `<button type="button" class="wpp-telefone-no-texto" data-acao="conversar-com-numero" data-telefone="${digitos}" title="Iniciar uma conversa com este número">${achado}</button>`;
+    });
+  }
+
   function htmlBolha(m) {
     const saida = m.direcao === "saida";
     const iconeStatus = { pendente: "🕓", enviada: "✓", entregue: "✓✓", lida: "✓✓", falhou: "⚠️", recebida: "" }[m.status] || "";
@@ -2254,11 +2369,13 @@
       ${htmlSeloApagada(m)}
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
-      ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
+      ${m.encaminhada_de ? `<div class="wpp-bolha-encaminhada">↪️ Encaminhada</div>` : ""}
+      ${m.texto ? `<div class="wpp-bolha-texto">${textoComTelefones(m.texto)}</div>` : ""}
       ${m.reacao ? `<span class="wpp-reacao" title="O cliente reagiu a esta mensagem${m.reacao_em ? " em " + fmtData(m.reacao_em) : ""}">${escapeHtml(m.reacao)}</span>` : ""}
       <div class="wpp-bolha-rodape">
         ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="abrir-reacao" data-id="${m.id}" title="Reagir a esta mensagem">😊</button>` : ""}
         ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="0" title="Responder citando esta mensagem">↩️</button>` : ""}
+        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="encaminhar-mensagem" data-id="${m.id}" title="Encaminhar para outros contatos">📨</button>` : ""}
         ${saida && !m.excluida_em && m.tipo === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem" data-id="${m.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
         ${htmlEditada(m)}
         ${saida && m.status === "falhou" ? `<button type="button" class="wpp-bolha-excluir" data-acao="reenviar-mensagem" data-id="${m.id}" title="Tentar enviar de novo">🔄</button>` : ""}
@@ -3563,11 +3680,16 @@
        <div class="cartao">
          <h3 style="margin-top:0;">Setores</h3>
          <p class="dica">Pra onde o cliente é direcionado no menu automático do WhatsApp, e o que cada atendente escolhe como área dele. Crie, renomeie ou exclua livremente — a ordem abaixo é a mesma ordem dos números que o cliente digita no menu.</p>
+         ${setoresDetalhado.some((s) => s.atendentes === 0) ? `
+           <p class="aviso-setor-vazio">⚠️ Os setores marcados abaixo estão no menu mas <strong>não têm ninguém cadastrado</strong>. O cliente que escolher um deles vai pra fila de <em>todos</em> os atendentes, porque não existe um dono. Ou cadastre alguém no setor (em Usuários), ou tire ele do menu.</p>` : ""}
          <ul style="list-style:none; padding:0; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
            ${setoresDetalhado.map((s, i) => `
              <li style="display:flex; align-items:center; gap:8px;">
                <span class="texto-suave" style="min-width:20px;">${i + 1}.</span>
                <input value="${escapeHtml(s.nome)}" data-acao-change="renomear-setor" data-setor-id="${s.id}" style="flex:1;">
+               ${s.atendentes === 0
+                 ? `<span class="selo-setor-vazio" title="Ninguém está cadastrado neste setor. O cliente que escolher este número cai na fila de todo mundo, porque não há dono.">⚠️ sem atendente</span>`
+                 : `<span class="texto-suave" style="font-size:12px; white-space:nowrap;">${s.atendentes} atendente${s.atendentes > 1 ? "s" : ""}</span>`}
                <button type="button" class="botao-icone" data-acao="excluir-setor" data-id="${s.id}" data-nome="${escapeHtml(s.nome)}" title="Excluir setor">🗑️</button>
              </li>`).join("")}
          </ul>
@@ -4639,6 +4761,26 @@
         fecharModais();
         definirFlash("ok", "Conversa devolvida pra fila — qualquer pessoa do setor já pode assumir.");
         return renderWhatsapp(null);
+      }
+      case "encaminhar-mensagem": {
+        const conversaId = Number(location.hash.split("/")[2]);
+        return modalEncaminharMensagem(conversaId, Number(alvo.dataset.id));
+      }
+      case "conversar-com-numero": {
+        // Já existe conversa com esse número? Abre ela. Se não, cai na
+        // janela de nova conversa com o número já preenchido — assim o
+        // clique nunca "não faz nada".
+        const tel = alvo.dataset.telefone;
+        try {
+          const r = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(tel)}`);
+          const achados = r.contatos || r || [];
+          const exato = achados.find((c) => (c.telefone || "").replace(/\D/g, "").endsWith(tel.slice(-8)));
+          if (exato && exato.conversa_id) {
+            state.escopoConversas = "todas";
+            return navegarPara(`#/whatsapp/${exato.conversa_id}`);
+          }
+        } catch (e) { /* sem contato: segue pra janela de nova conversa */ }
+        return modalNovaConversa(tel);
       }
       case "abrir-nova-conversa": modalNovaConversa(); return;
       case "abrir-criar-grupo": {

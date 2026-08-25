@@ -721,11 +721,11 @@ def listar_contatos():
         digitos = re.sub(r"\D", "", q)
         termo_tel = f"%{digitos}%" if len(digitos) >= 4 else termo
         rows = conn.execute(
-            "SELECT id, nome, telefone, foto_url, eh_grupo FROM whatsapp_contatos WHERE empresa_id = ? AND (nome LIKE ? OR telefone LIKE ?) ORDER BY nome LIMIT 200",
+            "SELECT id, nome, telefone, foto_url, eh_grupo, (SELECT c2.id FROM whatsapp_conversas c2 WHERE c2.contato_id = whatsapp_contatos.id AND c2.excluida_em IS NULL ORDER BY c2.id DESC LIMIT 1) AS conversa_id FROM whatsapp_contatos WHERE empresa_id = ? AND (nome LIKE ? OR telefone LIKE ?) ORDER BY nome LIMIT 200",
             (g.empresa_id, termo, termo_tel),
         ).fetchall()
     else:
-        rows = conn.execute("SELECT id, nome, telefone, foto_url, eh_grupo FROM whatsapp_contatos WHERE empresa_id = ? ORDER BY nome LIMIT 500", (g.empresa_id,)).fetchall()
+        rows = conn.execute("SELECT id, nome, telefone, foto_url, eh_grupo, (SELECT c2.id FROM whatsapp_conversas c2 WHERE c2.contato_id = whatsapp_contatos.id AND c2.excluida_em IS NULL ORDER BY c2.id DESC LIMIT 1) AS conversa_id FROM whatsapp_contatos WHERE empresa_id = ? ORDER BY nome LIMIT 500", (g.empresa_id,)).fetchall()
     apelidos = _apelidos_contatos()
     contatos = []
     for r in rows:
@@ -1348,6 +1348,145 @@ def marcar_sem_pendencia(conversa_id):
     )
     whatsapp_service.registrar_atividade(conn, usuario["id"], "sem_pendencia", conversa["telefone"], conversa_id)
     return jsonify({"ok": True, "sem_pendencia": True})
+
+
+@bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/encaminhar")
+@requires_auth
+def encaminhar_mensagem(conversa_id, mensagem_id):
+    """Repassa uma mensagem (texto ou arquivo) pra outros contatos.
+
+    O arquivo NÃO é baixado e reenviado: ele já está guardado aqui, então
+    o encaminhamento aponta pro mesmo arquivo. Era esse o trabalho manual
+    que isto elimina — baixar o PDF que a Tabata mandou, procurar na pasta
+    de downloads e anexar de novo pra cada cliente.
+
+    Aceita vários destinos de uma vez. Um destino que falhar não derruba
+    os outros: a resposta diz, um por um, o que foi e o que não foi.
+    """
+    usuario = g.usuario_atual
+    conn = get_db()
+    origem = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_visualizar(usuario, origem, conn):
+        raise ApiError(_recusa_atribuida(origem), status=403, codigo="sem_permissao",
+                       extra=_dados_do_dono(origem))
+
+    mensagem = conn.execute(
+        "SELECT * FROM whatsapp_mensagens WHERE id = ? AND conversa_id = ?", (mensagem_id, conversa_id)
+    ).fetchone()
+    if mensagem is None:
+        raise ApiError("Mensagem não encontrada.", status=404, codigo="nao_encontrado")
+    if mensagem["excluida_em"]:
+        raise ApiError("Esta mensagem foi apagada — não dá pra encaminhar.", status=400)
+
+    dados = request.get_json(silent=True) or {}
+    destinos_conversas = [int(x) for x in (dados.get("conversas") or [])]
+    telefones = [str(x).strip() for x in (dados.get("telefones") or []) if str(x).strip()]
+    comentario = (dados.get("comentario") or "").strip()
+    if not destinos_conversas and not telefones:
+        raise ApiError("Escolha pelo menos um contato pra encaminhar.", status=400)
+
+    # Telefone solto vira contato + conversa, igual "nova conversa" faz.
+    for bruto in telefones:
+        try:
+            tel = whatsapp_service.normalizar_telefone(bruto)
+        except ApiError:
+            continue
+        contato = whatsapp_service.obter_ou_criar_contato(conn, g.empresa_id, tel)
+        existente = conn.execute(
+            "SELECT id FROM whatsapp_conversas WHERE contato_id = ? ORDER BY id DESC LIMIT 1", (contato["id"],)
+        ).fetchone()
+        if existente:
+            destinos_conversas.append(existente["id"])
+        else:
+            nova, _ = whatsapp_service.obter_ou_criar_conversa(conn, contato["id"])
+            destinos_conversas.append(nova["id"])
+
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    agora = _now_iso()
+    resultados = []
+    for destino_id in dict.fromkeys(destinos_conversas):   # sem repetir destino
+        try:
+            destino = _carregar_conversa(conn, g.empresa_id, destino_id)
+        except ApiError:
+            resultados.append({"conversa_id": destino_id, "ok": False, "motivo": "Conversa não encontrada."})
+            continue
+        if destino["atribuida_usuario_id"] is not None and not _pode_agir(usuario, destino):
+            resultados.append({"conversa_id": destino_id, "ok": False,
+                               "nome": destino["contato_nome"] or destino["telefone"],
+                               "motivo": _recusa_atribuida(destino)})
+            continue
+        if destino["atribuida_usuario_id"] is None:
+            whatsapp_service.atribuir_conversa(conn, destino_id, usuario["id"], usuario["id"])
+
+        # O comentário vai ANTES do encaminhamento, como mensagem própria:
+        # chegar um documento sem contexto nenhum é o que faz o cliente
+        # responder "o que é isso?".
+        if comentario:
+            _mandar_texto_simples(conn, config, destino, usuario, comentario, agora)
+
+        tipo = mensagem["tipo"]
+        legenda = mensagem["texto"] or None
+        try:
+            if mensagem["midia_url"]:
+                url_completa = whatsapp_service.url_publica(config, mensagem["midia_url"])
+                nome_arquivo = (mensagem["midia_url"] or "").rsplit("/", 1)[-1]
+                if tipo == "figurinha":
+                    externo_id = whatsapp_service.enviar_figurinha(config, destino["telefone"], url_completa)
+                else:
+                    externo_id = whatsapp_service.enviar_midia(
+                        config, destino["telefone"], tipo, url_completa, nome_arquivo, legenda)
+            else:
+                if not legenda:
+                    resultados.append({"conversa_id": destino_id, "ok": False, "motivo": "Mensagem vazia."})
+                    continue
+                externo_id = whatsapp_service.enviar_texto(config, destino["telefone"], legenda)
+            status_msg, erro = "enviada", None
+        except ApiError as e:
+            externo_id, status_msg, erro = None, "falhou", e.mensagem
+
+        conn.execute(
+            """
+            INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id,
+                                            usuario_id, status, erro, criado_em, encaminhada_de)
+            VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (destino_id, tipo, legenda, mensagem["midia_url"], externo_id, usuario["id"],
+             status_msg, erro, agora, mensagem_id),
+        )
+        preview = legenda or {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento",
+                              "audio": "🎵 Áudio", "figurinha": "🌟 Figurinha"}.get(tipo, "Mensagem")
+        conn.execute(
+            "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, "
+            "ultima_mensagem_preview = ?, ultima_msg_operador_em = ? WHERE id = ?",
+            (agora, f"↪️ {preview}"[:120], agora, destino_id),
+        )
+        resultados.append({"conversa_id": destino_id, "ok": status_msg == "enviada",
+                           "nome": destino["contato_nome"] or destino["telefone"],
+                           "motivo": erro})
+
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "mensagem_encaminhada",
+        f"msg {mensagem_id} -> {len(resultados)} destino(s)", conversa_id
+    )
+    enviados = sum(1 for r in resultados if r["ok"])
+    return jsonify({"ok": enviados > 0, "enviados": enviados, "resultados": resultados})
+
+
+def _mandar_texto_simples(conn, config, conversa, usuario, texto, agora):
+    """Grava e envia um texto numa conversa já carregada. Usado pelo
+    encaminhamento pra mandar o comentário antes do anexo."""
+    try:
+        externo_id = whatsapp_service.enviar_texto(config, conversa["telefone"], texto)
+        status_msg, erro = "enviada", None
+    except ApiError as e:
+        externo_id, status_msg, erro = None, "falhou", e.mensagem
+    conn.execute(
+        """
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, usuario_id, status, erro, criado_em)
+        VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?, ?)
+        """,
+        (conversa["id"], texto, externo_id, usuario["id"], status_msg, erro, agora),
+    )
 
 
 @bp.post("/conversas/<int:conversa_id>/pedir-liberacao")

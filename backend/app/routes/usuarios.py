@@ -96,9 +96,19 @@ def listar_setores_detalhado():
     dropdowns de seleção em todo o resto do sistema)."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT id, nome FROM whatsapp_setores WHERE empresa_id = ? ORDER BY ordem, id", (g.empresa_id,)
+        """
+        SELECT s.id, s.nome,
+               (SELECT COUNT(*) FROM usuario_setores us
+                  JOIN usuarios u ON u.id = us.usuario_id
+                 WHERE us.setor = s.nome AND u.ativo = 1
+                   AND u.empresa_id = s.empresa_id AND u.acesso_conversas = 1) AS atendentes
+        FROM whatsapp_setores s
+        WHERE s.empresa_id = ?
+        ORDER BY s.ordem, s.id
+        """,
+        (g.empresa_id,),
     ).fetchall()
-    return jsonify([{"id": r["id"], "nome": r["nome"]} for r in rows])
+    return jsonify([{"id": r["id"], "nome": r["nome"], "atendentes": r["atendentes"]} for r in rows])
 
 
 @bp.post("/setores")
