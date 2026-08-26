@@ -1886,6 +1886,26 @@
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
+  // Faixa no alto da tela enquanto o WhatsApp está fora do ar. Some
+  // sozinha quando reconecta.
+  function _faixaDesconectado(status) {
+    const caiu = status && status !== "conectado";
+    let faixa = document.querySelector("[data-wpp-faixa-caiu]");
+    if (!caiu) { if (faixa) faixa.remove(); return; }
+    if (faixa) return;
+
+    const souAdmin = !!(state.usuarioAtual && state.usuarioAtual.admin);
+    faixa = document.createElement("div");
+    faixa.className = "wpp-faixa-caiu";
+    faixa.setAttribute("data-wpp-faixa-caiu", "");
+    faixa.innerHTML = `
+      <span><strong>WhatsApp desconectado.</strong> Nenhuma mensagem entra nem sai enquanto isso — o que você enviar agora não chega ao cliente.</span>
+      ${souAdmin
+        ? `<a class="botao pequeno" href="#/configuracao">Reconectar</a>`
+        : `<span class="wpp-faixa-caiu-dica">Avise um administrador para reconectar.</span>`}`;
+    document.body.appendChild(faixa);
+  }
+
   async function atualizarBolinhaStatusGlobal() {
     const bolinha = document.querySelector("[data-wpp-status-bolinha]");
     const texto = document.querySelector("[data-wpp-status-texto]");
@@ -1895,6 +1915,7 @@
       const [classe, rotulo] = ROTULO_STATUS_WHATSAPP[resp.status_conexao] || ["desconhecido", "— Status desconhecido"];
       bolinha.className = "wpp-status-bolinha wpp-status-" + classe;
       texto.textContent = rotulo;
+      _faixaDesconectado(resp.status_conexao);
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
