@@ -5620,10 +5620,38 @@
             const r = await chamarApi(`/whatsapp/grupos/${id}/participantes`, {
               method: "POST", body: { telefones: [...escolhidos] },
             });
+            const recusados = (r.resultados || []).filter((x) => !x.entrou);
+            if (!recusados.length) {
+              fecharModais();
+              definirFlash("ok", `${r.adicionados} pessoa(s) entrou(entraram) no grupo.`);
+              return renderWhatsapp(id);
+            }
+            // Alguém não entrou: mostra QUEM e POR QUÊ, e entrega o link
+            // de convite quando é o caso de a pessoa ter que entrar
+            // sozinha. Fechar a janela aqui esconderia a informação.
             fecharModais();
-            definirFlash("ok", `${r.adicionados} pessoa(s) adicionada(s) ao grupo.`);
+            abrirModal(`
+              <h3 style="margin-top:0;">Nem todo mundo entrou</h3>
+              ${r.adicionados ? `<p class="dica">${r.adicionados} pessoa(s) entrou(entraram) normalmente.</p>` : ""}
+              <div class="wpp-encaminhar-lista">
+                ${recusados.map((x) => `
+                  <div class="wpp-encaminhar-item" style="display:block;">
+                    <strong>${escapeHtml(_telefoneBonito(x.telefone))}</strong>
+                    <div class="texto-suave" style="font-size:12.5px;">${escapeHtml(x.motivo || "")}</div>
+                  </div>`).join("")}
+              </div>
+              ${r.link_convite ? `
+                <div class="campo" style="margin-top:12px;">
+                  <label class="rotulo-forte">Link de convite do grupo</label>
+                  <input value="${escapeHtml(r.link_convite)}" readonly onclick="this.select()">
+                  <span class="dica">Mande este link pra pessoa — ela entra sozinha, sem precisar de permissão.</span>
+                </div>` : ""}
+              <div class="rodape-modal">
+                <button type="button" class="botao" data-acao="fechar-modal">Entendi</button>
+              </div>`);
           } catch (e) {
             definirFlash("erro", e.message || "Não consegui adicionar. Só quem é administrador do grupo no WhatsApp pode incluir gente.");
+            fecharModais();
           }
           return renderWhatsapp(id);
         });

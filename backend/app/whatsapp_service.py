@@ -757,7 +757,49 @@ def adicionar_ao_grupo(config, jid: str, participantes: list):
         params={"groupJid": jid}, json={"action": "add", "participants": numeros},
         headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
     )
-    return _tratar_resposta(resp)
+    corpo = _tratar_resposta(resp)
+
+    # O HTTP volta 201 mesmo quando o WhatsApp recusou a pessoa. Quem diz
+    # a verdade é o status de cada participante, aqui dentro.
+    saida = []
+    for item in (corpo.get("updateParticipants") or []):
+        codigo = str(item.get("status") or "")
+        numero = (item.get("jid") or "").split("@")[0]
+        saida.append({
+            "telefone": numero,
+            "entrou": codigo == "200",
+            "codigo": codigo,
+            "motivo": MOTIVOS_ADICIONAR_GRUPO.get(codigo, f"O WhatsApp recusou (código {codigo})."),
+        })
+    return saida
+
+
+# O que cada código do WhatsApp quer dizer, em português. Sem isso a
+# pessoa recebia "erro 403" e não tinha o que fazer com a informação.
+MOTIVOS_ADICIONAR_GRUPO = {
+    "200": "Entrou no grupo.",
+    "403": "Esta pessoa só aceita ser adicionada a grupos por quem está na agenda dela. "
+           "Mande o link de convite do grupo pra ela entrar sozinha.",
+    "408": "Esta pessoa saiu do grupo há pouco tempo — o WhatsApp não deixa readicionar tão cedo. "
+           "Mande o link de convite.",
+    "409": "Esta pessoa já está no grupo.",
+    "401": "Esta pessoa bloqueou o nosso número.",
+    "451": "Este número não tem WhatsApp.",
+}
+
+
+def link_de_convite_do_grupo(config, jid: str):
+    """Link do grupo, pra mandar pra quem o WhatsApp não deixou adicionar
+    direto — que é o caminho normal quando a pessoa não tem a gente na
+    agenda dela."""
+    _exigir_configurado(config)
+    requests = _requests()
+    resp = requests.get(
+        f"{config['evolution_url']}/group/inviteCode/{config['instancia_nome']}",
+        params={"groupJid": jid if "@" in jid else f"{_somente_digitos(jid)}@g.us"},
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    return (_tratar_resposta(resp) or {}).get("inviteUrl")
 
 
 def _numero_da_instancia(config):
@@ -1362,16 +1404,29 @@ def excluir_mensagem(conn, config, mensagem: dict, excluida_por: int = None) -> 
                 (mensagem["conversa_id"],),
             ).fetchone()
             if conversa:
+                # Grupo é <id>@g.us, pessoa é <numero>@s.whatsapp.net.
+                # Montar sempre como pessoa fazia o apagar de mensagem de
+                # grupo nunca chegar ao WhatsApp: sumia da nossa tela e
+                # continuava no celular de todo mundo lá dentro.
+                destino = destino_whatsapp(conversa["telefone"])
+                remote_jid = destino if "@" in destino else f"{destino}@s.whatsapp.net"
                 resp = requests.delete(
                     f"{config['evolution_url']}/chat/deleteMessageForEveryone/{config['instancia_nome']}",
                     json={
                         "id": mensagem["externo_id"],
-                        "remoteJid": f"{conversa['telefone']}@s.whatsapp.net",
+                        "remoteJid": remote_jid,
                         "fromMe": True,
                     },
                     headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
                 )
-                apagada_no_whatsapp = resp.status_code < 400
+                # Só conta como apagada lá se o WhatsApp devolveu a chave
+                # da mensagem apagada. HTTP 2xx sozinho não garante nada
+                # aqui — a Evolution responde 201 até quando recusa.
+                try:
+                    corpo = resp.json() if resp.status_code < 400 else {}
+                except ValueError:
+                    corpo = {}
+                apagada_no_whatsapp = bool(corpo.get("key") or corpo.get("status") == "PENDING")
         except Exception:
             pass
     conn.execute("UPDATE whatsapp_mensagens SET excluida_em = ?, excluida_por = ? WHERE id = ?", (_now_iso(), excluida_por, mensagem["id"]))

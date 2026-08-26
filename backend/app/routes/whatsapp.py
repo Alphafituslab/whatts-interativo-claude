@@ -1066,9 +1066,26 @@ def adicionar_participantes(conversa_id):
     if not telefones:
         raise ApiError("Escolha pelo menos uma pessoa.", status=400)
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
-    whatsapp_service.adicionar_ao_grupo(config, f"{contato['telefone']}@g.us", telefones)
-    whatsapp_service.registrar_atividade(conn, usuario["id"], "grupo_participantes", contato["nome"], conversa_id)
-    return jsonify({"ok": True, "adicionados": len(telefones)})
+    jid = f"{contato['telefone']}@g.us"
+    resultados = whatsapp_service.adicionar_ao_grupo(config, jid, telefones)
+    entraram = [r for r in resultados if r["entrou"]]
+
+    # Quem o WhatsApp recusou por privacidade só entra por convite. Em vez
+    # de dizer "não deu", entrega o link pronto pra mandar pra pessoa.
+    convite = None
+    if any(not r["entrou"] and r["codigo"] in ("403", "408") for r in resultados):
+        try:
+            convite = whatsapp_service.link_de_convite_do_grupo(config, jid)
+        except ApiError:
+            convite = None
+
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "grupo_participantes",
+        f"{contato['nome']}: {len(entraram)} de {len(resultados)} entraram", conversa_id)
+    if resultados:
+        whatsapp_service.atualizar_membros_do_grupo(conn, config, contato["id"], jid, forcar=True)
+    return jsonify({"ok": True, "adicionados": len(entraram),
+                    "resultados": resultados, "link_convite": convite})
 
 
 @bp.post("/contatos/importar")
