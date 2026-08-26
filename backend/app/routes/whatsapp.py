@@ -261,7 +261,11 @@ def _conversa_para_json(row, tags=None):
     d["tags"] = tags or []
     d["sugerir_encerrar"] = _sugerir_encerrar(row)
     if d.get("eh_grupo"):
-        d["participantes"] = _participantes_do_grupo(get_db(), row["id"])
+        conn = get_db()
+        d["participantes"] = _participantes_do_grupo(conn, row["id"])
+        d["membros_whatsapp"] = conn.execute(
+            "SELECT COUNT(*) AS n FROM whatsapp_grupo_membros WHERE contato_id = ?", (row["contato_id"],)
+        ).fetchone()["n"]
     d["horas_sugerir_encerrar"] = HORAS_SUGERIR_ENCERRAR
     # Nome que ESTE usuário deu pro contato ganha da versão compartilhada
     # (o nome de cadastro segue guardado, só não é o que ele vê).
@@ -577,6 +581,12 @@ def listar_conversas():
     condicoes.append("c.excluida_em IS NULL")
     condicoes.append("c.arquivada = 1" if incluir_arquivadas else "c.arquivada = 0")
 
+    # Encerrada sai da frente. Continua na busca, no histórico e na aba
+    # "Todas" do administrador — e volta pra cá sozinha se o cliente
+    # escrever de novo, porque a mensagem que chega reabre a conversa.
+    if escopo in ("minhas", "fila", "sem_menu") and not incluir_arquivadas:
+        condicoes.append("c.status = 'aberta'")
+
     # Filtro por etiqueta. Vale junto com a aba escolhida (dá pra ver só
     # os "Orçamento enviado" que estão na fila, por exemplo).
     tag_id = request.args.get("tag_id")
@@ -744,7 +754,8 @@ def contagem_abas():
     usuario = g.usuario_atual
     conn = get_db()
     base = ("FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
-            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0")
+            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0 "
+            "AND c.status = 'aberta'")
     if usuario["admin"]:
         visivel, pv = "", []
     else:
@@ -780,7 +791,14 @@ def contagem_abas():
         # não mostrava — a aba piscava "1" e abria vazia.
         "fila": contar("AND c.atribuida_usuario_id IS NULL AND ct.eh_grupo = 0"),
         "sem_menu": contar("AND c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL AND ct.eh_grupo = 0"),
-        "todas": conn.execute(f"SELECT COUNT(*) AS n {base}", (g.empresa_id,)).fetchone()["n"] if usuario["admin"] else None,
+        # "Todas" é a visão de supervisão: conta encerrada também, porque
+        # a lista dela mostra encerrada. As outras três contam só aberta.
+        "todas": conn.execute(
+            "SELECT COUNT(*) AS n FROM whatsapp_conversas c "
+            "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0",
+            (g.empresa_id,),
+        ).fetchone()["n"] if usuario["admin"] else None,
     })
 
 

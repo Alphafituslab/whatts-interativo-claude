@@ -1609,6 +1609,9 @@ def _autor_da_mensagem_de_grupo(dados: dict, chave: dict, conn=None, empresa_id=
             ).fetchone()
         if membro is not None:
             telefone = membro["telefone"] or telefone
+            # Nome aprendido de mensagens anteriores deste mesmo grupo:
+            # é o que faz a pessoa continuar tendo nome quando o WhatsApp
+            # manda a mensagem sem o pushName.
             nome = nome or membro["nome"]
 
     if telefone and not nome and conn is not None and empresa_id is not None:
@@ -1621,6 +1624,22 @@ def _autor_da_mensagem_de_grupo(dados: dict, chave: dict, conn=None, empresa_id=
                 nome = achado["nome"]
         except Exception:
             pass
+
+    # Aprende o nome: se a pessoa se identificou agora, guarda pra
+    # sempre naquele grupo. Não vira contato da empresa — um grupo de 254
+    # pessoas encheria a agenda de gente que ninguém atende.
+    if nome and bruto and conn is not None and contato_grupo_id is not None:
+        try:
+            conn.execute(
+                "INSERT INTO whatsapp_grupo_membros (contato_id, lid, telefone, nome, atualizado_em) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(contato_id, lid) DO UPDATE SET nome = excluded.nome, "
+                "telefone = COALESCE(whatsapp_grupo_membros.telefone, excluded.telefone), "
+                "atualizado_em = excluded.atualizado_em",
+                (contato_grupo_id, bruto, telefone, nome, _now_iso()),
+            )
+        except Exception:
+            pass   # aprender o nome nunca pode derrubar o recebimento
 
     if not telefone and not nome:
         try:

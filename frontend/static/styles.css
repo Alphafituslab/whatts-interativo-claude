@@ -1436,3 +1436,8 @@ nav { perspective: 800px; }
 }
 .wpp-limites .campo { margin: 0; }
 .wpp-limites .dica { display: block; margin-top: 4px; }
+
+/* Participante que o WhatsApp não identificou. Aparece em itálico e
+   apagado de propósito: é melhor dizer "não identificado" do que deixar
+   a mensagem parecendo que veio do nada. */
+.wpp-autor-desconhecido { font-style: italic; opacity: 0.7; font-weight: 400; }
