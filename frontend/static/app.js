@@ -46,6 +46,33 @@
       .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   }
 
+  // Mantém o texto seguro e transforma URLs http(s) em links clicáveis.
+  // A separação por trechos evita inserir HTML vindo da mensagem.
+  function htmlTextoComLinks(texto) {
+    const valor = String(texto ?? "");
+    const regex = /https?:\/\/[^\s<>"']+/gi;
+    let html = "";
+    let inicio = 0;
+
+    for (const encontrado of valor.matchAll(regex)) {
+      html += escapeHtml(valor.slice(inicio, encontrado.index));
+
+      let url = encontrado[0];
+      let pontuacaoFinal = "";
+      while (/[.,;:!?)]$/.test(url)) {
+        pontuacaoFinal = url.slice(-1) + pontuacaoFinal;
+        url = url.slice(0, -1);
+      }
+
+      const urlSegura = escapeHtml(url);
+      html += `<a href="${urlSegura}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;overflow-wrap:anywhere;">${urlSegura}</a>`;
+      html += escapeHtml(pontuacaoFinal);
+      inicio = encontrado.index + encontrado[0].length;
+    }
+
+    return html + escapeHtml(valor.slice(inicio));
+  }
+
   function fmtNomeBackup(nome) {
     const m = nome.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
     if (!m) return nome;
@@ -2197,7 +2224,7 @@
       ${htmlSeloApagada(m)}
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
-      ${m.texto ? `<div class="wpp-bolha-texto">${escapeHtml(m.texto)}</div>` : ""}
+      ${m.texto ? `<div class="wpp-bolha-texto">${htmlTextoComLinks(m.texto)}</div>` : ""}
       ${m.reacao ? `<span class="wpp-reacao" title="O cliente reagiu a esta mensagem${m.reacao_em ? " em " + fmtData(m.reacao_em) : ""}">${escapeHtml(m.reacao)}</span>` : ""}
       <div class="wpp-bolha-rodape">
         ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="abrir-reacao" data-id="${m.id}" title="Reagir a esta mensagem">😊</button>` : ""}
