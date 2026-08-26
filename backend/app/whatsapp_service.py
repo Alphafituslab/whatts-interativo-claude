@@ -16,6 +16,7 @@ import csv
 import datetime
 import io
 import json
+import sqlite3
 import logging
 import mimetypes
 import os
@@ -518,6 +519,30 @@ def _registrar_webhook(config):
         )
     except Exception:
         pass
+
+
+def editar_mensagem_whatsapp(config, telefone: str, externo_id: str, texto: str):
+    """Corrige, no celular do cliente, uma mensagem que já enviamos.
+
+    O WhatsApp só aceita editar mensagem recente (cerca de 15 minutos) e
+    só as nossas. Passado disso ele recusa — quem chama trata o erro e
+    avisa que o cliente ficou com o texto original."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento.", status=400)
+    destino = destino_whatsapp(telefone)
+    remote_jid = destino if "@" in destino else f"{destino}@s.whatsapp.net"
+    requests = _requests()
+    resp = requests.post(
+        f"{config['evolution_url']}/chat/updateMessage/{config['instancia_nome']}",
+        json={
+            "number": destino.split("@")[0],
+            "key": {"remoteJid": remote_jid, "fromMe": True, "id": externo_id},
+            "text": texto,
+        },
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    return _tratar_resposta(resp)
 
 
 def reagir_mensagem(config, telefone: str, externo_id: str, emoji: str, minha: bool = False):
@@ -1878,10 +1903,21 @@ def obter_ou_criar_contato(conn, empresa_id: int, telefone: str, nome: str = Non
                              (nome.strip(), _now_iso(), row["id"]))
         return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (row["id"],)).fetchone())
     agora = _now_iso()
-    cur = conn.execute(
-        "INSERT INTO whatsapp_contatos (empresa_id, telefone, nome, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)",
-        (empresa_id, telefone, nome, agora, agora),
-    )
+    try:
+        cur = conn.execute(
+            "INSERT INTO whatsapp_contatos (empresa_id, telefone, nome, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)",
+            (empresa_id, telefone, nome, agora, agora),
+        )
+    except sqlite3.IntegrityError:
+        # Alguém criou este mesmo número entre a busca acima e este
+        # INSERT (o atendente clicando "Conversar" no instante em que
+        # chega uma mensagem do mesmo cliente). Usa o que o outro criou.
+        existente = conn.execute(
+            "SELECT * FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ?", (empresa_id, telefone)
+        ).fetchone()
+        if existente is None:
+            raise
+        return dict(existente)
     return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 

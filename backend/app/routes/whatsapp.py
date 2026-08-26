@@ -1322,12 +1322,14 @@ def excluir_mensagem(conversa_id, mensagem_id):
 @bp.put("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>")
 @requires_auth
 def editar_mensagem(conversa_id, mensagem_id):
-    """Corrige o texto de uma mensagem NOSSA. Fica marcada como editada —
-    ninguém muda o que disse sem deixar rastro na conversa.
+    """Corrige o texto de uma mensagem NOSSA — aqui e no celular do
+    cliente. Fica marcada como editada: ninguém muda o que disse sem
+    deixar rastro na conversa.
 
-    Só vale aqui dentro: o WhatsApp do cliente continua com o texto
-    original, porque a Evolution API não expõe edição de mensagem já
-    entregue. A tela avisa isso antes de salvar."""
+    O WhatsApp só aceita editar mensagem recente (cerca de 15 minutos).
+    Passado disso a correção vale aqui e a resposta avisa que o cliente
+    continuou com o texto original — melhor corrigir de um lado só do que
+    não corrigir de nenhum."""
     usuario = g.usuario_atual
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
@@ -1346,6 +1348,21 @@ def editar_mensagem(conversa_id, mensagem_id):
     if not texto:
         raise ApiError("Escreva o novo texto.", status=400)
     agora = _now_iso()
+
+    # Manda a correção pro cliente antes de gravar: se o WhatsApp recusar,
+    # a mensagem daqui ainda é corrigida, mas a tela precisa saber que lá
+    # ficou o texto velho.
+    avisado_ao_cliente, motivo = False, None
+    if mensagem["externo_id"] and mensagem["status"] != "falhou":
+        try:
+            whatsapp_service.editar_mensagem_whatsapp(
+                whatsapp_service.obter_configuracao(conn, g.empresa_id),
+                conversa["telefone"], mensagem["externo_id"], texto,
+            )
+            avisado_ao_cliente = True
+        except ApiError as e:
+            motivo = e.mensagem
+
     conn.execute(
         "UPDATE whatsapp_mensagens SET texto = ?, editada_em = ? WHERE id = ?", (texto, agora, mensagem_id)
     )
@@ -1357,7 +1374,10 @@ def editar_mensagem(conversa_id, mensagem_id):
     if ultima and ultima["id"] == mensagem_id:
         conn.execute("UPDATE whatsapp_conversas SET ultima_mensagem_preview = ? WHERE id = ?", (texto[:120], conversa_id))
     whatsapp_service.registrar_atividade(conn, usuario["id"], "mensagem_editada", texto[:120], conversa_id)
-    return jsonify(dict(conn.execute("SELECT * FROM whatsapp_mensagens WHERE id = ?", (mensagem_id,)).fetchone()))
+    saida = dict(conn.execute("SELECT * FROM whatsapp_mensagens WHERE id = ?", (mensagem_id,)).fetchone())
+    saida["editada_no_cliente"] = avisado_ao_cliente
+    saida["motivo_nao_editada"] = motivo
+    return jsonify(saida)
 
 
 def _caminho_do_anexo(midia_url: str):

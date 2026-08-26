@@ -2796,6 +2796,7 @@
             : `<span class="texto-suave">ninguém ainda</span>`}
           <button type="button" class="wpp-tag-adicionar" data-acao="abrir-membros-grupo" data-id="${conversa.id}" title="Chamar um colega pra este grupo — só quem está aqui dentro vê a conversa">+ colega</button>
           <button type="button" class="wpp-tag-adicionar" data-acao="ver-membros-whatsapp" data-id="${conversa.id}" title="Ver quem está neste grupo no WhatsApp">👤 Quem está no grupo</button>
+          <button type="button" class="wpp-tag-adicionar" data-acao="adicionar-ao-grupo" data-id="${conversa.id}" title="Incluir um contato neste grupo do WhatsApp">➕ Adicionar pessoa</button>
         </div>` : ""}
       <div class="wpp-tags-linha">
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
@@ -3182,7 +3183,7 @@
   function modalEditarMensagem(textoAtual, ehCliente, aoSalvar) {
     const wrap = abrirModal(`
       <h3 style="margin-top:0;">✏️ Editar mensagem</h3>
-      ${ehCliente ? `<p class="dica"><strong>Atenção:</strong> a correção vale aqui dentro do sistema. No celular do cliente a mensagem continua como foi enviada — o WhatsApp não permite reescrever o que já chegou. Para o cliente ver o texto certo, apague e mande de novo.</p>` : `<p class="dica">A mensagem passa a mostrar "editada", pra outra pessoa saber que o texto mudou.</p>`}
+      ${ehCliente ? `<p class="dica">A correção vai também pro celular do cliente, e a mensagem passa a mostrar "editada" nos dois lados. O WhatsApp só aceita corrigir mensagem <strong>recente</strong> (mais ou menos 15 minutos): passado disso, o texto muda aqui e o cliente fica com o original — a tela avisa quando isso acontecer.</p>` : `<p class="dica">A mensagem passa a mostrar "editada", pra outra pessoa saber que o texto mudou.</p>`}
       <div class="campo"><label>Texto</label><textarea name="texto" rows="4" required></textarea></div>
       <div class="rodape-modal">
         <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
@@ -5331,8 +5332,15 @@
         const id = Number(alvo.dataset.id);
         const conversaId = Number(location.hash.split("/")[2]);
         return modalEditarMensagem(alvo.dataset.texto || "", true, async (texto) => {
-          await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens/${id}`, { method: "PUT", body: { texto } });
+          const r = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens/${id}`, { method: "PUT", body: { texto } });
           fecharModais();
+          // Diz em qual dos dois lados a correção pegou — corrigir só
+          // aqui e achar que o cliente viu é o pior desfecho possível.
+          if (r && r.editada_no_cliente === false) {
+            definirFlash("erro", "Corrigi aqui, mas o WhatsApp não aceitou corrigir no celular do cliente (mensagem antiga demais). Lá continua o texto original.");
+          } else {
+            definirFlash("ok", "Mensagem corrigida aqui e no celular do cliente.");
+          }
           await atualizarMensagensNoDom(conversaId);
         });
       }
@@ -5546,6 +5554,80 @@
           ? `${alvo.dataset.nome} voltou a aparecer como disponível.`
           : `${alvo.dataset.nome} está marcado como ausente.`);
         return renderUsuarios();
+      }
+      case "adicionar-ao-grupo": {
+        const id = Number(alvo.dataset.id);
+        const wrap = abrirModal(`
+          <h3 style="margin-top:0;">➕ Adicionar ao grupo</h3>
+          <p class="dica">A pessoa entra no grupo <strong>no WhatsApp</strong> — todo mundo lá dentro vê que ela entrou. Escolha um contato ou digite um número novo.</p>
+          <div class="campo">
+            <input data-busca-add placeholder="Procurar por nome ou número…" autofocus>
+          </div>
+          <div class="wpp-encaminhar-lista" data-lista-add><p class="dica">Carregando…</p></div>
+          <p class="dica" data-resumo-add></p>
+          <div class="rodape-modal">
+            <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+            <button type="button" class="botao" data-add-ao-grupo disabled>Adicionar</button>
+          </div>`);
+        const lista = wrap.querySelector("[data-lista-add]");
+        const botao = wrap.querySelector("[data-add-ao-grupo]");
+        const resumo = wrap.querySelector("[data-resumo-add]");
+        const busca = wrap.querySelector("[data-busca-add]");
+        const escolhidos = new Set();
+
+        const atualizar = () => {
+          botao.disabled = escolhidos.size === 0;
+          botao.textContent = escolhidos.size ? `Adicionar ${escolhidos.size}` : "Adicionar";
+          resumo.textContent = escolhidos.size ? `Selecionado: ${[...escolhidos].join(", ")}` : "";
+        };
+        const desenhar = (contatos) => {
+          const digitado = busca.value.replace(/\D/g, "");
+          // Número que não está na agenda também pode entrar — é comum
+          // o cliente passar um contato novo pra incluir no grupo.
+          const avulso = digitado.length >= 10 && !contatos.some((c) => (c.telefone || "").includes(digitado))
+            ? [{ nome: `Adicionar o número ${_telefoneBonito(digitado)}`, telefone: digitado, avulso: true }]
+            : [];
+          const tudo = [...avulso, ...contatos.filter((c) => !c.eh_grupo)];
+          lista.innerHTML = tudo.length ? tudo.map((c) => `
+            <label class="wpp-encaminhar-item">
+              <input type="checkbox" data-telefone="${escapeHtml(c.telefone)}" ${escolhidos.has(c.telefone) ? "checked" : ""}>
+              <span class="wpp-encaminhar-nome">${escapeHtml(c.nome || c.telefone)}</span>
+              <span class="wpp-encaminhar-tel">${c.avulso ? "" : escapeHtml(_telefoneBonito(c.telefone))}</span>
+            </label>`).join("") : `<p class="dica">Nenhum contato encontrado. Digite o número completo com DDD.</p>`;
+          lista.querySelectorAll("input[type=checkbox]").forEach((cx) => {
+            cx.addEventListener("change", () => {
+              if (cx.checked) escolhidos.add(cx.dataset.telefone);
+              else escolhidos.delete(cx.dataset.telefone);
+              atualizar();
+            });
+          });
+        };
+        const buscar = async (termo) => {
+          try { desenhar((await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(termo || "")}`) || []).slice(0, 60)); }
+          catch (e) { lista.innerHTML = `<p class="dica">Não consegui carregar os contatos.</p>`; }
+        };
+        buscar("");
+        let debounce = null;
+        busca.addEventListener("input", () => {
+          clearTimeout(debounce);
+          debounce = setTimeout(() => buscar(busca.value.trim()), 250);
+        });
+
+        botao.addEventListener("click", async () => {
+          botao.disabled = true;
+          botao.textContent = "Adicionando…";
+          try {
+            const r = await chamarApi(`/whatsapp/grupos/${id}/participantes`, {
+              method: "POST", body: { telefones: [...escolhidos] },
+            });
+            fecharModais();
+            definirFlash("ok", `${r.adicionados} pessoa(s) adicionada(s) ao grupo.`);
+          } catch (e) {
+            definirFlash("erro", e.message || "Não consegui adicionar. Só quem é administrador do grupo no WhatsApp pode incluir gente.");
+          }
+          return renderWhatsapp(id);
+        });
+        return;
       }
       case "ver-membros-whatsapp": {
         const id = Number(alvo.dataset.id);
