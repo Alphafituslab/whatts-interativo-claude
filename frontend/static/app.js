@@ -3853,9 +3853,17 @@
        </div>
 
        ${config.status_conexao === "aguardando_qrcode" && config.qrcode_base64 ? `
-         <div class="wpp-qrcode-wrap">
-           <img class="wpp-qrcode" src="data:image/png;base64,${config.qrcode_base64}" alt="QR Code de pareamento do WhatsApp">
-           <p class="texto-suave">Abra o WhatsApp no celular → Aparelhos conectados → Conectar um aparelho → escaneie.</p>
+         <div class="wpp-qrcode-wrap" data-wpp-qr-area>
+           <div class="wpp-qrcode-moldura">
+             <img class="wpp-qrcode" src="data:image/png;base64,${config.qrcode_base64}" alt="QR Code de pareamento do WhatsApp">
+             <div class="wpp-qrcode-expirado" data-wpp-qr-expirado hidden>
+               <strong>Código expirado</strong>
+               <span>O WhatsApp troca o código a cada meio minuto.</span>
+               <button type="button" class="botao pequeno" data-acao="novo-qrcode">Gerar um novo</button>
+             </div>
+           </div>
+           <p class="wpp-qrcode-validade" data-wpp-qr-validade></p>
+           <p class="texto-suave">No celular: <strong>WhatsApp → Aparelhos conectados → Conectar um aparelho</strong> e aponte a câmera. Deixe a tela do WhatsApp já aberta antes de gerar o código — ele vale por pouco tempo.</p>
          </div>` : ""}
 
        ${config.status_conexao === "conectado" && config.numero_conectado ? `<p>Número conectado: <strong>${escapeHtml(config.numero_conectado)}</strong></p>` : ""}
@@ -4210,12 +4218,55 @@
   // página inteira — um re-render completo a cada 4s (o intervalo do
   // polling abaixo) jogava a rolagem de volta pro topo bem na hora de
   // escanear o QR Code, derrubando ele da tela repetidamente.
+  // Quantos segundos um QR Code vale. O WhatsApp não anuncia o prazo; ~40s
+  // é o que ele costuma dar, e é melhor avisar um pouco antes do que
+  // deixar a pessoa apontando a câmera pra um código morto.
+  const SEGUNDOS_VALIDADE_QR = 40;
+  let _qrMostradoEm = 0;
+
+  let _qrNaTela = null;
+
+  function _contarValidadeQr() {
+    const area = document.querySelector("[data-wpp-qr-area]");
+    if (!area) { _qrNaTela = null; return; }
+    // Código diferente do que estava aqui: começa a contar deste agora.
+    const img = area.querySelector(".wpp-qrcode");
+    const atual = img ? img.src.slice(-60) : null;
+    if (atual && atual !== _qrNaTela) {
+      _qrNaTela = atual;
+      _qrMostradoEm = Date.now();
+    }
+    const restam = Math.max(0, SEGUNDOS_VALIDADE_QR - Math.round((Date.now() - _qrMostradoEm) / 1000));
+    const validade = area.querySelector("[data-wpp-qr-validade]");
+    const expirado = area.querySelector("[data-wpp-qr-expirado]");
+    if (validade) {
+      validade.textContent = restam ? `Este código vale por mais ${restam}s` : "";
+      validade.classList.toggle("wpp-qrcode-acabando", restam > 0 && restam <= 12);
+    }
+    if (expirado) expirado.hidden = restam > 0;
+  }
+
+  setInterval(_contarValidadeQr, 1000);
+
   async function atualizarSecaoConexaoNoDom() {
     const container = document.querySelector("[data-wpp-secao-conexao]");
     if (!container) { pararPollingStatusWhatsapp(); return; }
     await chamarApi("/whatsapp/status"); // consulta de verdade a Evolution API e atualiza o banco
     const { config, webhookUrl } = await buscarConfigECriarWebhookUrl();
+
+    // Enquanto espera a leitura, NÃO redesenha: trocar a imagem do QR
+    // debaixo da câmera é exatamente o que fazia a leitura falhar. Só a
+    // contagem regressiva se mexe.
+    if (config.status_conexao === "aguardando_qrcode" && document.querySelector("[data-wpp-qr-area]")) {
+      _contarValidadeQr();
+      return;
+    }
+
     container.innerHTML = htmlSecaoConexao(config, webhookUrl);
+    if (config.status_conexao === "aguardando_qrcode") {
+      _qrMostradoEm = Date.now();
+      _contarValidadeQr();
+    }
     if (config.status_conexao !== "aguardando_qrcode") {
       pararPollingStatusWhatsapp();
       if (config.status_conexao === "conectado") {
@@ -5908,6 +5959,39 @@
         await chamarApi(`/whatsapp/lembretes/${alvo.dataset.id}/concluir`, { method: "POST" });
         definirFlash("ok", "Lembrete concluído.");
         return renderLembretes();
+      }
+      case "novo-qrcode": {
+        // Pega o código mais recente que a Evolution já gerou (ela troca
+        // sozinha o tempo todo) e recomeça a contagem. Sem pedir um
+        // "conectar" novo, que reiniciaria a sessão à toa.
+        const botao = alvo;
+        botao.disabled = true;
+        botao.textContent = "Gerando…";
+        try {
+          // Pede um código NOVO à Evolution. Só ler o último guardado não
+          // servia: com a sessão parada não existe nenhum guardado, e o
+          // botão não fazia nada.
+          const r = await chamarApi("/whatsapp/conectar", { method: "POST" });
+          const area = document.querySelector("[data-wpp-qr-area]");
+          const img = area && area.querySelector(".wpp-qrcode");
+          if (r.qrcode_base64 && img) {
+            img.src = `data:image/png;base64,${r.qrcode_base64}`;
+            _qrNaTela = img.src.slice(-60);
+            _qrMostradoEm = Date.now();
+            _contarValidadeQr();
+            botao.disabled = false;
+            botao.textContent = "Gerar um novo";
+            return;
+          }
+          // Sem área na tela ainda (ex.: veio da faixa vermelha): monta a
+          // seção inteira, que já desenha o código.
+          return renderConfiguracao();
+        } catch (e) {
+          botao.disabled = false;
+          botao.textContent = "Gerar um novo";
+          definirFlash("erro", e.message || "Não consegui gerar um código novo.");
+        }
+        return;
       }
       case "conectar-whatsapp": {
         await chamarApi("/whatsapp/conectar", { method: "POST" });

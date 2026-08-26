@@ -1457,3 +1457,22 @@ nav { perspective: 800px; }
   background: #fff; color: var(--vermelho); border-color: #fff; font-weight: 700;
 }
 .wpp-faixa-caiu-dica { opacity: 0.9; }
+
+/* QR Code com validade à vista. O código fica parado; o que muda é a
+   contagem — trocar a imagem debaixo da câmera é o que fazia a leitura
+   falhar. */
+.wpp-qrcode-moldura { position: relative; display: inline-block; }
+.wpp-qrcode-expirado {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; text-align: center; padding: 12px;
+  background: color-mix(in srgb, var(--superficie) 92%, transparent);
+  border-radius: var(--raio-peq);
+}
+.wpp-qrcode-expirado strong { font-size: 15px; }
+.wpp-qrcode-expirado span { font-size: 12.5px; color: var(--texto-suave); }
+.wpp-qrcode-validade {
+  font-size: 12.5px; color: var(--texto-suave); margin: 8px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.wpp-qrcode-validade.wpp-qrcode-acabando { color: var(--amarelo); font-weight: 600; }
