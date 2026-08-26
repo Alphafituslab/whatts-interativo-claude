@@ -2482,6 +2482,20 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         # das mensagens comuns, mais abaixo.
         return {"processado": True, "tipo": "recebida_grupo", "conversa_id": conversa["id"]}
 
+    # GRUPO: nada de resposta automática. Se um grupo ficou com estado de
+    # menu por algum caminho antigo, limpa aqui — senão cada mensagem
+    # dentro dele viraria um "digite o número" pro grupo todo.
+    if de_grupo and (conversa["menu_estado"] or conversa["aguardando_avaliacao"] or conversa["menu_setor"]):
+        conn.execute(
+            "UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL, "
+            "menu_tentativas_invalidas = 0, aguardando_avaliacao = 0, menu_setor = NULL WHERE id = ?",
+            (conversa["id"],),
+        )
+        conversa = dict(conversa)
+        conversa["menu_estado"] = None
+        conversa["aguardando_avaliacao"] = 0
+        conversa["menu_setor"] = None
+
     # Se esta conversa está no meio do menu de setor/atendente (ver
     # acima), tenta interpretar ESTA mensagem como a escolha do cliente
     # antes de tratá-la como mensagem comum.
@@ -2550,6 +2564,17 @@ def _dentro_do_expediente(janelas_json) -> bool:
 
 
 def _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone):
+    # Grupo não recebe aviso automático. "Estamos fora do horário" cai
+    # pra todo mundo do grupo, várias vezes por dia, e não é resposta a
+    # ninguém em particular — é o tipo de mensagem que faz o número
+    # parecer robô e irrita quem está lá dentro.
+    eh_grupo = conn.execute(
+        "SELECT ct.eh_grupo FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE c.id = ?",
+        (conversa["id"],),
+    ).fetchone()
+    if eh_grupo is not None and eh_grupo["eh_grupo"]:
+        return
+
     config = obter_configuracao(conn, empresa_id)
     if not config.get("expediente_ativo"):
         return
@@ -2885,12 +2910,36 @@ def _tratar_resposta_menu(conn, empresa_id, conversa, telefone, texto, externo_i
 
     def _responder(msg):
         try:
-            enviar_texto(config, telefone, msg)
-        except ApiError:
-            pass
+            externo = enviar_texto(config, telefone, msg)
+            status, erro = "enviada", None
+        except ApiError as e:
+            externo, status, erro = None, "falhou", e.mensagem
+        # Fica no histórico: sem isso a equipe não enxerga o que o
+        # automático disse ao cliente, e um automático repetindo passa
+        # despercebido até alguém reclamar.
+        conn.execute(
+            """
+            INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, status, erro, criado_em)
+            VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?)
+            """,
+            (conversa["id"], msg, externo, status, erro, _now_iso()),
+        )
 
     if not match or not (1 <= int(match.group()) <= len(opcoes)):
         if conversa["menu_estado"] != "setor":
+            # Mesmo limite do menu de setor: pede o número no máximo duas
+            # vezes e depois para de insistir, deixando a conversa seguir
+            # como conversa normal — alguém atende.
+            tentativas = (conversa["menu_tentativas_invalidas"] or 0) + 1
+            if tentativas >= TENTATIVAS_MENU_ANTES_DO_FALLBACK:
+                conn.execute(
+                    "UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL, "
+                    "menu_tentativas_invalidas = 0 WHERE id = ?",
+                    (conversa["id"],),
+                )
+                return {"processado": True, "tipo": "menu_desistiu", "conversa_id": conversa["id"]}
+            conn.execute("UPDATE whatsapp_conversas SET menu_tentativas_invalidas = ? WHERE id = ?",
+                         (tentativas, conversa["id"]))
             _responder("Digite apenas o número correspondente.")
             return {"processado": True, "tipo": "menu_resposta_invalida", "conversa_id": conversa["id"]}
 

@@ -1471,6 +1471,8 @@
     // roda em qualquer tela (não só Conversas/Chat interno), pra piscar
     // o menu lateral mesmo se a pessoa estiver, por exemplo, no Dashboard.
     timerBadgesNaoLidos = setInterval(atualizarBadgesNaoLidos, 4000);
+    _atualizarContadorDoIcone();
+    setInterval(_atualizarContadorDoIcone, 8000);
     // Follow-up muda em dias, não em segundos — 60s já é de sobra e
     // evita consulta pesada a cada 4s.
     atualizarContadorFollowup();
@@ -2067,11 +2069,64 @@
   let _ultimoTotalNaBarra = -1;
   const TITULO_BASE = "Seja Alpha";
 
+  // Guarda o ícone original uma vez só, pra poder redesenhar por cima
+  // dele e também pra saber pra onde voltar quando zerar.
+  let _iconeBase = null;
+
+  async function _atualizarContadorDoIcone() {
+    // Pergunta direto ao pulso, sem depender da tela aberta: o número no
+    // ícone tem que estar certo mesmo com a pessoa no Dashboard.
+    try {
+      const p = await chamarApi("/whatsapp/pulso");
+      _marcarNaBarraDeTarefas(p.n || 0, p.nc || 0, p.ni || 0);
+    } catch (e) { /* próxima volta corrige */ }
+  }
+
+  function _pintarIcone(total) {
+    const link = document.querySelector('link[rel="icon"][sizes="64x64"]')
+              || document.querySelector('link[rel="icon"]');
+    if (!link) return;
+    if (!_iconeBase) _iconeBase = link.getAttribute("href");
+
+    if (!total) { link.setAttribute("href", _iconeBase); return; }
+
+    const img = new Image();
+    img.onload = () => {
+      const L = 64;
+      const cv = document.createElement("canvas");
+      cv.width = L; cv.height = L;
+      const ctx = cv.getContext("2d");
+      ctx.drawImage(img, 0, 0, L, L);
+
+      // Bolinha no canto de cima à direita, igual à do WhatsApp. Fica
+      // maior quando o número tem mais dígitos, senão "12" não cabe.
+      const texto = total > 99 ? "99+" : String(total);
+      const r = texto.length > 2 ? 24 : texto.length > 1 ? 21 : 18;
+      const cx = L - r + 3, cy = r - 3;
+
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#e5342b"; ctx.fill();
+      // Contorno claro: sem ele a bolinha some quando o ícone atrás é
+      // escuro, que é justamente o nosso caso.
+      ctx.lineWidth = 4; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold ${Math.round(r * 1.15)}px -apple-system, "Segoe UI", Roboto, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(texto, cx, cy + 1);
+
+      link.setAttribute("href", cv.toDataURL("image/png"));
+    };
+    img.onerror = () => { /* sem ícone base, o título já avisa */ };
+    img.src = _iconeBase;
+  }
+
   function _marcarNaBarraDeTarefas(total, deClientes, doChatInterno) {
     if (total === _ultimoTotalNaBarra) return;   // não repinta à toa
     _ultimoTotalNaBarra = total;
 
     document.title = total ? `(${total}) ${TITULO_BASE}` : TITULO_BASE;
+    _pintarIcone(total);
 
     if (!("setAppBadge" in navigator)) return;
     // Falha aqui não é problema de ninguém: navegador que não suporta,
@@ -2348,7 +2403,11 @@
             }
             if (c.status === "fechada") partes.push('<span class="selo inativo">Fechada</span>');
             // O setor aparece sempre, em qualquer aba — não só em "Todas"/"Fila" — é informação útil pra qualquer atendente ver de cara.
-            if (c.menu_setor) partes.push(`🏷️ ${escapeHtml(c.menu_setor)}`);
+            // Só em conversa de uma pessoa: esse 🏷️ é o setor que o
+            // CLIENTE escolheu no menu, e grupo não passa por menu.
+            // Mostrá-lo num grupo faz parecer que o grupo "é" daquele
+            // setor, que é justamente a informação errada.
+            if (c.menu_setor && !c.eh_grupo) partes.push(`🏷️ ${escapeHtml(c.menu_setor)}`);
             return partes.length ? `<div class="wpp-conversa-dono">${partes.join(" · ")}</div>` : "";
           })()}
           ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
@@ -2694,7 +2753,7 @@
         </span>
         <div class="wpp-chat-identidade">
           <div class="wpp-chat-nome"><span class="wpp-chat-nome-texto" title="${escapeHtml(nome)}">${escapeHtml(nome)}</span> <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Trocar o nome deste contato (só você vê)">✏️</button></div>
-          <div class="texto-suave wpp-chat-telefone">${escapeHtml(conversa.telefone)}${conversa.menu_setor ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
+          <div class="texto-suave wpp-chat-telefone">${escapeHtml(conversa.telefone)}${conversa.menu_setor && !conversa.eh_grupo ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
         </div>
         <div class="wpp-chat-acoes">
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
