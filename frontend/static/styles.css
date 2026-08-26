@@ -1462,6 +1462,13 @@ nav { perspective: 800px; }
    contagem — trocar a imagem debaixo da câmera é o que fazia a leitura
    falhar. */
 .wpp-qrcode-moldura { position: relative; display: inline-block; }
+/* O [hidden] precisa estar aqui EXPLICITO: a regra abaixo define
+   display:flex, e uma classe com display vence a regra padrao do
+   navegador para [hidden] (mesma especificidade, ordem manda). Sem isto
+   a tampa de "expirado" ficava por cima de um codigo perfeitamente
+   valido — foi o que apareceu na tela do Clayton, com "expirado" e
+   "vale por mais 37s" ao mesmo tempo. */
+.wpp-qrcode-expirado[hidden] { display: none; }
 .wpp-qrcode-expirado {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1476,3 +1483,12 @@ nav { perspective: 800px; }
   font-variant-numeric: tabular-nums;
 }
 .wpp-qrcode-validade.wpp-qrcode-acabando { color: var(--amarelo); font-weight: 600; }
+
+/* Endereço dentro da mensagem. Sublinhado e na cor de link, pra ficar
+   claro que dá pra clicar — e quebra em qualquer ponto, senão um
+   endereço longo estoura a largura da bolha. */
+.wpp-link-na-mensagem {
+  color: inherit; text-decoration: underline; text-underline-offset: 2px;
+  word-break: break-all;
+}
+.wpp-link-na-mensagem:hover { opacity: 0.75; }

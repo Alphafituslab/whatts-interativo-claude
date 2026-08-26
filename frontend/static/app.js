@@ -2608,12 +2608,28 @@
   // frente; qualquer outro tamanho fica como texto comum.
   const RE_TELEFONE = /(\+?55[\s.-]?)?\(?\d{2}\)?[\s.-]?9?\d{4}[\s.-]?\d{4}/g;
 
+  // Endereços de site dentro da mensagem. Roda ANTES do telefone porque
+  // um link pode ter números que pareceriam telefone no meio dele.
+  const RE_LINK = /https?:\/\/[^\s<>"]+/gi;
+
+  function textoComLinks(escapado) {
+    return escapado.replace(RE_LINK, (url) => {
+      // Pontuação colada no fim ("...catalogo." ) não faz parte do
+      // endereço — sai do link e volta como texto.
+      const limpo = url.replace(/[.,;:)\]]+$/, "");
+      const sobra = url.slice(limpo.length);
+      return `<a href="${limpo}" target="_blank" rel="noopener noreferrer" class="wpp-link-na-mensagem">${limpo}</a>${sobra}`;
+    });
+  }
+
   function textoComTelefones(texto) {
-    const escapado = escapeHtml(texto);
+    const escapado = textoComLinks(escapeHtml(texto));
     return escapado.replace(RE_TELEFONE, (achado) => {
       const digitos = achado.replace(/\D/g, "");
       const nu = digitos.startsWith("55") ? digitos.slice(2) : digitos;
       if (nu.length !== 10 && nu.length !== 11) return achado;
+      // Não mexe no que já virou link (o endereço pode ter números).
+      if (/[/=&?]/.test(achado)) return achado;
       return `<button type="button" class="wpp-telefone-no-texto" data-acao="conversar-com-numero" data-telefone="${digitos}" title="Iniciar uma conversa com este número">${achado}</button>`;
     });
   }
@@ -5602,14 +5618,14 @@
           method: "PUT", body: { ativo: alvo.dataset.ativo !== "1" },
         });
         obterCatalogos("limpar");
-        return renderConfiguracao();
+        return renderWhatsappConfiguracao();
       }
       case "excluir-catalogo": {
         if (!confirm(`Excluir o catálogo "${alvo.dataset.nome}"? A equipe deixa de poder mandá-lo.`)) return;
         await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "DELETE" });
         obterCatalogos("limpar");
         definirFlash("ok", "Catálogo excluído.");
-        return renderConfiguracao();
+        return renderWhatsappConfiguracao();
       }
       case "ausencia-de-usuario": {
         const id = Number(alvo.dataset.id);
@@ -5985,7 +6001,7 @@
           }
           // Sem área na tela ainda (ex.: veio da faixa vermelha): monta a
           // seção inteira, que já desenha o código.
-          return renderConfiguracao();
+          return renderWhatsappConfiguracao();
         } catch (e) {
           botao.disabled = false;
           botao.textContent = "Gerar um novo";
@@ -6118,7 +6134,7 @@
       }
       case "renomear-catalogo": {
         const nome = alvo.value.trim();
-        if (!nome) return renderConfiguracao();
+        if (!nome) return renderWhatsappConfiguracao();
         await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "PUT", body: { nome } });
         obterCatalogos("limpar");
         definirFlash("ok", "Nome atualizado.");
@@ -6133,7 +6149,7 @@
       case "alternar-catalogo-restrito": {
         await chamarApi(`/whatsapp/catalogos/${alvo.dataset.id}`, { method: "PUT", body: { restrito: alvo.checked } });
         obterCatalogos("limpar");
-        return renderConfiguracao();
+        return renderWhatsappConfiguracao();
       }
       case "marcar-usuario-catalogo": {
         // Manda a seleção inteira: é o que o servidor grava, e evita
@@ -6554,7 +6570,7 @@
           },
         });
         definirFlash("ok", "Limites de envio salvos.");
-        return renderConfiguracao();
+        return renderWhatsappConfiguracao();
       }
       case "criar-catalogo": {
         await chamarApi("/whatsapp/catalogos", {
@@ -6563,7 +6579,7 @@
         });
         obterCatalogos("limpar");
         definirFlash("ok", "Catálogo adicionado.");
-        return renderConfiguracao();
+        return renderWhatsappConfiguracao();
       }
       case "subir-catalogo-pdf": {
         const arquivo = form.querySelector('input[name="arquivo"]').files[0];
@@ -6577,11 +6593,11 @@
         if (!resp.ok) {
           const corpo = await resp.json().catch(() => ({}));
           definirFlash("erro", corpo.mensagem || "Não consegui enviar o arquivo.");
-          return renderConfiguracao();
+          return renderWhatsappConfiguracao();
         }
         obterCatalogos("limpar");
         definirFlash("ok", "Catálogo em PDF adicionado.");
-        return renderConfiguracao();
+        return renderWhatsappConfiguracao();
       }
       case "criar-setor": {
         await chamarApi("/usuarios/setores", { method: "POST", body: { nome: dados.get("nome") || "" } });

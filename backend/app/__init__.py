@@ -118,7 +118,23 @@ def create_app(test_config: dict = None) -> Flask:
 
     @app.get("/")
     def frontend_index():
-        return send_from_directory(FRONTEND_DIR, "index.html")
+        # Carimba a versão nos endereços do CSS/JS. É o que garante que
+        # uma atualização chegue em TODA máquina sem ninguém precisar
+        # limpar cache — ver comentário em VERSAO_SERVIDOR.
+        caminho = os.path.join(FRONTEND_DIR, "index.html")
+        with open(caminho, encoding="utf-8") as f:
+            html = f.read()
+        html = (html
+                .replace('href="/static/styles.css"', f'href="/static/styles.css?v={VERSAO_SERVIDOR}"')
+                .replace('src="/static/app.js"', f'src="/static/app.js?v={VERSAO_SERVIDOR}"'))
+        resposta = app.response_class(html, mimetype="text/html")
+        # O index NUNCA pode ficar em cache: e ele que carrega o carimbo
+        # de versao do CSS/JS. Cacheado, ele continuava apontando pra
+        # versao velha — e o carimbo, que existe justamente pra forcar a
+        # atualizacao, nao servia pra nada.
+        resposta.headers["Cache-Control"] = "no-store, must-revalidate"
+        resposta.headers["Pragma"] = "no-cache"
+        return resposta
 
     @app.get("/instalador/WhattsInbox-instalador.zip")
     @app.get("/static/instalador/WhattsInbox-instalador.zip")

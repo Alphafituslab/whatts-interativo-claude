@@ -11,7 +11,7 @@ services:
       - evolution_postgres_data:/var/lib/postgresql/data
 
   evolution-api:
-    image: evoapicloud/evolution-api:v2.3.4
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: evolution-api
     restart: always
     depends_on:
