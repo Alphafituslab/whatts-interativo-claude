@@ -1216,6 +1216,14 @@ nav { perspective: 800px; }
   border-color: rgba(212, 160, 23, 0.7) !important;
   background: rgba(212, 160, 23, 0.14) !important;
 }
+/* Offline agora, sem ter marcado ausencia manual — diferente do amarelo
+   (decisao da pessoa) e do verde (tudo certo). Vermelho suave: e um
+   estado normal (ela so nao esta logada), nao um erro. */
+.botao-indisponivel {
+  border-color: color-mix(in srgb, var(--vermelho) 55%, transparent) !important;
+  background: color-mix(in srgb, var(--vermelho) 12%, transparent) !important;
+  opacity: 0.85;
+}
 .botao-sem-pendencia-ligado {
   border-color: color-mix(in srgb, var(--verde) 60%, transparent) !important;
   background: color-mix(in srgb, var(--verde) 14%, transparent) !important;

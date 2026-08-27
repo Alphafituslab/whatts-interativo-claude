@@ -4769,11 +4769,33 @@
         <td class="texto-suave">${escapeHtml(u.email)}</td>
         <td class="texto-suave">${(u.setores && u.setores.length) ? u.setores.map((s) => escapeHtml(s)).join(", ") : escapeHtml(u.setor || "—")}${u.acesso_conversas === false ? ' <span class="selo inativo" title="Não vê as conversas de clientes">só chat interno</span>' : ""}
           ${u.ativo ? `<div style="margin-top:4px;">
-            <button type="button" class="botao secundario pequeno ${u.ausente ? "botao-ausente-ligado" : ""}"
-                    data-acao="ausencia-de-usuario" data-id="${u.id}" data-nome="${escapeHtml(u.nome)}" data-ausente="${u.ausente ? 1 : 0}"
-                    title="${u.ausente ? "Está ausente — clique pra marcar como disponível" : "Marcar como ausente (some das listas de quem pode atender)"}">
-              ${u.ausente ? `🟡 Ausente${u.ausente_motivo ? " — " + escapeHtml(u.ausente_motivo) : ""} · liberar` : "🟢 Disponível"}
-            </button>
+            ${(() => {
+              // Um rotulo so, juntando os dois sinais que importam pra
+              // saber se essa pessoa pode atender agora: se marcou
+              // ausencia (decisao dela) e se esta com o sistema aberto
+              // (online). Antes o botao so olhava a ausencia manual e
+              // mostrava "Disponivel" ate pra quem estava offline havia
+              // horas — o oposto do que a palavra diz.
+              if (u.ausente) {
+                return `<button type="button" class="botao secundario pequeno botao-ausente-ligado"
+                          data-acao="ausencia-de-usuario" data-id="${u.id}" data-nome="${escapeHtml(u.nome)}" data-ausente="1"
+                          title="Está marcado como ausente — clique pra voltar a ficar disponível">
+                          🟡 Ausente${u.ausente_motivo ? " — " + escapeHtml(u.ausente_motivo) : ""} · liberar
+                        </button>`;
+              }
+              if (!u.online) {
+                return `<button type="button" class="botao secundario pequeno botao-indisponivel"
+                          data-acao="ausencia-de-usuario" data-id="${u.id}" data-nome="${escapeHtml(u.nome)}" data-ausente="0"
+                          title="O sistema não está aberto no aparelho dela agora. Clique pra marcar ausência manualmente também, se for o caso.">
+                          🔴 Indisponível <span class="texto-suave">(offline)</span>
+                        </button>`;
+              }
+              return `<button type="button" class="botao secundario pequeno"
+                        data-acao="ausencia-de-usuario" data-id="${u.id}" data-nome="${escapeHtml(u.nome)}" data-ausente="0"
+                        title="Online e disponível — clique pra marcar ausência">
+                        🟢 Disponível
+                      </button>`;
+            })()}
           </div>` : ""}</td>
         <td>${u.admin ? '<span class="selo ativo">Admin</span>' : '<span class="selo inativo">Padrão</span>'}</td>
         <td>${u.ativo ? '<span class="selo ativo">Ativo</span>' : '<span class="selo bloqueado">Inativo</span>'}</td>
