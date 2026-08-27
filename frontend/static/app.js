@@ -1466,7 +1466,7 @@
     atualizarBadgeSla();
     atualizarBadgesNaoLidos();
     verificarVersaoServidor();
-    timerStatusGlobal = setInterval(() => { atualizarBolinhaStatusGlobal(); verificarVersaoServidor(); atualizarBadgeSla(); }, 20000);
+    timerStatusGlobal = setInterval(() => { atualizarBolinhaStatusGlobal(); verificarVersaoServidor(); atualizarBadgeSla(); }, 8000);
     // Mais rápido que o resto — é o que avisa "chegou mensagem nova",
     // roda em qualquer tela (não só Conversas/Chat interno), pra piscar
     // o menu lateral mesmo se a pessoa estiver, por exemplo, no Dashboard.
@@ -1937,13 +1937,11 @@
       pararPollingLembretes();
       pararPollingWhatsapp();
       pararPollingStatusWhatsapp();
-      try { await chamarApi("/auth/logout", { method: "POST", body: { refresh_token: state.refreshToken } }); } catch (e) { /* ignora */ }
-      limparSessao();
       // Recarrega a página de verdade (não só troca de tela dentro do
       // SPA) — só assim o navegador busca o app.js/styles.css novos.
       // Sem isso, a aba continuava rodando o JS/CSS antigo em memória
       // pra sempre, mesmo depois de deslogar e logar de novo nela mesma.
-      localStorage.setItem("whatts_flash_pos_reload", "O sistema foi atualizado — faça login novamente pra usar a versão mais recente.");
+      localStorage.setItem("whatts_flash_pos_reload", "Sistema atualizado.");
       location.reload();
     } catch (e) { /* próxima tentativa corrige */ }
   }
@@ -2109,34 +2107,49 @@
     if (!link) return;
     if (!_iconeBase) _iconeBase = link.getAttribute("href");
 
-    if (!total) { link.setAttribute("href", _iconeBase); return; }
+    if (!total) {
+      document.querySelectorAll('link[rel="icon"]').forEach((l) => l.setAttribute("href", _iconeBase));
+      return;
+    }
 
     const img = new Image();
     img.onload = () => {
-      const L = 64;
+      // 128px: o dobro do que o navegador costuma pedir. Desenhar grande
+      // e deixar ele encolher sai nítido; desenhar pequeno e esticar,
+      // não.
+      const L = 128;
       const cv = document.createElement("canvas");
       cv.width = L; cv.height = L;
       const ctx = cv.getContext("2d");
       ctx.drawImage(img, 0, 0, L, L);
 
-      // Bolinha no canto de cima à direita, igual à do WhatsApp. Fica
-      // maior quando o número tem mais dígitos, senão "12" não cabe.
       const texto = total > 99 ? "99+" : String(total);
-      const r = texto.length > 2 ? 24 : texto.length > 1 ? 21 : 18;
-      const cx = L - r + 3, cy = r - 3;
+      // Quase metade do ícone. Na barra de tarefas o desenho chega a
+      // 16px: bolinha discreta ali vira um ponto e o número some.
+      const r = texto.length > 2 ? 56 : texto.length > 1 ? 52 : 46;
+      const cx = L - r + 6, cy = r - 6;
+
+      // Um vazio escuro atrás da bolinha separa ela da logo, senão o
+      // vermelho encosta no verde e os dois somem juntos de longe.
+      ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fill();
 
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = "#e5342b"; ctx.fill();
-      // Contorno claro: sem ele a bolinha some quando o ícone atrás é
-      // escuro, que é justamente o nosso caso.
-      ctx.lineWidth = 4; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+      ctx.lineWidth = 6; ctx.strokeStyle = "#ffffff"; ctx.stroke();
 
       ctx.fillStyle = "#ffffff";
-      ctx.font = `bold ${Math.round(r * 1.15)}px -apple-system, "Segoe UI", Roboto, sans-serif`;
+      // O texto se ajusta pra caber: "99+" precisa de letra menor que "3".
+      const tamanho = texto.length > 2 ? Math.round(r * 0.82) : Math.round(r * 1.05);
+      ctx.font = `900 ${tamanho}px -apple-system, "Segoe UI", Roboto, Arial, sans-serif`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(texto, cx, cy + 1);
+      ctx.fillText(texto, cx, cy + 2);
 
       link.setAttribute("href", cv.toDataURL("image/png"));
+      // Todos os tamanhos de ícone apontam pro mesmo desenho: o navegador
+      // escolhe um deles e, se sobrar o antigo em algum, aparece o ícone
+      // limpo bem na hora em que deveria avisar.
+      document.querySelectorAll('link[rel="icon"]').forEach((l) => l.setAttribute("href", cv.toDataURL("image/png")));
     };
     img.onerror = () => { /* sem ícone base, o título já avisa */ };
     img.src = _iconeBase;
@@ -2610,7 +2623,7 @@
 
   // Endereços de site dentro da mensagem. Roda ANTES do telefone porque
   // um link pode ter números que pareceriam telefone no meio dele.
-  const RE_LINK = /https?:\/\/[^\s<>"]+/gi;
+  const RE_LINK = /\bhttps?:\/\/[^\s<>"]+/gi;
 
   function textoComLinks(escapado) {
     return escapado.replace(RE_LINK, (url) => {
