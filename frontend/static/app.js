@@ -2997,13 +2997,16 @@
 
   function htmlNegociacoesFechadas(conversaId, negociacoes) {
     if (!negociacoes || !negociacoes.length) return "";
-    return `<div class="wpp-negociacoes-lista">
-      ${negociacoes.map((n) => `
-        <div class="wpp-negociacao-item">
-          <span>💰 Negociação fechada por <strong>${escapeHtml(n.usuario_nome)}</strong> em ${fmtData(n.marcado_em)}</span>
-          <button type="button" class="wpp-tag-tirar" data-acao="desfazer-negociacao" data-id="${conversaId}" data-negociacao="${n.id}" title="Desfazer — marquei por engano">✕</button>
-        </div>`).join("")}
-    </div>`;
+    return `<details class="wpp-resumo">
+      <summary class="wpp-resumo-rotulo">💰 Negociações fechadas <span class="texto-suave">(${negociacoes.length})</span></summary>
+      <div class="wpp-negociacoes-lista">
+        ${negociacoes.map((n) => `
+          <div class="wpp-negociacao-item">
+            <span>Marcada por <strong>${escapeHtml(n.usuario_nome)}</strong> em ${fmtData(n.marcado_em)}</span>
+            <button type="button" class="wpp-tag-tirar" data-acao="desfazer-negociacao" data-id="${conversaId}" data-negociacao="${n.id}" title="Desfazer — marquei por engano">✕</button>
+          </div>`).join("")}
+      </div>
+    </details>`;
   }
 
   function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes) {
@@ -5825,6 +5828,7 @@
       }
       case "fechar-conversa": modalFecharConversa(Number(alvo.dataset.id)); return;
       case "marcar-negociacao": {
+        if (!confirm("Marcar esta conversa como negociação fechada? Isso já entra na taxa de conversão do Dashboard.")) return;
         const conversaId = Number(alvo.dataset.id);
         await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado: "venda" } });
         definirFlash("ok", "Negociação fechada marcada — já entra no Dashboard, sem encerrar o atendimento.");

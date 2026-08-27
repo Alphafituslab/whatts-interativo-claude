@@ -2368,8 +2368,16 @@ def marcar_resultado(conversa_id):
     conn.execute("UPDATE whatsapp_conversas SET resultado = ? WHERE id = ?", (resultado, conversa_id))
     # "Venda" é REPETÍVEL — o mesmo cliente pode fechar negócio de novo
     # mais pra frente, e cada vez conta separado no histórico (pedido do
-    # Clayton, 2026-08-27; nunca sobrescreve uma marcação anterior).
+    # Clayton, 2026-08-27; nunca sobrescreve uma marcação anterior). Mas
+    # só UMA por dia por conversa — evita duplicar por clique duplo/engano.
     if resultado == "venda":
+        hoje = _now_iso()[:10]
+        ja_hoje = conn.execute(
+            "SELECT 1 FROM whatsapp_negociacoes_fechadas WHERE conversa_id = ? AND marcado_em LIKE ?",
+            (conversa_id, hoje + "%"),
+        ).fetchone()
+        if ja_hoje:
+            raise ApiError("Esta conversa já teve uma negociação marcada como fechada hoje.", status=409, codigo="negociacao_ja_marcada_hoje")
         conn.execute(
             "INSERT INTO whatsapp_negociacoes_fechadas (conversa_id, contato_id, usuario_id, empresa_id, marcado_em) "
             "VALUES (?, ?, ?, ?, ?)",
