@@ -959,6 +959,7 @@
     const chip = e.target.closest(".wpp-tag-filtro, .wpp-tag-chip");
     if (!chip || !chip.dataset.id) return; // o "✕ limpar" do filtro não tem id, não abre menu
     e.preventDefault();
+    e.stopImmediatePropagation(); // sem isso, o menu geral da conversa (cadastrado depois, no mesmo document) roda também e apaga este
     const interna = chip.classList.contains("wpp-tag-chip")
       ? chip.dataset.interna === "1"
       : chip.dataset.acao === "filtrar-por-etiqueta-interno";
