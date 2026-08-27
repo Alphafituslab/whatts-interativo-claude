@@ -35,6 +35,7 @@
     filtroAtividadesUsuarioId: null,
     versaoServidor: null,
     buscaConversas: null,
+    buscaData: null, // "AAAA-MM-DD" — filtro de data nas Conversas, pode vir junto com buscaConversas ou sozinho
     slaAlertasIds: new Set(),
   };
   if (state.tema !== "auto") document.documentElement.setAttribute("data-tema", state.tema);
@@ -554,6 +555,13 @@
         recriado.setSelectionRange(recriado.value.length, recriado.value.length);
       }
     }, 350);
+  });
+
+  document.addEventListener("change", (e) => {
+    const campoData = e.target.closest('form[data-form="buscar-conversas"] input[name="data"]');
+    if (!campoData) return;
+    state.buscaData = campoData.value || null;
+    renderWhatsapp(null);
   });
 
   // Ctrl+V com um print na área de transferência manda a imagem pra
@@ -3033,13 +3041,20 @@
     _carregandoSeTrocouDeTela("whatsapp");
     let conversas;
     let contatosSemConversa = [];
-    if (state.buscaConversas) {
+    if (state.buscaConversas || state.buscaData) {
       // A busca de conversas parte das CONVERSAS, então um contato salvo
       // que nunca escreveu não apareceria nunca. Procura na agenda
-      // também e mostra à parte, com botão pra iniciar a conversa.
+      // também e mostra à parte, com botão pra iniciar a conversa — mas
+      // só faz sentido pra busca por texto (a agenda não tem data de
+      // conversa nenhuma).
+      const paramsBusca = new URLSearchParams();
+      if (state.buscaConversas) paramsBusca.set("q", state.buscaConversas);
+      if (state.buscaData) paramsBusca.set("data", state.buscaData);
       const [achadas, contatos] = await Promise.all([
-        chamarApi(`/whatsapp/conversas/buscar?q=${encodeURIComponent(state.buscaConversas)}`),
-        chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(state.buscaConversas)}`).catch(() => []),
+        chamarApi(`/whatsapp/conversas/buscar?${paramsBusca.toString()}`),
+        state.buscaConversas
+          ? chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(state.buscaConversas)}`).catch(() => [])
+          : Promise.resolve([]),
       ]);
       conversas = achadas;
       const telefonesComConversa = new Set(achadas.map((c) => c.telefone));
@@ -3097,11 +3112,12 @@
          <div class="wpp-painel-lista">
            <form class="wpp-busca-form" data-form="buscar-conversas">
              <input type="search" name="q" class="wpp-busca-input" placeholder="Buscar por nome, telefone ou mensagem…" autocomplete="off" value="${escapeHtml(state.buscaConversas || "")}">
+             <input type="date" name="data" class="wpp-busca-data" title="Filtrar por um dia" value="${state.buscaData || ""}">
              <button type="submit" class="botao-icone" title="Buscar">🔍</button>
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
-             ${state.buscaConversas ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
+             ${(state.buscaConversas || state.buscaData) ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
-           ${state.buscaConversas ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados para "${escapeHtml(state.buscaConversas)}"</p>` : htmlAbasConversas() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
+           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas)}</div>
@@ -3131,7 +3147,7 @@
   async function atualizarListaConversasNoDom() {
     const lista = document.querySelector("[data-wpp-lista]");
     if (!lista) return;
-    if (state.buscaConversas) return; // não sobrescreve um resultado de busca ativo
+    if (state.buscaConversas || state.buscaData) return; // não sobrescreve um resultado de busca ativo
     const conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
     const conversaAtivaId = Number(location.hash.split("/")[2]) || null;
     if (!conversas.length) { _pintarSeMudou(lista, htmlListaConversas(conversas, conversaAtivaId)); return; }
@@ -5397,6 +5413,7 @@
       }
       case "limpar-busca-conversas": {
         state.buscaConversas = null;
+        state.buscaData = null;
         return renderWhatsapp(null);
       }
       case "devolver-para-fila": {
@@ -6373,6 +6390,7 @@
       case "buscar-conversas": {
         const q = (dados.get("q") || "").trim();
         state.buscaConversas = q.length >= 2 ? q : null;
+        state.buscaData = (dados.get("data") || "").trim() || null;
         return renderWhatsapp(null);
       }
       case "buscar-contatos-modal": {

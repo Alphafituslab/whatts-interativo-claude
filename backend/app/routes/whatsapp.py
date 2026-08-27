@@ -807,8 +807,9 @@ def contagem_abas():
 def buscar_conversas():
     usuario = g.usuario_atual
     q = (request.args.get("q") or "").strip()
-    if len(q) < 2:
-        raise ApiError("Digite ao menos 2 caracteres pra buscar.", status=400)
+    data_filtro = (request.args.get("data") or "").strip()
+    if len(q) < 2 and not data_filtro:
+        raise ApiError("Digite ao menos 2 caracteres ou escolha uma data pra buscar.", status=400)
     conn = get_db()
     termo = f"%{q}%"
     # Telefone é guardado só com dígitos (5548991212203), mas ninguém
@@ -821,10 +822,26 @@ def buscar_conversas():
     condicoes = [
         "ct.empresa_id = ?",
         "c.excluida_em IS NULL",
-        f"(ct.nome LIKE ? OR {por_telefone} OR EXISTS ("
-        "SELECT 1 FROM whatsapp_mensagens m WHERE m.conversa_id = c.id AND m.texto LIKE ? AND m.excluida_em IS NULL))",
     ]
-    params = [g.empresa_id, termo, f"%{digitos}%" if len(digitos) >= 4 else termo, termo]
+    params = [g.empresa_id]
+    if len(q) >= 2:
+        condicoes.append(
+            f"(ct.nome LIKE ? OR {por_telefone} OR EXISTS ("
+            "SELECT 1 FROM whatsapp_mensagens m WHERE m.conversa_id = c.id AND m.texto LIKE ? AND m.excluida_em IS NULL))"
+        )
+        params.extend([termo, f"%{digitos}%" if len(digitos) >= 4 else termo, termo])
+    if data_filtro:
+        try:
+            dia = datetime.datetime.strptime(data_filtro, "%Y-%m-%d")
+        except ValueError:
+            raise ApiError("Data inválida.", status=400)
+        inicio_utc = (dia + datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        fim_utc = (dia + datetime.timedelta(days=1, hours=3)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        condicoes.append(
+            "EXISTS (SELECT 1 FROM whatsapp_mensagens m WHERE m.conversa_id = c.id "
+            "AND m.excluida_em IS NULL AND m.criado_em >= ? AND m.criado_em < ?)"
+        )
+        params.extend([inicio_utc, fim_utc])
     if not usuario["admin"]:
         sql_visivel, params_visivel = _sql_visivel_nao_admin(conn, usuario)
         condicoes.append(sql_visivel)
