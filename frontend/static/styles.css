@@ -1034,6 +1034,7 @@ nav { perspective: 800px; }
    Cada botão usa a cor da própria etiqueta: apagado quando desligado,
    pintado quando é ele que está filtrando.
    ===================================================================== */
+.botao-negociacao-fechada { background: color-mix(in srgb, #0a7d67 18%, transparent); border-color: #0a7d67; color: #0a7d67; }
 .wpp-filtro-atendente { padding: 0 4px 8px; }
 .wpp-filtro-atendente select {
   width: 100%; padding: 6px 8px; border-radius: var(--raio-peq); border: 1px solid var(--borda);

@@ -2320,6 +2320,11 @@ def fechar_conversa(conversa_id):
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
         raise ApiError("Só o responsável por esta conversa (ou um administrador) pode encerrá-la.", status=403, codigo="sem_permissao")
+    # "Encerrar sem marcar" não apaga um resultado que já tinha sido
+    # marcado antes (ver marcar_resultado) — só um resultado novo,
+    # explícito, sobrescreve o anterior.
+    if resultado is None and conversa["resultado"]:
+        resultado = conversa["resultado"]
     whatsapp_service.fechar_conversa(conn, conversa_id, resultado)
     # Administrador encerrando o atendimento de OUTRA pessoa: libera o
     # dono na hora, pra a conversa ficar disponivel pra qualquer um do
@@ -2331,6 +2336,33 @@ def fechar_conversa(conversa_id):
         whatsapp_service.atribuir_conversa(conn, conversa_id, None, usuario["id"])
     whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_fechada", f"{conversa['telefone']}" + (f" ({resultado})" if resultado else ""), conversa_id)
     return jsonify({"ok": True})
+
+
+@bp.put("/conversas/<int:conversa_id>/resultado")
+@requires_auth
+def marcar_resultado(conversa_id):
+    """Marca (ou desmarca) venda/perdido numa conversa SEM encerrar o
+    atendimento — pro Dashboard já contar a conversão na hora, mesmo o
+    atendente continuando a falar com o cliente depois (ex.: tirar
+    dúvida sobre entrega). Fechar a conversa continua perguntando o
+    resultado também (ver fechar_conversa) — as duas formas gravam no
+    mesmo lugar, então marcar aqui e encerrar depois "sem marcar" não
+    apaga o que já foi marcado."""
+    usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
+    resultado = dados.get("resultado")
+    if resultado not in (None, "venda", "perdido"):
+        raise ApiError("Resultado inválido — use 'venda', 'perdido' ou deixe em branco.", status=400)
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError("Só o responsável por esta conversa (ou um administrador) pode marcar o resultado.", status=403, codigo="sem_permissao")
+    conn.execute("UPDATE whatsapp_conversas SET resultado = ? WHERE id = ?", (resultado, conversa_id))
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "resultado_marcado",
+        f"{conversa['telefone']} ({resultado or 'sem marcação'})", conversa_id,
+    )
+    return jsonify({"ok": True, "resultado": resultado})
 
 
 @bp.post("/conversas/<int:conversa_id>/reabrir")

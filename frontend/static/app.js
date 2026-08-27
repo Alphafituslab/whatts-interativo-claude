@@ -3021,6 +3021,9 @@
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
+          ${!conversa.eh_grupo ? (conversa.resultado === "venda"
+            ? `<button type="button" class="botao secundario pequeno botao-negociacao-fechada" data-acao="marcar-negociacao" data-id="${conversa.id}" data-resultado="" title="Clique pra desmarcar">💰 Negociação fechada</button>`
+            : `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" data-resultado="venda" title="Marca a venda como concluída sem encerrar o atendimento — já entra na taxa de conversão do Dashboard">💰 Marcar negociação fechada</button>`) : ""}
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}
@@ -6695,6 +6698,13 @@
         definirFlash("ok", `${resp.importados} contato(s) novo(s) importado(s)${resp.ja_existiam ? `, ${resp.ja_existiam} já existiam` : ""}${resp.invalidos ? `, ${resp.invalidos} inválido(s)` : ""}.`);
         fecharModais();
         return montarRota();
+      }
+      case "marcar-negociacao": {
+        const conversaId = Number(alvo.dataset.id);
+        const resultado = alvo.dataset.resultado || null;
+        await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado } });
+        definirFlash("ok", resultado ? "Marcado como negociação fechada — já entra no Dashboard, sem encerrar o atendimento." : "Desmarcado.");
+        return renderWhatsapp(conversaId);
       }
       case "salvar-edicao-etiqueta": {
         const nome = (dados.get("nome") || "").trim();
