@@ -231,7 +231,7 @@
   // Layout
   // ---------------------------------------------------------------------
   const ITENS_MENU = [
-    { rota: "#/whatsapp", chave: "whatsapp", label: "Conversas", icone: "💬", exigeConversas: true },
+    { rota: "#/whatsapp", chave: "whatsapp", label: "WhatsApp", icone: "💬", exigeConversas: true },
     { rota: "#/chat-interno", chave: "chat-interno", label: "Chat interno", icone: "🗨️" },
     { rota: "#/agendamentos", chave: "agendamentos", label: "Agendamentos", icone: "🕒" },
     { rota: "#/lembretes", chave: "lembretes", label: "Lembretes", icone: "🔔" },
@@ -4377,7 +4377,7 @@
            <thead><tr><th>Quando</th><th>Cliente</th><th>Anotação</th>${verTodos ? "<th>Responsável</th>" : ""}<th></th></tr></thead>
            <tbody>${linhas}</tbody>
          </table>` : `<p class="texto-suave">Nenhum lembrete pendente.</p>
-           <p class="dica">Lembretes são criados <strong>dentro da conversa</strong>: abra o cliente em <a href="#/whatsapp">Conversas</a> e clique no 🔔 no topo. Serve pra você não esquecer de algo — só você é avisado.</p>`}
+           <p class="dica">Lembretes são criados <strong>dentro da conversa</strong>: abra o cliente em <a href="#/whatsapp">WhatsApp</a> e clique no 🔔 no topo. Serve pra você não esquecer de algo — só você é avisado.</p>`}
        </div>`,
       "lembretes"
     );
