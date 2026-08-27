@@ -1937,11 +1937,14 @@
       pararPollingLembretes();
       pararPollingWhatsapp();
       pararPollingStatusWhatsapp();
-      // Recarrega a página de verdade (não só troca de tela dentro do
-      // SPA) — só assim o navegador busca o app.js/styles.css novos.
-      // Sem isso, a aba continuava rodando o JS/CSS antigo em memória
-      // pra sempre, mesmo depois de deslogar e logar de novo nela mesma.
-      localStorage.setItem("whatts_flash_pos_reload", "Sistema atualizado.");
+      // Sai da conta e recarrega de verdade — o Clayton preferiu assim
+      // (2026-08-27): um recarregar sem sair as vezes nao bastava pra
+      // garantir que o navegador largasse o JS antigo que ja estava
+      // rodando em memoria. Deslogar forca uma pagina nova do zero, sem
+      // chance de sobrar nada da versao anterior.
+      try { await chamarApi("/auth/logout", { method: "POST", body: { refresh_token: state.refreshToken } }); } catch (e) { /* ignora */ }
+      limparSessao();
+      localStorage.setItem("whatts_flash_pos_reload", "O sistema foi atualizado — faça login novamente pra usar a versão mais recente.");
       location.reload();
     } catch (e) { /* próxima tentativa corrige */ }
   }
@@ -3356,15 +3359,20 @@
   function htmlVistoInterno(m, conversa, eu) {
     const souCriador = conversa.criado_por_id === eu;
     const vistoOutro = souCriador ? conversa.visto_participante_em : conversa.visto_criador_em;
+    const outroOnline = souCriador ? conversa.participante_online : conversa.criado_por_online;
     const lida = vistoOutro && new Date(vistoOutro) >= new Date(m.criado_em);
-    // Mesmo padrão das conversas de cliente: ✓✓ cinza = chegou e ainda
-    // não foi vista; ✓✓ azul = visualizada. Aqui não existe um "✓"
-    // duradouro de "enviada mas não entregue" — a mensagem é gravada no
-    // nosso próprio banco, então "enviada" e "entregue" são o mesmo
-    // instante.
-    return lida
-      ? `<span class="wpp-bolha-status wpp-status-lida" title="Visualizada em ${fmtData(vistoOutro)}">✓✓</span>`
-      : `<span class="wpp-bolha-status" title="Enviada — ainda não visualizada">✓✓</span>`;
+    // Três estados, do jeito que o Clayton pediu:
+    //   ✓     a pessoa está OFFLINE agora — a mensagem está aqui
+    //         esperando, mas o aparelho dela nem está ligado pra "chegar".
+    //   ✓✓    a pessoa está online, mas ainda não abriu esta conversa.
+    //   ✓✓ azul  a pessoa abriu e viu.
+    if (lida) {
+      return `<span class="wpp-bolha-status wpp-status-lida" title="Visualizada em ${fmtData(vistoOutro)}">✓✓</span>`;
+    }
+    if (outroOnline) {
+      return `<span class="wpp-bolha-status" title="Online, mas ainda não abriu esta conversa">✓✓</span>`;
+    }
+    return `<span class="wpp-bolha-status" title="A pessoa está offline no momento">✓</span>`;
   }
 
   function htmlBolhaInterna(m, conversa) {
