@@ -134,6 +134,16 @@ def login():
     if usuario is None or not security.verify_password(senha, usuario["senha_hash"]):
         limite_tentativas.registrar_falha(chaves)
         raise AuthError("Email ou senha incorretos.")
+
+    # Endereço de acesso é de uma empresa específica, mas o email é de
+    # outra: recusa. Cada empresa cliente tem o próprio endereço — entrar
+    # pelo de outra normalmente é engano (endereço errado, favorito
+    # antigo), e é bom avisar em vez de deixar logar num lugar que não é
+    # o dela.
+    host = (request.host or "").split(":")[0].lower()
+    dono_do_dominio = conn.execute("SELECT id FROM empresas WHERE dominio = ?", (host,)).fetchone()
+    if dono_do_dominio is not None and dono_do_dominio["id"] != usuario["empresa_id"]:
+        raise AuthError("Este endereço é de outra empresa. Confira o link de acesso.")
     if not usuario["ativo"]:
         raise AuthError("Usuário inativo.")
     horario_permitido = usuario["horario_permitido"] if "horario_permitido" in usuario.keys() else None

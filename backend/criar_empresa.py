@@ -5,7 +5,12 @@ usuário administrador dela — cada empresa fica com dados 100% isolados
 configuração de WhatsApp), mesmo compartilhando o mesmo banco de dados.
 
 Uso:
-    python criar_empresa.py "Nome da Empresa" admin@empresa.com
+    python criar_empresa.py "Nome da Empresa" admin@empresa.com [dominio.da.empresa.com.br]
+
+O domínio é opcional (dá pra cadastrar depois, direto no banco), mas sem
+ele a tela de login desta empresa mostra a logo padrão até alguém
+configurar. Lembre de criar o bloco correspondente no Caddyfile e apontar
+o DNS do cliente pra este servidor — isso ainda é feito à mão.
 
 A senha é lida de WPP_NOVA_EMPRESA_SENHA; se não for definida, uma senha
 aleatória forte é gerada e impressa uma única vez no terminal.
@@ -45,7 +50,7 @@ SETORES_PADRAO = [
 ]
 
 
-def criar_empresa(nome_empresa: str, admin_email: str, admin_senha: str = None, conn=None, imprimir=True):
+def criar_empresa(nome_empresa: str, admin_email: str, admin_senha: str = None, dominio: str = None, conn=None, imprimir=True):
     proprio_conn = conn is None
     if proprio_conn:
         conn = db_module._connect()
@@ -55,9 +60,15 @@ def criar_empresa(nome_empresa: str, admin_email: str, admin_senha: str = None, 
     if ja_existe:
         raise SystemExit(f"Já existe um usuário com o email {email} (email é único em todo o sistema, mesmo entre empresas diferentes).")
 
+    dominio = (dominio or "").strip().lower() or None
+    if dominio:
+        conflito = conn.execute("SELECT id FROM empresas WHERE dominio = ?", (dominio,)).fetchone()
+        if conflito:
+            raise SystemExit(f"O domínio {dominio} já está em uso por outra empresa.")
+
     cur = conn.execute(
-        "INSERT INTO empresas (nome, ativo, criado_em) VALUES (?, 1, ?)",
-        (nome_empresa.strip(), _now_iso()),
+        "INSERT INTO empresas (nome, ativo, criado_em, dominio) VALUES (?, 1, ?, ?)",
+        (nome_empresa.strip(), _now_iso(), dominio),
     )
     empresa_id = cur.lastrowid
 
@@ -83,6 +94,10 @@ def criar_empresa(nome_empresa: str, admin_email: str, admin_senha: str = None, 
         print(f"Usuário administrador: {email}")
         if senha_gerada:
             print(f"Senha gerada (guarde agora, não será mostrada de novo): {senha_gerada}")
+        if dominio:
+            print(f"Domínio: {dominio} — falta criar o bloco no Caddyfile e apontar o DNS do cliente pra este servidor.")
+        else:
+            print("Sem domínio próprio ainda: a tela de login dela usa a logo padrão até alguém preencher o campo `dominio` na tabela `empresas`.")
         print("Agora é só logar com esse email/senha e preencher a Configuração do WhatsApp (URL/chave/instância da Evolution API dela).")
 
     if proprio_conn:
@@ -92,8 +107,8 @@ def criar_empresa(nome_empresa: str, admin_email: str, admin_senha: str = None, 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Uso: python criar_empresa.py \"Nome da Empresa\" admin@empresa.com")
+        print("Uso: python criar_empresa.py \"Nome da Empresa\" admin@empresa.com [dominio.da.empresa.com.br]")
         sys.exit(1)
     if not os.path.exists(db_module.get_db_path()):
         db_module.init_db()
-    criar_empresa(sys.argv[1], sys.argv[2])
+    criar_empresa(sys.argv[1], sys.argv[2], dominio=(sys.argv[3] if len(sys.argv) > 3 else None))

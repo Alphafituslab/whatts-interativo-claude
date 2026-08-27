@@ -3,7 +3,7 @@ import logging
 import os
 import secrets
 
-from flask import Flask, jsonify, redirect, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory
 
 from .context import ApiError, close_db
 
@@ -104,14 +104,30 @@ def create_app(test_config: dict = None) -> Flask:
     def marca():
         """Qual logo mostrar na tela de login. Sem autenticação porque a
         tela de login vem ANTES de existir sessão — e logo de empresa não
-        é informação sigilosa. Usa a primeira empresa configurada: hoje
-        cada instalação atende uma empresa; quando houver mais de uma no
-        mesmo servidor, isso precisa passar a olhar o domínio de acesso."""
+        é informação sigilosa.
+
+        Primeiro tenta pelo ENDEREÇO usado pra acessar (empresas.dominio):
+        é assim que cada empresa cliente, com seu próprio endereço, vê a
+        própria logo sem precisar logar antes. Sem domínio reconhecido
+        (o endereço principal, ou uma instalação com uma empresa só),
+        cai na primeira empresa cadastrada — o comportamento de sempre.
+        """
         from .context import get_db
+        conn = get_db()
+        host = (request.host or "").split(":")[0].lower()
         try:
-            row = get_db().execute(
-                "SELECT logo_url FROM configuracoes_whatsapp WHERE logo_url IS NOT NULL ORDER BY empresa_id LIMIT 1"
+            row = conn.execute(
+                """
+                SELECT cw.logo_url FROM empresas emp
+                JOIN configuracoes_whatsapp cw ON cw.empresa_id = emp.id
+                WHERE emp.dominio = ? AND emp.ativo = 1
+                """,
+                (host,),
             ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT logo_url FROM configuracoes_whatsapp WHERE logo_url IS NOT NULL ORDER BY empresa_id LIMIT 1"
+                ).fetchone()
             return jsonify({"logo_url": row["logo_url"] if row else None})
         except Exception:
             return jsonify({"logo_url": None})
