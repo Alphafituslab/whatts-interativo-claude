@@ -5756,6 +5756,26 @@
         modalAgendarInterno(Number(alvo.dataset.id));
         return;
       }
+      case "chamar-atencao-interna": {
+        if (alvo.disabled) return;
+        const conversaId = Number(alvo.dataset.id);
+        alvo.disabled = true;
+        const iconeOriginal = alvo.textContent;
+        try {
+          await chamarApi(`/chat-interno/conversas/${conversaId}/chamar-atencao`, { method: "POST" });
+          alvo.textContent = "✅";
+          tocarConfirmacaoAtencaoEnviada();
+          _mostrarConfirmacaoAtencaoEnviada(alvo.dataset.nome);
+        } catch (erro) {
+          alvo.textContent = "⚠️";
+        } finally {
+          // Trava 1,5s só pra evitar clique duplo sem querer — não é
+          // limite de quantas vezes chamar, é só não martelar sem
+          // querer no mesmo toque de dedo.
+          setTimeout(() => { alvo.textContent = iconeOriginal; alvo.disabled = false; }, 1500);
+        }
+        return;
+      }
       case "abrir-agendar-contato": {
         modalAgendarContato(Number(alvo.dataset.id));
         return;
@@ -6617,26 +6637,6 @@
         _desenharBarraCitacao();
         await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto, responde_a: citada } });
         await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
-        return;
-      }
-      case "chamar-atencao-interna": {
-        if (alvo.disabled) return;
-        const conversaId = Number(alvo.dataset.id);
-        alvo.disabled = true;
-        const iconeOriginal = alvo.textContent;
-        try {
-          await chamarApi(`/chat-interno/conversas/${conversaId}/chamar-atencao`, { method: "POST" });
-          alvo.textContent = "✅";
-          tocarConfirmacaoAtencaoEnviada();
-          _mostrarConfirmacaoAtencaoEnviada(alvo.dataset.nome);
-        } catch (erro) {
-          alvo.textContent = "⚠️";
-        } finally {
-          // Trava 1,5s só pra evitar clique duplo sem querer — não é
-          // limite de quantas vezes chamar, é só não martelar sem
-          // querer no mesmo toque de dedo.
-          setTimeout(() => { alvo.textContent = iconeOriginal; alvo.disabled = false; }, 1500);
-        }
         return;
       }
       case "encaminhar-interno": {
