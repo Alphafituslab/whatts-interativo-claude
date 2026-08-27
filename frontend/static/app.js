@@ -5798,6 +5798,13 @@
         return montarRota();
       }
       case "fechar-conversa": modalFecharConversa(Number(alvo.dataset.id)); return;
+      case "marcar-negociacao": {
+        const conversaId = Number(alvo.dataset.id);
+        const resultado = alvo.dataset.resultado || null;
+        await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado } });
+        definirFlash("ok", resultado ? "Marcado como negociação fechada — já entra no Dashboard, sem encerrar o atendimento." : "Desmarcado.");
+        return renderWhatsapp(conversaId);
+      }
       case "fechar-conversa-com-resultado": {
         const id = Number(alvo.dataset.id);
         const resultado = alvo.dataset.resultado || undefined;
@@ -6699,13 +6706,6 @@
         definirFlash("ok", `${resp.importados} contato(s) novo(s) importado(s)${resp.ja_existiam ? `, ${resp.ja_existiam} já existiam` : ""}${resp.invalidos ? `, ${resp.invalidos} inválido(s)` : ""}.`);
         fecharModais();
         return montarRota();
-      }
-      case "marcar-negociacao": {
-        const conversaId = Number(alvo.dataset.id);
-        const resultado = alvo.dataset.resultado || null;
-        await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado } });
-        definirFlash("ok", resultado ? "Marcado como negociação fechada — já entra no Dashboard, sem encerrar o atendimento." : "Desmarcado.");
-        return renderWhatsapp(conversaId);
       }
       case "salvar-edicao-etiqueta": {
         const nome = (dados.get("nome") || "").trim();
