@@ -3035,12 +3035,11 @@
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
-          ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno ${conversa.resultado === "venda" ? "botao-negociacao-fechada" : ""}" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}
           <button type="button" class="botao-icone wpp-mais-acoes ${conversa.resumo || conversa.proximo_contato_em ? "wpp-icone-preenchido" : ""}" data-acao="abrir-mais-acoes" data-id="${conversa.id}"
-            data-resumo="${escapeHtml(conversa.resumo || "")}" data-arquivada="${conversa.arquivada ? "1" : "0"}"
+            data-resumo="${escapeHtml(conversa.resumo || "")}" data-arquivada="${conversa.arquivada ? "1" : "0"}" data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}"
             data-proximo="${escapeHtml(conversa.proximo_contato_em || "")}" title="Mais ações">⋯</button>
         </div>
       </div>
@@ -5652,10 +5651,12 @@
         const r = alvo.getBoundingClientRect();
         const arquivada = alvo.dataset.arquivada === "1";
         const proximo = alvo.dataset.proximo;
+        const ehGrupo = alvo.dataset.ehGrupo === "1";
         return abrirMenuContexto(r.right - 250, r.bottom + 4, [
           { acao: "abrir-resumo", id, rotulo: alvo.dataset.resumo ? "📝 Ver/editar resumo" : "📝 Escrever resumo",
             dados: { resumo: alvo.dataset.resumo } },
           { acao: "abrir-lembrete", id, rotulo: "🔔 Criar lembrete de retorno" },
+          ...(!ehGrupo ? [{ acao: "marcar-negociacao", id, rotulo: "💰 Marcar negociação fechada" }] : []),
           { acao: "abrir-agendar-contato", id,
             rotulo: proximo ? `📞 Próximo contato: ${fmtData(proximo)}` : "📞 Agendar próximo contato" },
           { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id,
