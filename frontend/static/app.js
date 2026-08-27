@@ -69,6 +69,42 @@
     } catch (e) { return iso; }
   }
 
+  function _diaLocal(iso) {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    } catch (e) { return ""; }
+  }
+
+  function _rotuloDoDia(diaLocal) {
+    const [ano, mes, dia] = diaLocal.split("-");
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  function htmlDivisorDeDia(diaLocal) {
+    return `<div class="wpp-divisor-dia"><span>${_rotuloDoDia(diaLocal)}</span></div>`;
+  }
+
+  // Intercala um divisor de data toda vez que o dia muda entre uma
+  // mensagem e a anterior — o "27/08/2026" que separa visualmente as
+  // conversas de dias diferentes, do jeito que todo chat costuma
+  // mostrar. Cada item ganha uma chave propria pra \_sincronizarLista
+  // conseguir atualizar so o que mudou, sem redesenhar a lista inteira.
+  function _comDivisoresDeDia(mensagens) {
+    const itens = [];
+    let diaAnterior = null;
+    for (const m of mensagens) {
+      const dia = _diaLocal(m.criado_em);
+      if (dia && dia !== diaAnterior) {
+        itens.push({ chave: `dia-${dia}`, divisor: dia });
+        diaAnterior = dia;
+      }
+      itens.push({ chave: String(m.id), mensagem: m });
+    }
+    return itens;
+  }
+
   function fmtHoraCurta(iso) {
     if (!iso) return "";
     try {
@@ -392,6 +428,17 @@
       document.querySelectorAll("[data-wpp-logo]").forEach((img) => { img.src = r.logo_url; });
     } catch (e) { /* fica a padrao */ }
   }
+
+  // A hora de cada mensagem fica escondida até a pessoa clicar nela
+  // (pedido do Clayton, 2026-08-27) — só o dia continua sempre visível,
+  // no divisor. Roda separado do listener de data-acao: aqui é só pra
+  // cliques que NÃO caíram em nenhum botão de ação da bolha (reagir,
+  // citar, editar…), senão clicar num botão também alternaria a hora.
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-acao]")) return;
+    const bolha = e.target.closest(".wpp-bolha");
+    if (bolha) bolha.classList.toggle("wpp-hora-visivel");
+  });
 
   document.addEventListener("click", async (e) => {
     const alvo = e.target.closest("[data-acao]");
@@ -2363,7 +2410,9 @@
     // aparecia só na mensagem seguinte quando a checagem era só a
     // contagem).
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
-    const mudou = _sincronizarLista(painel, mensagens, (m) => m.id, (m) => htmlBolhaInterna(m, conversa));
+    const itensInternos = _comDivisoresDeDia(mensagens);
+    const mudou = _sincronizarLista(painel, itensInternos, (it) => it.chave,
+      (it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa));
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 
@@ -2862,7 +2911,7 @@
           <button type="button" class="botao pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>
         </div>` : ""}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}">${mensagens.map((m) => htmlBolha(m, !!conversa.eh_grupo)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo)).join("")}</div>
       ${htmlAgendadas(agendadas)}
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem" data-conversa-id="${conversa.id}">
@@ -3076,7 +3125,9 @@
     // Precisa saber se é grupo pra desenhar o autor de cada mensagem —
     // sem isso o redesenho apagava os nomes que a montagem tinha posto.
     const ehGrupo = !!(painel.dataset.ehGrupo === "1");
-    const mudou = _sincronizarLista(painel, mensagens, (m) => m.id, (m) => htmlBolha(m, ehGrupo));
+    const itens = _comDivisoresDeDia(mensagens);
+    const mudou = _sincronizarLista(painel, itens, (it) => it.chave,
+      (it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, ehGrupo));
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 
@@ -3444,7 +3495,7 @@
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens-interno>${mensagens.map((m) => htmlBolhaInterna(m, conversa)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens-interno>${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa)).join("")}</div>
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
         <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" multiple hidden>
