@@ -65,6 +65,7 @@ SCHEMA_FILES = [
     "schema_050_dominio_empresa.sql",
     "schema_051_chamar_atencao.sql",
     "schema_052_assinar_mensagens.sql",
+    "schema_053_negociacoes_fechadas.sql",
 ]
 
 

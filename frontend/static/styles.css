@@ -1035,6 +1035,13 @@ nav { perspective: 800px; }
    pintado quando é ele que está filtrando.
    ===================================================================== */
 .botao-negociacao-fechada { background: color-mix(in srgb, #0a7d67 18%, transparent); border-color: #0a7d67; color: #0a7d67; }
+.wpp-negociacoes-lista { display: flex; flex-direction: column; gap: 4px; padding: 0 4px 8px; }
+.wpp-negociacao-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: color-mix(in srgb, #0a7d67 12%, transparent); border: 1px solid color-mix(in srgb, #0a7d67 35%, transparent);
+  border-radius: var(--raio-peq); padding: 5px 9px; font-size: 12px;
+}
+.wpp-negociacao-item .wpp-tag-tirar { background: rgba(0,0,0,0.15); }
 .wpp-filtro-atendente { padding: 0 4px 8px; }
 .wpp-filtro-atendente select {
   width: 100%; padding: 6px 8px; border-radius: var(--raio-peq); border: 1px solid var(--borda);

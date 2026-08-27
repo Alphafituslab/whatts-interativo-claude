@@ -584,8 +584,16 @@ def listar_conversas():
     # Encerrada sai da frente. Continua na busca, no histórico e na aba
     # "Todas" do administrador — e volta pra cá sozinha se o cliente
     # escrever de novo, porque a mensagem que chega reabre a conversa.
-    if escopo in ("minhas", "fila", "sem_menu") and not incluir_arquivadas:
+    resultado_filtro = request.args.get("resultado")
+    if resultado_filtro and resultado_filtro not in ("venda", "perdido"):
+        raise ApiError("Filtro de resultado inválido.", status=400)
+
+    if escopo in ("minhas", "fila", "sem_menu") and not incluir_arquivadas and not resultado_filtro:
         condicoes.append("c.status = 'aberta'")
+
+    if resultado_filtro:
+        condicoes.append("c.resultado = ?")
+        params.append(resultado_filtro)
 
     # Filtro por atendente — só admin. Vale junto com a aba/etiqueta já
     # escolhidas; na prática só faz sentido dentro de "Todas" (nas
@@ -2358,11 +2366,65 @@ def marcar_resultado(conversa_id):
     if not _pode_agir(usuario, conversa):
         raise ApiError("Só o responsável por esta conversa (ou um administrador) pode marcar o resultado.", status=403, codigo="sem_permissao")
     conn.execute("UPDATE whatsapp_conversas SET resultado = ? WHERE id = ?", (resultado, conversa_id))
+    # "Venda" é REPETÍVEL — o mesmo cliente pode fechar negócio de novo
+    # mais pra frente, e cada vez conta separado no histórico (pedido do
+    # Clayton, 2026-08-27; nunca sobrescreve uma marcação anterior).
+    if resultado == "venda":
+        conn.execute(
+            "INSERT INTO whatsapp_negociacoes_fechadas (conversa_id, contato_id, usuario_id, empresa_id, marcado_em) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (conversa_id, conversa["contato_id"], usuario["id"], g.empresa_id, _now_iso()),
+        )
     whatsapp_service.registrar_atividade(
         conn, usuario["id"], "resultado_marcado",
         f"{conversa['telefone']} ({resultado or 'sem marcação'})", conversa_id,
     )
     return jsonify({"ok": True, "resultado": resultado})
+
+
+@bp.get("/conversas/<int:conversa_id>/negociacoes")
+@requires_auth
+def listar_negociacoes_fechadas(conversa_id):
+    """Histórico de vezes que essa conversa foi marcada como negociação
+    fechada — aparece intercalado com as mensagens, como um aviso visível
+    só dentro do Seja Alpha (nunca é mandado pro cliente no WhatsApp)."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_visualizar(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    rows = conn.execute(
+        "SELECT n.id, n.marcado_em, u.nome AS usuario_nome FROM whatsapp_negociacoes_fechadas n "
+        "JOIN usuarios u ON u.id = n.usuario_id WHERE n.conversa_id = ? ORDER BY n.marcado_em",
+        (conversa_id,),
+    ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.delete("/conversas/<int:conversa_id>/negociacoes/<int:negociacao_id>")
+@requires_auth
+def desfazer_negociacao_fechada(conversa_id, negociacao_id):
+    """Desfaz uma marcação por engano — só quem marcou ou um admin."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    linha = conn.execute(
+        "SELECT * FROM whatsapp_negociacoes_fechadas WHERE id = ? AND conversa_id = ?",
+        (negociacao_id, conversa_id),
+    ).fetchone()
+    if linha is None:
+        raise ApiError("Marcação não encontrada.", status=404, codigo="nao_encontrado")
+    if linha["usuario_id"] != usuario["id"] and not usuario["admin"]:
+        raise ApiError("Só quem marcou (ou um administrador) pode desfazer.", status=403, codigo="sem_permissao")
+    conn.execute("DELETE FROM whatsapp_negociacoes_fechadas WHERE id = ?", (negociacao_id,))
+    # Se essa era a ÚLTIMA marcação desta conversa, o "resultado" atual
+    # (usado no filtro e no mapa de conversão) também deixa de valer.
+    sobrou = conn.execute(
+        "SELECT 1 FROM whatsapp_negociacoes_fechadas WHERE conversa_id = ? LIMIT 1", (conversa_id,)
+    ).fetchone()
+    if not sobrou and conversa["resultado"] == "venda":
+        conn.execute("UPDATE whatsapp_conversas SET resultado = NULL WHERE id = ?", (conversa_id,))
+    return jsonify({"ok": True})
 
 
 @bp.post("/conversas/<int:conversa_id>/reabrir")

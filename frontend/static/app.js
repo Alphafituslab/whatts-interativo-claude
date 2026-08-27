@@ -2995,7 +2995,18 @@
     </details>`;
   }
 
-  function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas) {
+  function htmlNegociacoesFechadas(conversaId, negociacoes) {
+    if (!negociacoes || !negociacoes.length) return "";
+    return `<div class="wpp-negociacoes-lista">
+      ${negociacoes.map((n) => `
+        <div class="wpp-negociacao-item">
+          <span>💰 Negociação fechada por <strong>${escapeHtml(n.usuario_nome)}</strong> em ${fmtData(n.marcado_em)}</span>
+          <button type="button" class="wpp-tag-tirar" data-acao="desfazer-negociacao" data-id="${conversaId}" data-negociacao="${n.id}" title="Desfazer — marquei por engano">✕</button>
+        </div>`).join("")}
+    </div>`;
+  }
+
+  function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes) {
     if (!conversa) {
       return `<div class="wpp-chat-vazio"><div class="wpp-chat-vazio-icone">💬</div><p class="texto-suave">Selecione uma conversa à esquerda para ver as mensagens.</p></div>`;
     }
@@ -3021,9 +3032,7 @@
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
-          ${!conversa.eh_grupo ? (conversa.resultado === "venda"
-            ? `<button type="button" class="botao secundario pequeno botao-negociacao-fechada" data-acao="marcar-negociacao" data-id="${conversa.id}" data-resultado="" title="Clique pra desmarcar">💰 Negociação fechada</button>`
-            : `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" data-resultado="venda" title="Marca a venda como concluída sem encerrar o atendimento — já entra na taxa de conversão do Dashboard">💰 Marcar negociação fechada</button>`) : ""}
+          ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno ${conversa.resultado === "venda" ? "botao-negociacao-fechada" : ""}" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}
@@ -3049,6 +3058,7 @@
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="0" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
+      ${htmlNegociacoesFechadas(conversa.id, negociacoes || [])}
       ${htmlNotas(conversa.id, notas || [])}
       ${conversa.sugerir_encerrar ? `
         <div class="wpp-lembrar-encerrar">
@@ -3117,6 +3127,16 @@
   // Filtro "ver por atendente" — só admin, e só faz sentido dentro da
   // aba Todas (nas outras a lista já é implicitamente de uma pessoa
   // só: a própria, ou ninguém). Some sozinho se sair dali.
+  function htmlFiltroNegociacoes() {
+    const ativo = !!state.filtroNegociacaoFechada;
+    return `<div class="wpp-filtro-negociacao">
+      <button type="button" class="wpp-tag-filtro ${ativo ? "ativa" : ""}" data-acao="alternar-filtro-negociacao"
+        style="--cor-etiqueta:#0a7d67;" title="${ativo ? "Clique de novo pra tirar o filtro" : "Ver só as conversas marcadas como negociação fechada"}">
+        💰 Negociações fechadas
+      </button>
+    </div>`;
+  }
+
   function htmlFiltroAtendente(usuarios) {
     if (!state.usuarioAtual.admin || state.escopoConversas !== "todas" || !usuarios || !usuarios.length) return "";
     return `<div class="wpp-filtro-atendente">
@@ -3161,7 +3181,8 @@
     // seria ignorado mesmo (server só aceita com escopo=todas na
     // prática, já que só admin usa), mas assim evita mandar à toa.
     const atendente = (state.usuarioFiltroAtendente && escopoQuery === "todas") ? `&usuario_id=${state.usuarioFiltroAtendente}` : "";
-    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}${atendente}`;
+    const negociacao = state.filtroNegociacaoFechada ? "&resultado=venda" : "";
+    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}${atendente}${negociacao}`;
   }
 
   async function renderWhatsapp(conversaId) {
@@ -3211,7 +3232,7 @@
     state.contagemAbas = contagemAbas;
 
     let conversaAtual = null, mensagens = [], agendadas = [], respostasProntas = [], notas = [];
-    let emojisSalvos = [], figurinhas = [];
+    let emojisSalvos = [], figurinhas = [], negociacoes = [];
     if (conversaId) {
       conversaAtual = conversas.find((c) => c.id === conversaId) || null;
       if (!conversaAtual) {
@@ -3226,13 +3247,14 @@
         conversaAtual = await chamarApi(`/whatsapp/conversas/${conversaId}`).catch(() => null);
       }
       if (conversaAtual) {
-        [mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas] = await Promise.all([
+        [mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes] = await Promise.all([
           chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`),
           chamarApi(`/whatsapp/conversas/${conversaId}/agendadas`),
           obterRespostasProntas(),
           chamarApi(`/whatsapp/conversas/${conversaId}/notas`),
           obterEmojisSalvos(),
           obterFigurinhas(),
+          chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes`).catch(() => []),
         ]);
         if (conversaAtual.atribuida_usuario_id === state.usuarioAtual.id) conversaAtual.nao_lidas = 0;
       }
@@ -3255,10 +3277,10 @@
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${(state.buscaConversas || state.buscaData) ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
-           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
+           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroNegociacoes() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
-         <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas)}</div>
+         <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes)}</div>
        </div>`,
       "whatsapp"
     );
@@ -5487,6 +5509,10 @@
         state.usuarioFiltroAtendente = alvo.value || null;
         return renderWhatsapp(null);
       }
+      case "alternar-filtro-negociacao": {
+        state.filtroNegociacaoFechada = !state.filtroNegociacaoFechada;
+        return renderWhatsapp(null);
+      }
       case "alternar-lembretes-todos": {
         state.lembretesTodos = alvo.dataset.todos === "1";
         return renderLembretes();
@@ -5800,9 +5826,15 @@
       case "fechar-conversa": modalFecharConversa(Number(alvo.dataset.id)); return;
       case "marcar-negociacao": {
         const conversaId = Number(alvo.dataset.id);
-        const resultado = alvo.dataset.resultado || null;
-        await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado } });
-        definirFlash("ok", resultado ? "Marcado como negociação fechada — já entra no Dashboard, sem encerrar o atendimento." : "Desmarcado.");
+        await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado: "venda" } });
+        definirFlash("ok", "Negociação fechada marcada — já entra no Dashboard, sem encerrar o atendimento.");
+        return renderWhatsapp(conversaId);
+      }
+      case "desfazer-negociacao": {
+        const conversaId = Number(alvo.dataset.id);
+        const negociacaoId = Number(alvo.dataset.negociacao);
+        await chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes/${negociacaoId}`, { method: "DELETE" });
+        definirFlash("ok", "Marcação desfeita.");
         return renderWhatsapp(conversaId);
       }
       case "fechar-conversa-com-resultado": {
