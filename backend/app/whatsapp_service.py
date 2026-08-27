@@ -2656,6 +2656,20 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         # de um atendimento em andamento (isso já não existe mais desde
         # que tiramos o gatilho por "menu"/"voltar"). Grupo nunca entra
         # aqui: reabre normal, sem menu, mais abaixo.
+        #
+        # Se o atendimento encerrado ainda tinha um dono (só é liberado
+        # quando um admin encerra o atendimento de OUTRA pessoa — ver
+        # fechar_conversa na rota), pergunta antes se o cliente quer
+        # continuar com a mesma pessoa, em vez de já cair no menu de
+        # setor do zero.
+        dono_anterior_id = conversa["atribuida_usuario_id"]
+        atendente_anterior = (
+            conn.execute("SELECT id, nome FROM usuarios WHERE id = ? AND ativo = 1", (dono_anterior_id,)).fetchone()
+            if dono_anterior_id else None
+        )
+        if atendente_anterior:
+            _iniciar_retomar_atendimento(conn, empresa_id, conversa["id"], telefone, atendente_anterior)
+            return {"processado": True, "tipo": "retomar_perguntado", "conversa_id": conversa["id"]}
         atribuir_conversa(conn, conversa["id"], None, None)
         _iniciar_menu_setor(conn, empresa_id, conversa["id"], telefone)
         return {"processado": True, "tipo": "menu_reiniciado_pos_encerramento", "conversa_id": conversa["id"]}
@@ -2950,6 +2964,25 @@ def _iniciar_menu_setor(conn, empresa_id: int, conversa_id: int, telefone: str):
         pass
 
 
+def _iniciar_retomar_atendimento(conn, empresa_id: int, conversa_id: int, telefone: str, atendente):
+    opcoes = [{"acao": "retomar", "usuario_id": atendente["id"]}, {"acao": "novo_menu"}]
+    conn.execute(
+        "UPDATE whatsapp_conversas SET menu_estado = 'retomar', menu_opcoes = ?, menu_tentativas_invalidas = 0 WHERE id = ?",
+        (json.dumps(opcoes), conversa_id),
+    )
+    try:
+        config = obter_configuracao(conn, empresa_id)
+        enviar_texto(
+            config, telefone,
+            f"Olá de novo! 👋 Da última vez você falou com *{atendente['nome']}*.\n\n"
+            f"1️⃣ Continuar com {atendente['nome']}\n"
+            f"2️⃣ Falar sobre outro assunto (escolher setor)\n\n"
+            f"Responda só com o número."
+        )
+    except ApiError:
+        pass
+
+
 def _rotear_para_setor(conn, empresa_id, conversa, setor, _responder):
     """Núcleo comum de "encaminhar pro setor X", usado quando o cliente
     escolhe um número válido no menu. Sempre limpa o estado de menu no
@@ -3079,6 +3112,21 @@ def _tratar_resposta_menu(conn, empresa_id, conversa, telefone, texto, externo_i
         conn.execute("UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL WHERE id = ?", (conversa["id"],))
         _responder(f"Você foi direcionado(a) para {atendente['nome']}. Só um momento! 😊")
         return {"processado": True, "tipo": "menu_atribuido", "conversa_id": conversa["id"]}
+
+    if conversa["menu_estado"] == "retomar":
+        escolhida = opcoes[escolha]
+        conn.execute("UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL WHERE id = ?", (conversa["id"],))
+        if escolhida.get("acao") == "retomar":
+            atendente_id = escolhida["usuario_id"]
+            atribuir_conversa(conn, conversa["id"], atendente_id, None)
+            atendente = conn.execute("SELECT nome FROM usuarios WHERE id = ?", (atendente_id,)).fetchone()
+            _responder(f"Beleza! Retomando com {atendente['nome'] if atendente else 'quem te atendeu antes'}. Só um momento! 😊")
+            return {"processado": True, "tipo": "retomou_atendimento", "conversa_id": conversa["id"]}
+        # Escolheu falar sobre outro assunto: libera o dono anterior e
+        # cai no menu de setor normal, do zero.
+        atribuir_conversa(conn, conversa["id"], None, None)
+        _iniciar_menu_setor(conn, empresa_id, conversa["id"], telefone)
+        return {"processado": True, "tipo": "retomar_recusado_menu_setor", "conversa_id": conversa["id"]}
 
     setor = opcoes[escolha]
     return _rotear_para_setor(conn, empresa_id, conversa, setor, _responder)

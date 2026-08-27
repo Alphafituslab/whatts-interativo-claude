@@ -4649,9 +4649,10 @@
   // =======================================================================
   function fmtMinutos(v) {
     if (v === null || v === undefined) return "—";
-    if (v < 60) return `${v}min`;
-    const h = Math.floor(v / 60);
-    const m = Math.round(v % 60);
+    const total = Math.round(v); // inteiro ANTES de separar h/min — senão um resto tipo 59.9 virava "60min" em vez de completar a hora
+    if (total < 60) return `${total}min`;
+    const h = Math.floor(total / 60);
+    const m = total % 60;
     return `${h}h${m > 0 ? ` ${m}min` : ""}`;
   }
 
