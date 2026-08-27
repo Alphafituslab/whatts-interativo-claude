@@ -1320,7 +1320,7 @@ def enviar_mensagem(conversa_id):
         assinatura = usuario["nome"]
         if setores_row and setores_row["s"]:
             assinatura += f" - {setores_row['s']}"
-        texto_para_cliente = f"*{assinatura}:*\n{texto}"
+        texto_para_cliente = f"*{assinatura}:*\n\n{texto}"  # linha em branco depois da assinatura, mais respiro (pedido do Clayton, viu isso no print do concorrente)
     else:
         texto_para_cliente = texto
     try:
