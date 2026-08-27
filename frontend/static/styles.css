@@ -485,6 +485,24 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 }
 .wpp-busca-data:focus { outline: none; border-color: var(--primaria); }
 
+/* Banner de "fulano está chamando sua atenção" — chamativo de propósito
+   (é a intenção do recurso), mas não trava a tela: some sozinho ou no X. */
+@keyframes wpp-aviso-atencao-pulso {
+  0%, 100% { box-shadow: 0 4px 18px rgba(0,0,0,0.18), 0 0 0 0 rgba(255,140,0,0.55); }
+  50% { box-shadow: 0 4px 18px rgba(0,0,0,0.18), 0 0 0 8px rgba(255,140,0,0); }
+}
+.wpp-aviso-atencao {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9999;
+  display: flex; align-items: center; gap: 12px;
+  background: #fff4e5; color: #7a3e00; border: 1px solid #ffb454; border-radius: var(--raio-peq);
+  padding: 10px 14px; font-size: 13.5px; font-weight: 600; max-width: min(92vw, 480px);
+  animation: wpp-aviso-atencao-pulso 1.1s ease-in-out infinite;
+}
+@media (prefers-color-scheme: dark) {
+  .wpp-aviso-atencao { background: #4a2e00; color: #ffd699; border-color: #a85f00; }
+}
+.wpp-aviso-atencao a.botao { flex-shrink: 0; }
+
 .wpp-abas { display: flex; gap: 4px; padding: 2px; background: var(--superficie-2); border-radius: var(--raio-peq); flex-shrink: 0; }
 .wpp-aba {
   flex: 1; padding: 7px 0; border: none; background: none; border-radius: 7px; font: inherit; font-weight: 700;

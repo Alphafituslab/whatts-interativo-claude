@@ -1613,6 +1613,18 @@
     ]);
   }
 
+  // "Chamar atenção" no chat interno: bem mais insistente que o toque
+  // normal de mensagem nova — 4 bipes secos e agudos, quase um alarme,
+  // pra dar pra notar mesmo sem olhar a tela nem prestar atenção nela.
+  function tocarAvisoAtencao() {
+    _tocarNotas([
+      { hz: 1760, inicio: 0,    duracao: 0.11, volume: 0.19 },
+      { hz: 1760, inicio: 0.17, duracao: 0.11, volume: 0.19 },
+      { hz: 1760, inicio: 0.34, duracao: 0.11, volume: 0.19 },
+      { hz: 1760, inicio: 0.51, duracao: 0.22, volume: 0.20 },
+    ]);
+  }
+
   // Colega no chat interno: sequência mais longa e grave (4 notas
   // descendo, ~1s). O toque do cliente é curto e agudo; alongar este
   // aqui deixa a diferença óbvia sem precisar olhar a tela.
@@ -1942,6 +1954,26 @@
       }
       if (state.naoLidasInterno !== null && total > state.naoLidasInterno) tocarAvisoChatInterno();
       state.naoLidasInterno = total;
+
+      // "Chamar atenção": cada toque muda o instante gravado pro MEU
+      // lado (ver chamar_atencao no backend). Comparar com o que a
+      // gente já viu detecta toques novos, mesmo repetidos na mesma
+      // conversa — é assim que dá pra apertar "quantas vezes for
+      // necessário" e cada uma toca de novo.
+      if (!state.avisosAtencaoVistos) state.avisosAtencaoVistos = {};
+      for (const c of conversasInternas) {
+        const souCriador = c.criado_por_id === meuId;
+        const emMim = souCriador ? c.aviso_criador_em : c.aviso_participante_em;
+        if (!emMim) continue;
+        const visto = state.avisosAtencaoVistos[c.id];
+        if (visto === undefined) { state.avisosAtencaoVistos[c.id] = emMim; continue; } // primeira leitura: só guarda, não toca
+        if (emMim !== visto) {
+          state.avisosAtencaoVistos[c.id] = emMim;
+          const nomeDeQuemChamou = souCriador ? c.participante_nome : c.criado_por_nome;
+          tocarAvisoAtencao();
+          _mostrarAvisoAtencao(nomeDeQuemChamou, c.id);
+        }
+      }
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
@@ -1961,6 +1993,26 @@
         ? "1 conversa parada: o cliente falou e ninguém respondeu dentro do tempo combinado"
         : `${alertas.length} conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado`;
     } catch (e) { /* próxima tentativa corrige */ }
+  }
+
+  // Banner flutuante de "fulano está chamando sua atenção" — aparece
+  // em cima de QUALQUER tela (não só no chat interno), porque o toque
+  // não serve de nada se só aparece pra quem já está olhando a
+  // conversa certa. Some sozinho depois de um tempo, ou no X.
+  function _mostrarAvisoAtencao(nome, conversaId) {
+    const existente = document.querySelector("[data-wpp-aviso-atencao]");
+    if (existente) existente.remove();
+    const banner = document.createElement("div");
+    banner.className = "wpp-aviso-atencao";
+    banner.setAttribute("data-wpp-aviso-atencao", "");
+    banner.innerHTML = `
+      <span>📣 <strong>${escapeHtml(nome || "Alguém")}</strong> está chamando sua atenção no chat interno!</span>
+      <a class="botao pequeno" href="#/chat-interno/${conversaId}">Ver conversa</a>
+      <button type="button" class="botao-icone" title="Fechar">✕</button>`;
+    banner.querySelector("button").addEventListener("click", () => banner.remove());
+    banner.querySelector("a").addEventListener("click", () => banner.remove());
+    document.body.appendChild(banner);
+    setTimeout(() => { if (banner.isConnected) banner.remove(); }, 9000);
   }
 
   // Faixa no alto da tela enquanto o WhatsApp está fora do ar. Some
@@ -3522,6 +3574,7 @@
         <div class="wpp-chat-acoes">
           <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
           <button type="button" class="botao-icone" data-acao="abrir-agendar-interno" data-id="${conversa.id}" title="Agendar mensagem pro colega">🕒</button>
+          ${!souAlheio ? `<button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>` : ""}
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar-interno" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-interno" data-id="${conversa.id}">Reabrir</button>`
@@ -6546,6 +6599,24 @@
         _desenharBarraCitacao();
         await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto, responde_a: citada } });
         await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
+        return;
+      }
+      case "chamar-atencao-interna": {
+        if (alvo.disabled) return;
+        const conversaId = Number(alvo.dataset.id);
+        alvo.disabled = true;
+        const iconeOriginal = alvo.textContent;
+        try {
+          await chamarApi(`/chat-interno/conversas/${conversaId}/chamar-atencao`, { method: "POST" });
+          alvo.textContent = "✅";
+        } catch (erro) {
+          alvo.textContent = "⚠️";
+        } finally {
+          // Trava 1,5s só pra evitar clique duplo sem querer — não é
+          // limite de quantas vezes chamar, é só não martelar sem
+          // querer no mesmo toque de dedo.
+          setTimeout(() => { alvo.textContent = iconeOriginal; alvo.disabled = false; }, 1500);
+        }
         return;
       }
       case "encaminhar-interno": {

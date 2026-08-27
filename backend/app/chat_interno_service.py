@@ -67,6 +67,20 @@ def _atualizar_preview(conn, conversa_id, texto, agora):
     )
 
 
+def chamar_atencao(conn, conversa_id: int, quem_id: int):
+    """Registra um toque de quem_id pro OUTRO lado da conversa — botão
+    "chamar atenção" no chat interno (som insistente no destinatário,
+    repetível). Só grava o instante; quem detecta a mudança e toca o
+    alerta é o navegador do destinatário, via polling (ver
+    atualizarBadgesNaoLidos no app.js)."""
+    conversa = conn.execute(
+        "SELECT criado_por_id, participante_id FROM chat_interno_conversas WHERE id = ?", (conversa_id,)
+    ).fetchone()
+    agora = _now_iso()
+    campo = "aviso_participante_em" if quem_id == conversa["criado_por_id"] else "aviso_criador_em"
+    conn.execute(f"UPDATE chat_interno_conversas SET {campo} = ? WHERE id = ?", (agora, conversa_id))
+
+
 SEGUNDOS_DIGITANDO = 6
 
 

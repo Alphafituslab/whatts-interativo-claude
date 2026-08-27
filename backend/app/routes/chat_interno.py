@@ -488,6 +488,18 @@ def marcar_digitando(conversa_id):
     return jsonify({"ok": True})
 
 
+@bp.post("/conversas/<int:conversa_id>/chamar-atencao")
+@requires_auth
+def chamar_atencao(conversa_id):
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Só quem está nesta conversa pode chamar atenção do outro lado.", status=403, codigo="sem_permissao")
+    chat_interno_service.chamar_atencao(conn, conversa_id, usuario["id"])
+    return jsonify({"ok": True})
+
+
 @bp.post("/conversas/<int:conversa_id>/encaminhar")
 @requires_auth
 def encaminhar(conversa_id):
