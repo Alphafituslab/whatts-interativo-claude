@@ -2846,19 +2846,19 @@
     return tel || "";
   }
 
-  function htmlBolha(m, ehGrupo) {
+  function htmlBolha(m, ehGrupo, contatoNome) {
     const saida = m.direcao === "saida";
     const iconeStatus = { pendente: "🕓", enviada: "✓", entregue: "✓✓", lida: "✓✓", falhou: "⚠️", recebida: "" }[m.status] || "";
     return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.status === "falhou" ? "wpp-bolha-falhou" : ""} ${m.excluida_em ? "wpp-bolha-apagada" : ""}" data-wpp-bolha-id="${m.id}">
-      ${!saida && ehGrupo
+      ${!saida
         ? `<div class="wpp-bolha-autor" title="${escapeHtml(m.autor_telefone || "")}">${
-             m.autor_nome ? escapeHtml(m.autor_nome)
-             : m.autor_telefone ? escapeHtml(_telefoneBonito(m.autor_telefone))
-             : "<span class=\"wpp-autor-desconhecido\">participante não identificado</span>"
+             ehGrupo
+               ? (m.autor_nome ? escapeHtml(m.autor_nome)
+                  : m.autor_telefone ? escapeHtml(_telefoneBonito(m.autor_telefone))
+                  : "<span class=\"wpp-autor-desconhecido\">participante não identificado</span>")
+               : escapeHtml(m.autor_nome || contatoNome || "Cliente")
            }</div>`
-        : (!saida && (m.autor_nome || m.autor_telefone)
-            ? `<div class="wpp-bolha-autor" title="${escapeHtml(m.autor_telefone || "")}">${escapeHtml(m.autor_nome || _telefoneBonito(m.autor_telefone))}</div>`
-            : "")}
+        : (m.usuario_nome ? `<div class="wpp-bolha-autor">${escapeHtml(m.usuario_nome)}</div>` : "")}
       ${htmlSeloApagada(m)}
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
@@ -3048,7 +3048,7 @@
           <button type="button" class="botao pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>
         </div>` : ""}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}" data-contato-nome="${escapeHtml(conversa.contato_nome || "")}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo, conversa.contato_nome)).join("")}</div>
       ${htmlAgendadas(agendadas)}
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem" data-conversa-id="${conversa.id}">
@@ -3290,12 +3290,14 @@
     if (!painel) return;
     const mensagens = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`);
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
-    // Precisa saber se é grupo pra desenhar o autor de cada mensagem —
-    // sem isso o redesenho apagava os nomes que a montagem tinha posto.
+    // Precisa saber se é grupo (e o nome do contato) pra desenhar o autor
+    // de cada mensagem — sem isso o redesenho apagava os nomes que a
+    // montagem tinha posto.
     const ehGrupo = !!(painel.dataset.ehGrupo === "1");
+    const contatoNome = painel.dataset.contatoNome || "";
     const itens = _comDivisoresDeDia(mensagens);
     const mudou = _sincronizarLista(painel, itens, (it) => it.chave,
-      (it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, ehGrupo));
+      (it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, ehGrupo, contatoNome));
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 

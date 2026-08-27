@@ -1228,11 +1228,12 @@ def listar_mensagens(conversa_id):
     # citada_*: trecho da mensagem que esta responde, pra desenhar a
     # citação sem uma segunda ida ao servidor por mensagem.
     campos = (
-        "SELECT m.*, ue.nome AS excluida_por_nome, "
+        "SELECT m.*, ue.nome AS excluida_por_nome, ua.nome AS usuario_nome, "
         "cit.texto AS citada_texto, cit.direcao AS citada_direcao, "
         "cit.tipo AS citada_tipo, cit.excluida_em AS citada_excluida_em "
         "FROM whatsapp_mensagens m "
         "LEFT JOIN usuarios ue ON ue.id = m.excluida_por "
+        "LEFT JOIN usuarios ua ON ua.id = m.usuario_id "
         "LEFT JOIN whatsapp_mensagens cit ON cit.id = m.responde_a "
     )
     # Mesma régua do chat interno: apagada só aparece em supervisão. Se a
