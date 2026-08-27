@@ -64,6 +64,7 @@ SCHEMA_FILES = [
     "schema_049_ritmo_envio.sql",
     "schema_050_dominio_empresa.sql",
     "schema_051_chamar_atencao.sql",
+    "schema_052_assinar_mensagens.sql",
 ]
 
 

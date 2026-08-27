@@ -4440,6 +4440,15 @@
        </div>
 
        <div class="cartao">
+         <h3 style="margin-top:0;">Assinar mensagens com o nome de quem atende</h3>
+         <p class="dica">O WhatsApp não mostra pro cliente qual atendente da equipe está falando — ele só vê o número/perfil da empresa. Ligando isto, toda mensagem de texto sai com o nome de quem respondeu na frente (ex.: "<strong>Andreia:</strong> Bom dia!"). Vale só pra texto digitado na hora — não mexe em áudio, imagem, documento nem nas mensagens automáticas do menu.</p>
+         <form data-form="salvar-assinar-mensagens">
+           <div class="campo campo-checkbox"><label><input type="checkbox" name="assinar_mensagens" ${config.assinar_mensagens ? "checked" : ""}> Assinar com o nome do atendente</label></div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao secundario">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
          <h3 style="margin-top:0;">Horário de funcionamento</h3>
          <p class="dica">Fora dessas janelas, quem escrever recebe um aviso automático em vez de silêncio.</p>
          <form data-form="salvar-expediente">
@@ -6858,6 +6867,11 @@
           },
         });
         definirFlash("ok", "Configuração salva.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-assinar-mensagens": {
+        await chamarApi("/whatsapp/configuracao", { method: "PUT", body: { assinar_mensagens: form.querySelector('[name="assinar_mensagens"]').checked } });
+        definirFlash("ok", "Preferência salva.");
         return renderWhatsappConfiguracao();
       }
       case "salvar-saudacao": {

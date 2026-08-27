@@ -1307,9 +1307,25 @@ def enviar_mensagem(conversa_id):
 
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
     agora = _now_iso()
+    # "Assinar mensagens" (Configuração): o CLIENTE não vê no WhatsApp
+    # quem da equipe está falando com ele — só a empresa. Ligado, cada
+    # mensagem sai com "Nome - Setor:" na frente (padrão pedido pelo
+    # Clayton, igual ao de um concorrente que ele mostrou); o que fica
+    # GRAVADO aqui (e o que a equipe vê dentro do Seja Alpha) continua
+    # limpo, sem repetir nada — o nome já aparece em cima da bolha.
+    if config.get("assinar_mensagens"):
+        setores_row = conn.execute(
+            "SELECT GROUP_CONCAT(setor, '/') AS s FROM usuario_setores WHERE usuario_id = ?", (usuario["id"],)
+        ).fetchone()
+        assinatura = usuario["nome"]
+        if setores_row and setores_row["s"]:
+            assinatura += f" - {setores_row['s']}"
+        texto_para_cliente = f"*{assinatura}:*\n{texto}"
+    else:
+        texto_para_cliente = texto
     try:
         externo_id = whatsapp_service.enviar_texto(
-            config, conversa["telefone"], texto,
+            config, conversa["telefone"], texto_para_cliente,
             citar_externo_id=citada["externo_id"] if citada else None,
         )
         status_msg = "enviada"

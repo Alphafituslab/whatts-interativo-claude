@@ -177,6 +177,7 @@ def obter_configuracao(conn, empresa_id: int):
             "sla_minutos_alerta": 15,
             "dashboard_reset_em": None,
             "logo_url": None,
+            "assinar_mensagens": 0,
         }
     return dict(row)
 
@@ -192,6 +193,7 @@ def config_publica(config):
     d.pop("webhook_segredo", None)
     d["ativo"] = bool(d.get("ativo"))
     d["expediente_ativo"] = bool(d.get("expediente_ativo"))
+    d["assinar_mensagens"] = bool(d.get("assinar_mensagens"))
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -261,13 +263,17 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     else:
         saudacao_mensagem = anterior.get("saudacao_mensagem")
 
+    # Checkbox independente dos outros formulários da tela — mesma
+    # régua de "ativo"/"expediente_ativo": só mexe se vier explicitamente.
+    assinar_mensagens = (1 if dados.get("assinar_mensagens") else 0) if "assinar_mensagens" in dados else (1 if anterior.get("assinar_mensagens") else 0)
+
     conn.execute(
         """
         INSERT INTO configuracoes_whatsapp (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome,
                                               webhook_segredo, webhook_base_url, expediente_ativo, expediente_janelas,
                                               expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
-                                              limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?)
+                                              limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -284,13 +290,14 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             limite_envios_hora = excluded.limite_envios_hora,
             limite_novos_contatos_hora = excluded.limite_novos_contatos_hora,
             minutos_liberar_sem_menu = excluded.minutos_liberar_sem_menu,
+            assinar_mensagens = excluded.assinar_mensagens,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
         (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome, webhook_segredo, webhook_base_url,
          expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta,
          minutos_sem_menu, empresa_id, _now_iso(), usuario_id,
-         limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora),
+         limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens),
     )
     return obter_configuracao(conn, empresa_id)
 
