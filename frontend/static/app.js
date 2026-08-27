@@ -4015,14 +4015,10 @@
   function modalFecharConversa(conversaId) {
     abrirModal(`
       <h3 style="margin-top:0;">Encerrar atendimento</h3>
-      <p class="texto-suave">Essa negociação resultou em venda? Isso alimenta a taxa de conversão no Dashboard.</p>
-      <div class="rodape-modal" style="justify-content:space-between;">
+      <p class="texto-suave">Confirma encerrar este atendimento? O cliente passa pelo menu de novo se chamar sobre outro assunto depois.</p>
+      <div class="rodape-modal">
         <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
-        <div style="display:flex; gap:8px;">
-          <button type="button" class="botao secundario" data-acao="fechar-conversa-com-resultado" data-id="${conversaId}">Encerrar sem marcar</button>
-          <button type="button" class="botao perigo" data-acao="fechar-conversa-com-resultado" data-id="${conversaId}" data-resultado="perdido">Não convertido</button>
-          <button type="button" class="botao" data-acao="fechar-conversa-com-resultado" data-id="${conversaId}" data-resultado="venda">✅ Venda fechada</button>
-        </div>
+        <button type="button" class="botao" data-acao="fechar-conversa-com-resultado" data-id="${conversaId}">Confirmar encerramento</button>
       </div>`);
   }
 
