@@ -3356,11 +3356,15 @@
   function htmlVistoInterno(m, conversa, eu) {
     const souCriador = conversa.criado_por_id === eu;
     const vistoOutro = souCriador ? conversa.visto_participante_em : conversa.visto_criador_em;
-    if (!vistoOutro) return `<span class="wpp-bolha-status" title="Enviada">✓</span>`;
-    const lida = new Date(vistoOutro) >= new Date(m.criado_em);
+    const lida = vistoOutro && new Date(vistoOutro) >= new Date(m.criado_em);
+    // Mesmo padrão das conversas de cliente: ✓✓ cinza = chegou e ainda
+    // não foi vista; ✓✓ azul = visualizada. Aqui não existe um "✓"
+    // duradouro de "enviada mas não entregue" — a mensagem é gravada no
+    // nosso próprio banco, então "enviada" e "entregue" são o mesmo
+    // instante.
     return lida
       ? `<span class="wpp-bolha-status wpp-status-lida" title="Visualizada em ${fmtData(vistoOutro)}">✓✓</span>`
-      : `<span class="wpp-bolha-status" title="Enviada — ainda não visualizada">✓</span>`;
+      : `<span class="wpp-bolha-status" title="Enviada — ainda não visualizada">✓✓</span>`;
   }
 
   function htmlBolhaInterna(m, conversa) {
