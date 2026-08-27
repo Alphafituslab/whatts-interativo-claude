@@ -50,11 +50,10 @@ def _carregar(conn, empresa_id, conversa_id):
 def listar_conversas():
     usuario = g.usuario_atual
     incluir_encerradas = request.args.get("encerradas") == "1"
-    todas = request.args.get("todas") == "1"
-    # A aba "Todas" do chat interno acabou: não existe mais ninguém que
-    # veja conversa interna alheia. Pedir por ela não é erro — só devolve
-    # as suas, que é tudo o que existe pra quem pede.
-    todas = False
+    # "Todas" é a visão de supervisão do administrador — só ele pode
+    # pedir. Se alguém sem ser admin tentar (mexendo na URL/API direto),
+    # cai pro comportamento normal: só as próprias conversas.
+    todas = request.args.get("todas") == "1" and bool(usuario["admin"])
     conn = get_db()
     return jsonify(chat_interno_service.listar_conversas(
         conn, usuario["id"], incluir_encerradas,
