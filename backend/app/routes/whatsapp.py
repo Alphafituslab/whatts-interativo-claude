@@ -587,6 +587,16 @@ def listar_conversas():
     if escopo in ("minhas", "fila", "sem_menu") and not incluir_arquivadas:
         condicoes.append("c.status = 'aberta'")
 
+    # Filtro por atendente — só admin. Vale junto com a aba/etiqueta já
+    # escolhidas; na prática só faz sentido dentro de "Todas" (nas
+    # outras abas a lista já é implicitamente de uma pessoa só).
+    usuario_filtro = request.args.get("usuario_id")
+    if usuario_filtro:
+        if not usuario["admin"]:
+            raise ApiError("Só um administrador pode filtrar por atendente.", status=403, codigo="sem_permissao")
+        condicoes.append("c.atribuida_usuario_id = ?")
+        params.append(usuario_filtro)
+
     # Filtro por etiqueta. Vale junto com a aba escolhida (dá pra ver só
     # os "Orçamento enviado" que estão na fila, por exemplo).
     tag_id = request.args.get("tag_id")

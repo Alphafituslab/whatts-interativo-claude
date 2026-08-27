@@ -3106,6 +3106,19 @@
     }).join("")}</div>`;
   }
 
+  // Filtro "ver por atendente" — só admin, e só faz sentido dentro da
+  // aba Todas (nas outras a lista já é implicitamente de uma pessoa
+  // só: a própria, ou ninguém). Some sozinho se sair dali.
+  function htmlFiltroAtendente(usuarios) {
+    if (!state.usuarioAtual.admin || state.escopoConversas !== "todas" || !usuarios || !usuarios.length) return "";
+    return `<div class="wpp-filtro-atendente">
+      <select data-acao-change="filtrar-por-atendente" title="Ver o atendimento de um usuário só">
+        <option value="">👤 Todos os atendentes</option>
+        ${usuarios.map((u) => `<option value="${u.id}" ${String(state.usuarioFiltroAtendente) === String(u.id) ? "selected" : ""}>${escapeHtml(u.nome)}</option>`).join("")}
+      </select>
+    </div>`;
+  }
+
   // Barra de etiquetas: clicar filtra a lista, clicar de novo tira o
   // filtro. Fica escondida se a empresa ainda não criou nenhuma — sem
   // etiqueta cadastrada a barra seria só um espaço vazio ocupando lugar.
@@ -3136,7 +3149,11 @@
     // "sem_menu" vai direto pro servidor, que já sabe filtrar.
     const escopoQuery = arquivadas ? (state.usuarioAtual.admin ? "todas" : "minhas") : state.escopoConversas;
     const etiqueta = state.tagFiltro ? `&tag_id=${state.tagFiltro}` : "";
-    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}`;
+    // Só manda junto quando a aba é "Todas" — nas outras o parâmetro
+    // seria ignorado mesmo (server só aceita com escopo=todas na
+    // prática, já que só admin usa), mas assim evita mandar à toa.
+    const atendente = (state.usuarioFiltroAtendente && escopoQuery === "todas") ? `&usuario_id=${state.usuarioFiltroAtendente}` : "";
+    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}${atendente}`;
   }
 
   async function renderWhatsapp(conversaId) {
@@ -3175,11 +3192,13 @@
     }
 
     // Etiquetas e a contagem de cada uma alimentam a barra de filtro.
-    // Falhar aqui não pode derrubar a tela de conversas inteira.
-    const [etiquetas, contagemEtiquetas, contagemAbas] = await Promise.all([
+    // Falhar aqui não pode derrubar a tela de conversas inteira. A
+    // lista de usuários só interessa pro admin (filtro por atendente).
+    const [etiquetas, contagemEtiquetas, contagemAbas, usuariosParaFiltro] = await Promise.all([
       chamarApi("/whatsapp/tags").catch(() => []),
       chamarApi("/whatsapp/tags/contagem").catch(() => ({})),
       chamarApi("/whatsapp/contagem-abas").catch(() => ({})),
+      state.usuarioAtual.admin ? chamarApi("/usuarios").catch(() => []) : Promise.resolve([]),
     ]);
     state.contagemAbas = contagemAbas;
 
@@ -3228,7 +3247,7 @@
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${(state.buscaConversas || state.buscaData) ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
-           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
+           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas)}</div>
@@ -5442,6 +5461,10 @@
       }
       case "trocar-escopo-conversas": {
         state.escopoConversas = alvo.dataset.escopo;
+        return renderWhatsapp(null);
+      }
+      case "filtrar-por-atendente": {
+        state.usuarioFiltroAtendente = alvo.value || null;
         return renderWhatsapp(null);
       }
       case "alternar-lembretes-todos": {
