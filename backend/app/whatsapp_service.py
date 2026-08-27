@@ -2642,12 +2642,13 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         (agora, preview[:120], agora, conversa["id"]),
     )
 
-    if estava_fechada:
+    if estava_fechada and not de_grupo:
         # A saudação/menu de setor só é reenviada em DOIS casos: contato
         # totalmente novo (ver conversa_nova acima) ou uma conversa que
         # tinha sido ENCERRADA e o cliente chamou de novo — nunca no meio
         # de um atendimento em andamento (isso já não existe mais desde
-        # que tiramos o gatilho por "menu"/"voltar").
+        # que tiramos o gatilho por "menu"/"voltar"). Grupo nunca entra
+        # aqui: reabre normal, sem menu, mais abaixo.
         atribuir_conversa(conn, conversa["id"], None, None)
         _iniciar_menu_setor(conn, empresa_id, conversa["id"], telefone)
         return {"processado": True, "tipo": "menu_reiniciado_pos_encerramento", "conversa_id": conversa["id"]}

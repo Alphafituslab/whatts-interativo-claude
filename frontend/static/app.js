@@ -463,6 +463,28 @@
     catch (erro) { definirFlash("erro", erro.message || "Ocorreu um erro."); montarRota(); }
   });
 
+  // Rascunho de mensagem: guardado no navegador (localStorage), por
+  // conversa, sem tocar rede. Ver `_salvarRascunho`/`_lerRascunho`.
+  function _chaveRascunho(tipo, conversaId) { return `rascunho:${tipo}:${conversaId}`; }
+  function _salvarRascunho(tipo, conversaId, texto) {
+    try {
+      const chave = _chaveRascunho(tipo, conversaId);
+      if (texto) localStorage.setItem(chave, texto);
+      else localStorage.removeItem(chave);
+    } catch (e) { /* localStorage indisponível (aba privada etc.) — sem rascunho, sem drama */ }
+  }
+  function _lerRascunho(tipo, conversaId) {
+    try { return localStorage.getItem(_chaveRascunho(tipo, conversaId)) || ""; }
+    catch (e) { return ""; }
+  }
+  document.addEventListener("input", (e) => {
+    const textarea = e.target.closest('form[data-form="enviar-mensagem"] textarea[name="texto"], form[data-form="enviar-mensagem-interna"] textarea[name="texto"]');
+    if (!textarea) return;
+    const form = textarea.closest("form");
+    const tipo = form.dataset.form === "enviar-mensagem-interna" ? "interna" : "cliente";
+    _salvarRascunho(tipo, form.dataset.conversaId, textarea.value);
+  });
+
   // Avisa "digitando…" pro colega quando a pessoa escreve no chat interno
   // — throttled (no máx. 1 a cada 4s) pra não martelar a API a cada tecla;
   // o próprio "digitando" expira sozinho no servidor depois de alguns
@@ -2933,7 +2955,7 @@
           <button type="button" class="botao-icone" data-acao="alternar-catalogos" data-id="${conversa.id}" title="Enviar portfólio ou catálogo">📚</button>
           <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
         </div>
-        <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1"></textarea>
+        <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1">${escapeHtml(_lerRascunho("cliente", conversa.id))}</textarea>
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
         <button type="button" class="botao-icone" data-acao="gravar-video" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
         <button type="button" class="botao-icone" data-acao="abrir-agendar" data-id="${conversa.id}" title="Agendar envio">🕒</button>
@@ -3508,7 +3530,7 @@
           <button type="button" class="botao-icone" data-acao="alternar-emoji" title="Emoji">😀</button>
           <div class="wpp-emoji-painel" data-wpp-emoji-painel hidden>${EMOJIS_COMUNS.map((e) => `<button type="button" class="wpp-emoji-item" data-acao="inserir-emoji" data-emoji="${e}">${e}</button>`).join("")}</div>
         </div>
-        <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1"></textarea>
+        <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1">${escapeHtml(_lerRascunho("interna", conversa.id))}</textarea>
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio-interno" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
         <button type="button" class="botao-icone" data-acao="gravar-video-interno" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
         <button type="submit" class="botao wpp-botao-enviar" title="Enviar">➤</button>
@@ -6469,6 +6491,7 @@
         // routes/whatsapp.py::enviar_mensagem).
         form.reset();
         textarea.focus();
+        _salvarRascunho("cliente", conversaId, "");
         const citada = state.citando && !state.citando.interna ? state.citando.id : null;
         state.citando = null;
         _desenharBarraCitacao();
@@ -6496,6 +6519,7 @@
         const textarea = form.querySelector("textarea");
         form.reset();
         textarea.focus();
+        _salvarRascunho("interna", conversaId, "");
         // Pega e já limpa a citação: se o envio falhar, a pessoa reescreve
         // e cita de novo — pior seria a citação ficar grudada e a próxima
         // mensagem sair respondendo algo que ela nem quis citar.
