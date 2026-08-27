@@ -951,10 +951,17 @@
     setTimeout(() => document.addEventListener("click", fecharMenuContexto, { once: true }), 0);
   }
   document.addEventListener("contextmenu", async (e) => {
-    const chip = e.target.closest(".wpp-tag-filtro");
-    if (!chip || !chip.dataset.id) return; // o "✕ limpar" não tem id, não abre menu
+    // Vale tanto no chip do FILTRO (lá em cima) quanto no chip que já
+    // aparece pintado na lista de conversas e no cabeçalho da conversa
+    // aberta (.wpp-tag-chip) — o mesmo botão direito, editar ou excluir
+    // a etiqueta de verdade (não é só tirar dessa conversa, que é o que
+    // o ✕ dela já fazia).
+    const chip = e.target.closest(".wpp-tag-filtro, .wpp-tag-chip");
+    if (!chip || !chip.dataset.id) return; // o "✕ limpar" do filtro não tem id, não abre menu
     e.preventDefault();
-    const interna = chip.dataset.acao === "filtrar-por-etiqueta-interno";
+    const interna = chip.classList.contains("wpp-tag-chip")
+      ? chip.dataset.interna === "1"
+      : chip.dataset.acao === "filtrar-por-etiqueta-interno";
     abrirMenuContexto(e.clientX, e.clientY, [
       { separador: true, rotulo: chip.dataset.nome },
       { acao: "editar-etiqueta-menu", id: chip.dataset.id, rotulo: "✏️ Editar (nome/cor)", dados: { interna: interna ? "1" : "0" } },
@@ -996,19 +1003,26 @@
   document.addEventListener("contextmenu", async (e) => {
     const nomeEl = e.target.closest(".wpp-chat-nome");
     if (!nomeEl) return;
-    const botaoEditar = nomeEl.querySelector('[data-acao="renomear-contato"], [data-acao="abrir-apelido-interno"]');
-    if (!botaoEditar) return;
-    e.preventDefault();
     const botaoTags = document.querySelector('[data-acao="abrir-tags-conversa"], [data-acao="abrir-tags-interna"]');
-    if (!botaoTags) { botaoEditar.click(); return; }
+    // Sem nem o lápis de editar nome, nem o botão de etiquetar (caso
+    // raríssimo — tela ainda não montou de todo) não tem menu nenhum
+    // pra oferecer.
+    const botaoEditar = nomeEl.querySelector('[data-acao="renomear-contato"], [data-acao="abrir-apelido-interno"]');
+    if (!botaoEditar && !botaoTags) return;
+    e.preventDefault();
+    // Quem só SUPERVISIONA (admin vendo pela aba "Todas", sem ser dono
+    // nem participante) não tem o lápis — não editar o nome de quem
+    // não é dele, mas etiqueta é anotação PRÓPRIA de quem clica, então
+    // continua valendo mesmo supervisionando.
+    if (!botaoTags) { if (botaoEditar) botaoEditar.click(); return; }
     const interna = botaoTags.dataset.acao === "abrir-tags-interna"
       || botaoTags.getAttribute("data-acao") === "abrir-tags-interna";
     const id = botaoTags.dataset.id;
     const marcadas = JSON.parse(botaoTags.dataset.tags || "[]");
     const etiquetas = await obterEtiquetas();
     abrirMenuContexto(e.clientX, e.clientY, [
-      { acao: interna ? "abrir-apelido-interno-menu" : "renomear-contato-menu", id,
-        rotulo: interna ? "✏️ Editar como você chama esta pessoa" : "✏️ Editar nome do contato" },
+      ...(botaoEditar ? [{ acao: interna ? "abrir-apelido-interno-menu" : "renomear-contato-menu", id,
+        rotulo: interna ? "✏️ Editar como você chama esta pessoa" : "✏️ Editar nome do contato" }] : []),
       ..._itensEtiquetaMenu(id, marcadas, etiquetas, interna),
     ]);
   });
@@ -2618,7 +2632,7 @@
             if (c.menu_setor && !c.eh_grupo) partes.push(`🏷️ ${escapeHtml(c.menu_setor)}`);
             return partes.length ? `<div class="wpp-conversa-dono">${partes.join(" · ")}</div>` : "";
           })()}
-          ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
+          ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="0" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
         </div>
         ${naFila ? `<button type="button" class="botao pequeno wpp-botao-assumir" data-acao="assumir-conversa" data-id="${c.id}">${c.eh_grupo ? "Entrar no grupo" : "Assumir"}</button>` : ""}
       </a>`;
@@ -3023,7 +3037,7 @@
           <button type="button" class="wpp-tag-adicionar" data-acao="adicionar-ao-grupo" data-id="${conversa.id}" title="Incluir um contato neste grupo do WhatsApp">➕ Adicionar pessoa</button>
         </div>` : ""}
       <div class="wpp-tags-linha">
-        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
+        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="0" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
       ${htmlNotas(conversa.id, notas || [])}
@@ -3532,7 +3546,7 @@
             if (!doOutro && !fechada) return "";
             return `<div class="wpp-conversa-dono">${doOutro ? `🏷️ ${escapeHtml(doOutro)}` : ""}${fechada ? `${doOutro ? " · " : ""}<span class="selo inativo">Fechada</span>` : ""}</div>`;
           })()}
-          ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
+          ${(c.tags || []).length ? `<div class="wpp-tags-linha wpp-tags-linha-lista">${c.tags.map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="1" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}</span>`).join("")}</div>` : ""}
         </div>
       </a>`;
     }
@@ -3626,7 +3640,7 @@
         </div>
       </div>
       <div class="wpp-tags-linha">
-        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" style="background:${t.cor};">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="1" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
+        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="1" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="1" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
