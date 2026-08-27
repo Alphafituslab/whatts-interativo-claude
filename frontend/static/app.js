@@ -1995,6 +1995,13 @@
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
+  function tocarConfirmacaoAtencaoEnviada() {
+    _tocarNotas([
+      { hz: 1046, inicio: 0,    duracao: 0.09, volume: 0.11 },
+      { hz: 1568, inicio: 0.10, duracao: 0.13, volume: 0.12 },
+    ]);
+  }
+
   // Banner flutuante de "fulano está chamando sua atenção" — aparece
   // em cima de QUALQUER tela (não só no chat interno), porque o toque
   // não serve de nada se só aparece pra quem já está olhando a
@@ -2013,6 +2020,17 @@
     banner.querySelector("a").addEventListener("click", () => banner.remove());
     document.body.appendChild(banner);
     setTimeout(() => { if (banner.isConnected) banner.remove(); }, 9000);
+  }
+
+  function _mostrarConfirmacaoAtencaoEnviada(nome) {
+    const existente = document.querySelector("[data-wpp-aviso-atencao]");
+    if (existente) existente.remove();
+    const banner = document.createElement("div");
+    banner.className = "wpp-aviso-atencao wpp-aviso-atencao-enviado";
+    banner.setAttribute("data-wpp-aviso-atencao", "");
+    banner.innerHTML = `<span>📣 Aviso enviado pra <strong>${escapeHtml(nome || "o colega")}</strong>.</span>`;
+    document.body.appendChild(banner);
+    setTimeout(() => { if (banner.isConnected) banner.remove(); }, 2500);
   }
 
   // Faixa no alto da tela enquanto o WhatsApp está fora do ar. Some
@@ -3574,7 +3592,7 @@
         <div class="wpp-chat-acoes">
           <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
           <button type="button" class="botao-icone" data-acao="abrir-agendar-interno" data-id="${conversa.id}" title="Agendar mensagem pro colega">🕒</button>
-          ${!souAlheio ? `<button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>` : ""}
+          ${!souAlheio ? `<button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" data-nome="${escapeHtml(outroNome)}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>` : ""}
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar-interno" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-interno" data-id="${conversa.id}">Reabrir</button>`
@@ -6609,6 +6627,8 @@
         try {
           await chamarApi(`/chat-interno/conversas/${conversaId}/chamar-atencao`, { method: "POST" });
           alvo.textContent = "✅";
+          tocarConfirmacaoAtencaoEnviada();
+          _mostrarConfirmacaoAtencaoEnviada(alvo.dataset.nome);
         } catch (erro) {
           alvo.textContent = "⚠️";
         } finally {

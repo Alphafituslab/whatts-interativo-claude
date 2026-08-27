@@ -502,6 +502,12 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
   .wpp-aviso-atencao { background: #4a2e00; color: #ffd699; border-color: #a85f00; }
 }
 .wpp-aviso-atencao a.botao { flex-shrink: 0; }
+/* Variante pra quem MANDOU o toque: só confirma que saiu, sem alarme —
+   fundo neutro, sem o pulso do banner que o destinatário vê. */
+.wpp-aviso-atencao-enviado {
+  background: var(--superficie); color: var(--texto); border-color: var(--borda);
+  animation: none; box-shadow: 0 4px 18px rgba(0,0,0,0.18);
+}
 
 .wpp-abas { display: flex; gap: 4px; padding: 2px; background: var(--superficie-2); border-radius: var(--raio-peq); flex-shrink: 0; }
 .wpp-aba {
