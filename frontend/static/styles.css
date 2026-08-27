@@ -1034,6 +1034,12 @@ nav { perspective: 800px; }
    Cada botão usa a cor da própria etiqueta: apagado quando desligado,
    pintado quando é ele que está filtrando.
    ===================================================================== */
+.wpp-tags-filtro-bloco { margin-bottom: 2px; }
+.wpp-tags-filtro-alternar {
+  background: none; border: none; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 700;
+  color: var(--texto-suave); padding: 2px 4px 6px; font-family: inherit;
+}
+.wpp-tags-filtro-alternar:hover { color: var(--texto); }
 .wpp-tags-filtro {
   display: flex; flex-wrap: wrap; gap: 5px; padding: 0 4px 8px;
 }

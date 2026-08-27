@@ -914,6 +914,7 @@
       { separador: true, rotulo: "Etiquetas" },
       ...linhas,
       { acao: "nova-etiqueta-conversa", id: conversaId, rotulo: "➕ Nova etiqueta…", dados: { tags: JSON.stringify(marcadas), interna: interna ? "1" : "0" } },
+      { acao: "excluir-etiqueta-escolher-menu", id: conversaId, rotulo: "🗑️ Excluir uma etiqueta…", dados: { interna: interna ? "1" : "0" } },
     ];
   }
 
@@ -949,6 +950,19 @@
     menu.style.top = Math.min(y, window.innerHeight - altura - 8) + "px";
     setTimeout(() => document.addEventListener("click", fecharMenuContexto, { once: true }), 0);
   }
+  document.addEventListener("contextmenu", async (e) => {
+    const chip = e.target.closest(".wpp-tag-filtro");
+    if (!chip || !chip.dataset.id) return; // o "✕ limpar" não tem id, não abre menu
+    e.preventDefault();
+    const interna = chip.dataset.acao === "filtrar-por-etiqueta-interno";
+    abrirMenuContexto(e.clientX, e.clientY, [
+      { separador: true, rotulo: chip.dataset.nome },
+      { acao: "editar-etiqueta-menu", id: chip.dataset.id, rotulo: "✏️ Editar (nome/cor)", dados: { interna: interna ? "1" : "0" } },
+      { acao: "excluir-etiqueta-menu", id: chip.dataset.id, rotulo: "🗑️ Excluir etiqueta",
+        dados: { nome: chip.dataset.nome, interna: interna ? "1" : "0" } },
+    ]);
+  });
+
   document.addEventListener("contextmenu", async (e) => {
     const item = e.target.closest("[data-wpp-conversa-id]");
     if (!item) return;
@@ -2469,18 +2483,22 @@
 
   function htmlFiltroEtiquetasInterno(etiquetas) {
     if (!etiquetas || !etiquetas.length) return "";
+    const aberto = !!state.etiquetasFiltroAbertasInterno;
     const chips = etiquetas.map((t) => {
       const ativa = String(state.tagFiltroInterno) === String(t.id);
       return `<button type="button" class="wpp-tag-filtro ${ativa ? "ativa" : ""}"
-                data-acao="filtrar-por-etiqueta-interno" data-id="${t.id}"
+                data-acao="filtrar-por-etiqueta-interno" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}"
                 style="--cor-etiqueta:${escapeHtml(t.cor || "#6b7280")};"
-                title="${ativa ? "Clique de novo pra tirar o filtro" : `Ver só as conversas com a etiqueta ${escapeHtml(t.nome)}`}">
+                title="${ativa ? "Clique de novo pra tirar o filtro (botão direito: editar/excluir)" : `Ver só as conversas com a etiqueta ${escapeHtml(t.nome)} (botão direito: editar/excluir)`}">
         ${escapeHtml(t.nome)}
       </button>`;
     }).join("");
-    return `<div class="wpp-tags-filtro">
-      ${chips}
-      ${state.tagFiltroInterno ? `<button type="button" class="wpp-tag-filtro-limpar" data-acao="filtrar-por-etiqueta-interno" data-id="">✕ limpar</button>` : ""}
+    return `<div class="wpp-tags-filtro-bloco">
+      <button type="button" class="wpp-tags-filtro-alternar" data-acao="alternar-filtro-etiquetas" data-interna="1">🏷️ Etiquetas ${aberto ? "▾" : "▸"}</button>
+      <div class="wpp-tags-filtro" ${aberto ? "" : "hidden"}>
+        ${chips}
+        ${state.tagFiltroInterno ? `<button type="button" class="wpp-tag-filtro-limpar" data-acao="filtrar-por-etiqueta-interno" data-id="">✕ limpar</button>` : ""}
+      </div>
     </div>`;
   }
 
@@ -3078,19 +3096,23 @@
   // etiqueta cadastrada a barra seria só um espaço vazio ocupando lugar.
   function htmlFiltroEtiquetas(etiquetas, contagem) {
     if (!etiquetas || !etiquetas.length) return "";
+    const aberto = !!state.etiquetasFiltroAbertas;
     const chips = etiquetas.map((t) => {
       const total = (contagem || {})[String(t.id)] || 0;
       const ativa = String(state.tagFiltro) === String(t.id);
       return `<button type="button" class="wpp-tag-filtro ${ativa ? "ativa" : ""}"
-                data-acao="filtrar-por-etiqueta" data-id="${t.id}"
+                data-acao="filtrar-por-etiqueta" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}"
                 style="--cor-etiqueta:${escapeHtml(t.cor || "#6b7280")};"
-                title="${ativa ? "Clique de novo pra tirar o filtro" : `Ver só as conversas com a etiqueta ${escapeHtml(t.nome)}`}">
+                title="${ativa ? "Clique de novo pra tirar o filtro (botão direito: editar/excluir)" : `Ver só as conversas com a etiqueta ${escapeHtml(t.nome)} (botão direito: editar/excluir)`}">
         ${escapeHtml(t.nome)}${total ? ` <span class="wpp-tag-filtro-n">${total}</span>` : ""}
       </button>`;
     }).join("");
-    return `<div class="wpp-tags-filtro">
-      ${chips}
-      ${state.tagFiltro ? `<button type="button" class="wpp-tag-filtro-limpar" data-acao="filtrar-por-etiqueta" data-id="">✕ limpar</button>` : ""}
+    return `<div class="wpp-tags-filtro-bloco">
+      <button type="button" class="wpp-tags-filtro-alternar" data-acao="alternar-filtro-etiquetas" data-interna="0">🏷️ Etiquetas ${aberto ? "▾" : "▸"}</button>
+      <div class="wpp-tags-filtro" ${aberto ? "" : "hidden"}>
+        ${chips}
+        ${state.tagFiltro ? `<button type="button" class="wpp-tag-filtro-limpar" data-acao="filtrar-por-etiqueta" data-id="">✕ limpar</button>` : ""}
+      </div>
     </div>`;
   }
 
@@ -3970,6 +3992,19 @@
             <button type="button" class="botao secundario pequeno" data-acao="criar-tag-inline">Criar</button>
           </div>
         </div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Salvar</button>
+        </div>
+      </form>`);
+  }
+
+  function modalEditarEtiqueta(tag, interna) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Editar etiqueta</h3>
+      <form data-form="salvar-edicao-etiqueta" data-id="${tag.id}" data-interna="${interna ? "1" : "0"}">
+        <div class="campo"><label>Nome</label><input name="nome" value="${escapeHtml(tag.nome)}" required autofocus></div>
+        <div class="campo"><label>Cor</label><input type="color" name="cor" value="${escapeHtml(tag.cor || "#6b7280")}" style="width:60px; padding:2px;"></div>
         <div class="rodape-modal">
           <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
           <button type="submit" class="botao">Salvar</button>
@@ -5482,6 +5517,17 @@
         URL.revokeObjectURL(url);
         return;
       }
+      case "alternar-filtro-etiquetas": {
+        const interna = alvo.dataset.interna === "1";
+        if (interna) state.etiquetasFiltroAbertasInterno = !state.etiquetasFiltroAbertasInterno;
+        else state.etiquetasFiltroAbertas = !state.etiquetasFiltroAbertas;
+        const aberto = interna ? state.etiquetasFiltroAbertasInterno : state.etiquetasFiltroAbertas;
+        const bloco = alvo.closest(".wpp-tags-filtro-bloco");
+        const chips = bloco && bloco.querySelector(".wpp-tags-filtro");
+        if (chips) chips.hidden = !aberto;
+        alvo.textContent = `🏷️ Etiquetas ${aberto ? "▾" : "▸"}`;
+        return;
+      }
       case "filtrar-atividades": {
         state.filtroAtividadesUsuarioId = alvo.value || null;
         return renderAtividades();
@@ -5758,6 +5804,35 @@
       }
       case "abrir-agendar-interno": {
         modalAgendarInterno(Number(alvo.dataset.id));
+        return;
+      }
+      case "editar-etiqueta-menu": {
+        const etiquetas = await obterEtiquetas();
+        const tag = etiquetas.find((t) => String(t.id) === String(alvo.dataset.id));
+        if (!tag) { definirFlash("erro", "Etiqueta não encontrada — pode já ter sido excluída."); return _redesenharCanal(alvo.dataset.interna === "1"); }
+        return modalEditarEtiqueta(tag, alvo.dataset.interna === "1");
+      }
+      case "excluir-etiqueta-menu": {
+        if (!confirm(`Excluir a etiqueta "${alvo.dataset.nome}"? Ela sai de todas as conversas onde foi usada. As conversas em si (e as mensagens) não são apagadas.`)) return;
+        await chamarApi(`/whatsapp/tags/${alvo.dataset.id}`, { method: "DELETE" });
+        state._tagsCache = null;
+        if (String(state.tagFiltro) === String(alvo.dataset.id)) state.tagFiltro = null;
+        if (String(state.tagFiltroInterno) === String(alvo.dataset.id)) state.tagFiltroInterno = null;
+        definirFlash("ok", "Etiqueta excluída.");
+        return _redesenharCanal(alvo.dataset.interna === "1");
+      }
+      case "excluir-etiqueta-escolher-menu": {
+        const interna = alvo.dataset.interna === "1";
+        const etiquetas = await obterEtiquetas();
+        if (!etiquetas.length) { definirFlash("erro", "Nenhuma etiqueta criada ainda."); return; }
+        const rect = alvo.getBoundingClientRect();
+        abrirMenuContexto(rect.left, rect.bottom, [
+          { separador: true, rotulo: "Excluir qual etiqueta?" },
+          ...etiquetas.map((t) => ({
+            acao: "excluir-etiqueta-menu", id: t.id, rotulo: escapeHtml(t.nome), cor: t.cor || "#6b7280",
+            dados: { nome: t.nome, interna: interna ? "1" : "0" },
+          })),
+        ]);
         return;
       }
       case "chamar-atencao-interna": {
@@ -6566,6 +6641,16 @@
         definirFlash("ok", `${resp.importados} contato(s) novo(s) importado(s)${resp.ja_existiam ? `, ${resp.ja_existiam} já existiam` : ""}${resp.invalidos ? `, ${resp.invalidos} inválido(s)` : ""}.`);
         fecharModais();
         return montarRota();
+      }
+      case "salvar-edicao-etiqueta": {
+        const nome = (dados.get("nome") || "").trim();
+        const cor = dados.get("cor") || "";
+        if (!nome) { definirFlash("erro", "Informe o nome da etiqueta."); return; }
+        await chamarApi(`/whatsapp/tags/${form.dataset.id}`, { method: "PUT", body: { nome, cor } });
+        state._tagsCache = null;
+        fecharModais();
+        definirFlash("ok", "Etiqueta atualizada em todas as conversas onde é usada.");
+        return _redesenharCanal(form.dataset.interna === "1");
       }
       case "definir-tags-conversa": {
         const conversaId = Number(form.dataset.conversaId);
