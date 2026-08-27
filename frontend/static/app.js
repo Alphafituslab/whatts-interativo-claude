@@ -2995,18 +2995,21 @@
     </details>`;
   }
 
-  function htmlNegociacoesFechadas(conversaId, negociacoes) {
-    if (!negociacoes || !negociacoes.length) return "";
-    return `<details class="wpp-resumo">
-      <summary class="wpp-resumo-rotulo">💰 Negociações fechadas <span class="texto-suave">(${negociacoes.length})</span></summary>
-      <div class="wpp-negociacoes-lista">
-        ${negociacoes.map((n) => `
+  function modalNegociacoesFechadas(conversaId, negociacoes) {
+    abrirModal(`
+      <h3 style="margin-top:0;">💰 Negociações fechadas</h3>
+      <p class="dica">Só visível pra equipe — nunca vai pro cliente. Cada marcação conta separado no Dashboard, mesmo repetindo com o mesmo cliente ao longo do tempo.</p>
+      <div class="wpp-negociacoes-lista" style="margin-bottom:14px;">
+        ${negociacoes.length ? negociacoes.map((n) => `
           <div class="wpp-negociacao-item">
             <span>Marcada por <strong>${escapeHtml(n.usuario_nome)}</strong> em ${fmtData(n.marcado_em)}</span>
             <button type="button" class="wpp-tag-tirar" data-acao="desfazer-negociacao" data-id="${conversaId}" data-negociacao="${n.id}" title="Desfazer — marquei por engano">✕</button>
-          </div>`).join("")}
+          </div>`).join("") : '<p class="texto-suave">Nenhuma marcada ainda.</p>'}
       </div>
-    </details>`;
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
+        <button type="button" class="botao" data-acao="marcar-negociacao" data-id="${conversaId}">💰 Marcar negociação fechada</button>
+      </div>`);
   }
 
   function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes) {
@@ -3038,8 +3041,9 @@
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}
-          <button type="button" class="botao-icone wpp-mais-acoes ${conversa.resumo || conversa.proximo_contato_em ? "wpp-icone-preenchido" : ""}" data-acao="abrir-mais-acoes" data-id="${conversa.id}"
+          <button type="button" class="botao-icone wpp-mais-acoes ${conversa.resumo || conversa.proximo_contato_em || (negociacoes || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-mais-acoes" data-id="${conversa.id}"
             data-resumo="${escapeHtml(conversa.resumo || "")}" data-arquivada="${conversa.arquivada ? "1" : "0"}" data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}"
+            data-negociacoes="${(negociacoes || []).length}"
             data-proximo="${escapeHtml(conversa.proximo_contato_em || "")}" title="Mais ações">⋯</button>
         </div>
       </div>
@@ -3060,7 +3064,6 @@
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="0" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
-      ${htmlNegociacoesFechadas(conversa.id, negociacoes || [])}
       ${htmlNotas(conversa.id, notas || [])}
       ${conversa.sugerir_encerrar ? `
         <div class="wpp-lembrar-encerrar">
@@ -5652,11 +5655,12 @@
         const arquivada = alvo.dataset.arquivada === "1";
         const proximo = alvo.dataset.proximo;
         const ehGrupo = alvo.dataset.ehGrupo === "1";
+        const totalNegociacoes = Number(alvo.dataset.negociacoes || 0);
         return abrirMenuContexto(r.right - 250, r.bottom + 4, [
           { acao: "abrir-resumo", id, rotulo: alvo.dataset.resumo ? "📝 Ver/editar resumo" : "📝 Escrever resumo",
             dados: { resumo: alvo.dataset.resumo } },
           { acao: "abrir-lembrete", id, rotulo: "🔔 Criar lembrete de retorno" },
-          ...(!ehGrupo ? [{ acao: "marcar-negociacao", id, rotulo: "💰 Marcar negociação fechada" }] : []),
+          ...(!ehGrupo ? [{ acao: "ver-negociacoes", id, rotulo: `💰 Negociações fechadas${totalNegociacoes ? ` (${totalNegociacoes})` : ""}` }] : []),
           { acao: "abrir-agendar-contato", id,
             rotulo: proximo ? `📞 Próximo contato: ${fmtData(proximo)}` : "📞 Agendar próximo contato" },
           { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id,
@@ -5824,10 +5828,16 @@
         return montarRota();
       }
       case "fechar-conversa": modalFecharConversa(Number(alvo.dataset.id)); return;
+      case "ver-negociacoes": {
+        const conversaId = Number(alvo.dataset.id);
+        const negociacoes = await chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes`).catch(() => []);
+        return modalNegociacoesFechadas(conversaId, negociacoes);
+      }
       case "marcar-negociacao": {
         if (!confirm("Marcar esta conversa como negociação fechada? Isso já entra na taxa de conversão do Dashboard.")) return;
         const conversaId = Number(alvo.dataset.id);
         await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado: "venda" } });
+        fecharModais();
         definirFlash("ok", "Negociação fechada marcada — já entra no Dashboard, sem encerrar o atendimento.");
         return renderWhatsapp(conversaId);
       }
@@ -5836,6 +5846,7 @@
         const negociacaoId = Number(alvo.dataset.negociacao);
         await chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes/${negociacaoId}`, { method: "DELETE" });
         definirFlash("ok", "Marcação desfeita.");
+        fecharModais();
         return renderWhatsapp(conversaId);
       }
       case "fechar-conversa-com-resultado": {
