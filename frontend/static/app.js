@@ -1618,10 +1618,14 @@
   // pra dar pra notar mesmo sem olhar a tela nem prestar atenção nela.
   function tocarAvisoAtencao() {
     _tocarNotas([
-      { hz: 1760, inicio: 0,    duracao: 0.11, volume: 0.19 },
-      { hz: 1760, inicio: 0.17, duracao: 0.11, volume: 0.19 },
-      { hz: 1760, inicio: 0.34, duracao: 0.11, volume: 0.19 },
-      { hz: 1760, inicio: 0.51, duracao: 0.22, volume: 0.20 },
+      { hz: 1760, inicio: 0,    duracao: 0.13, volume: 0.19 },
+      { hz: 1760, inicio: 0.22, duracao: 0.13, volume: 0.19 },
+      { hz: 1760, inicio: 0.44, duracao: 0.13, volume: 0.19 },
+      { hz: 1760, inicio: 0.66, duracao: 0.13, volume: 0.19 },
+      { hz: 1760, inicio: 0.98, duracao: 0.13, volume: 0.20 },
+      { hz: 1760, inicio: 1.20, duracao: 0.13, volume: 0.20 },
+      { hz: 1760, inicio: 1.42, duracao: 0.13, volume: 0.20 },
+      { hz: 1760, inicio: 1.64, duracao: 0.90, volume: 0.21 },
     ]);
   }
 
