@@ -2273,6 +2273,14 @@ def fechar_conversa(conversa_id):
     if not _pode_agir(usuario, conversa):
         raise ApiError("Só o responsável por esta conversa (ou um administrador) pode encerrá-la.", status=403, codigo="sem_permissao")
     whatsapp_service.fechar_conversa(conn, conversa_id, resultado)
+    # Administrador encerrando o atendimento de OUTRA pessoa: libera o
+    # dono na hora, pra a conversa ficar disponivel pra qualquer um do
+    # setor pegar caso seja reaberta antes de o cliente escrever de novo
+    # (nesse caso o sistema ja libera sozinho). Nao mexe em grupo, que
+    # nao tem dono unico.
+    if (usuario["admin"] and not conversa["eh_grupo"]
+            and conversa["atribuida_usuario_id"] and conversa["atribuida_usuario_id"] != usuario["id"]):
+        whatsapp_service.atribuir_conversa(conn, conversa_id, None, usuario["id"])
     whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_fechada", f"{conversa['telefone']}" + (f" ({resultado})" if resultado else ""), conversa_id)
     return jsonify({"ok": True})
 
