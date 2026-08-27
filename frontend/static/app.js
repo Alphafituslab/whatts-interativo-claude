@@ -2604,7 +2604,10 @@
       const nome = c.contato_nome || c.telefone;
       // Grupo nunca tem dono, então "sem dono" não significa "na fila":
       // só está na fila o grupo em que ninguém da equipe entrou ainda.
-      const naFila = c.eh_grupo ? !c.equipe_no_grupo : !c.atribuida_usuario_id;
+      // E conversa ENCERRADA nunca está "na fila" — encerrar tira do
+      // jogo pra todo mundo; só volta a aparecer disponível se reabrir
+      // (o cliente escrevendo de novo, ou alguém clicando Reabrir).
+      const naFila = c.status !== "fechada" && (c.eh_grupo ? !c.equipe_no_grupo : !c.atribuida_usuario_id);
       const slaEstourado = state.slaAlertasIds.has(c.id);
       return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : ""}>
         ${htmlAvatarContato(c.contato_foto, c.contato_nome, c.telefone, 42)}
@@ -2621,8 +2624,10 @@
           </div>
           ${(() => {
             const partes = [];
-            if (state.escopoConversas === "todas" || naFila) {
-              partes.push(naFila ? '<span class="selo amarelo">Na fila</span>' : `<span class="wpp-mini-bolinha ${c.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${c.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> ${escapeHtml(c.atribuida_usuario_nome || "")}`);
+            if (naFila) {
+              partes.push('<span class="selo amarelo">Na fila</span>');
+            } else if (state.escopoConversas === "todas" && c.atribuida_usuario_nome) {
+              partes.push(`<span class="wpp-mini-bolinha ${c.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${c.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> ${escapeHtml(c.atribuida_usuario_nome)}`);
             }
             if (c.status === "fechada") partes.push('<span class="selo inativo">Fechada</span>');
             // O setor aparece sempre, em qualquer aba — não só em "Todas"/"Fila" — é informação útil pra qualquer atendente ver de cara.

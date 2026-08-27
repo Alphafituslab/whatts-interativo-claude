@@ -2234,6 +2234,10 @@ def assumir_conversa(conversa_id):
     usuario = g.usuario_atual
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if conversa["status"] == "fechada":
+        raise ApiError(
+            "Esta conversa está encerrada — reabra antes de assumir (ou espere o cliente escrever de novo, que já reabre sozinho).",
+            status=409, codigo="conversa_fechada")
     # Assumir um grupo é ENTRAR nele. Não vira dono (grupo comporta várias
     # pessoas daqui), mas passa a ver e escrever — e some da fila.
     #
