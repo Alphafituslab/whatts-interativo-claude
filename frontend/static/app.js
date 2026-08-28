@@ -2978,10 +2978,11 @@
       </div>`).join("")}</div>`;
   }
 
-  function htmlNotas(conversaId, notas) {
-    return `<details class="wpp-resumo">
-      <summary class="wpp-resumo-rotulo">🗒️ Notas internas <span class="texto-suave">— só a equipe vê, nunca vai pro cliente${notas.length ? ` (${notas.length})` : ""}</span></summary>
-      <div class="wpp-notas-lista">
+  function modalNotasInternas(conversaId, notas) {
+    abrirModal(`
+      <h3 style="margin-top:0;">🗒️ Notas internas</h3>
+      <p class="dica">Só a equipe vê — nunca vai pro cliente.</p>
+      <div class="wpp-notas-lista" style="margin-bottom:14px;">
         ${notas.length ? notas.map((n) => `
           <div class="wpp-nota-item">
             <div class="wpp-nota-cabecalho"><strong>${escapeHtml(n.usuario_nome || "—")}</strong><span class="texto-suave">${fmtData(n.criado_em)}</span></div>
@@ -2990,9 +2991,11 @@
       </div>
       <form data-form="criar-nota" data-conversa-id="${conversaId}" class="wpp-resumo-form">
         <textarea name="texto" rows="2" placeholder="Ex.: cliente pediu desconto, aguardando aprovação da gerência…" required></textarea>
-        <button type="submit" class="botao secundario pequeno">Adicionar</button>
-      </form>
-    </details>`;
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
+          <button type="submit" class="botao secundario">Adicionar</button>
+        </div>
+      </form>`);
   }
 
   function modalNegociacoesFechadas(conversaId, negociacoes) {
@@ -3037,6 +3040,7 @@
         <div class="wpp-chat-acoes">
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
+          <button type="button" class="botao-icone ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Notas internas — só a equipe vê, nunca vai pro cliente${(notas || []).length ? ` (${notas.length})` : ""}">🗒️</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
@@ -3064,7 +3068,7 @@
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="0" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="0" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-conversa" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Marcar este cliente com uma etiqueta sua — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar cliente"}</button>
       </div>
-      ${htmlNotas(conversa.id, notas || [])}
+
       ${conversa.sugerir_encerrar ? `
         <div class="wpp-lembrar-encerrar">
           <span>Este atendimento está parado há mais de ${conversa.horas_sugerir_encerrar || 24}h. Se já terminou, encerre — assim o cliente passa pelo menu de novo quando voltar.</span>
@@ -5828,6 +5832,11 @@
         return montarRota();
       }
       case "fechar-conversa": modalFecharConversa(Number(alvo.dataset.id)); return;
+      case "abrir-notas": {
+        const conversaId = Number(alvo.dataset.id);
+        const notasAtuais = await chamarApi(`/whatsapp/conversas/${conversaId}/notas`).catch(() => []);
+        return modalNotasInternas(conversaId, notasAtuais);
+      }
       case "ver-negociacoes": {
         const conversaId = Number(alvo.dataset.id);
         const negociacoes = await chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes`).catch(() => []);
@@ -6773,6 +6782,7 @@
       case "criar-nota": {
         const conversaId = Number(form.dataset.conversaId);
         await chamarApi(`/whatsapp/conversas/${conversaId}/notas`, { method: "POST", body: { texto: dados.get("texto") } });
+        fecharModais();
         return renderWhatsapp(conversaId);
       }
       case "criar-resposta-pronta": {
