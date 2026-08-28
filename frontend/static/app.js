@@ -3205,6 +3205,14 @@
     }
     _limparCitacaoSeTrocou(`cliente:${conversaId}`);
     _carregandoSeTrocouDeTela("whatsapp");
+    if (!state._escopoAutoAplicado && state.usuarioAtual.admin && !state.buscaConversas && !state.buscaData) {
+      state._escopoAutoAplicado = true;
+      try {
+        const cont = await chamarApi("/whatsapp/contagem-abas");
+        state.contagemAbas = cont;
+        if (!cont.minhas_nao_lidas) state.escopoConversas = "todas";
+      } catch (e) { /* segue com o padrão (Minhas) se a checagem falhar */ }
+    }
     let conversas;
     let contatosSemConversa = [];
     if (state.buscaConversas || state.buscaData) {
