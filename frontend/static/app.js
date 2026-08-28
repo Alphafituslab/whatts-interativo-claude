@@ -5584,6 +5584,7 @@
       }
       case "alternar-filtro-negociacao": {
         state.filtroNegociacaoFechada = !state.filtroNegociacaoFechada;
+        if (state.filtroNegociacaoFechada) state.filtroSoGrupos = false;
         return renderWhatsapp(null);
       }
       case "alternar-filtros-extras": {
@@ -5597,6 +5598,7 @@
       }
       case "alternar-filtro-grupos": {
         state.filtroSoGrupos = !state.filtroSoGrupos;
+        if (state.filtroSoGrupos) state.filtroNegociacaoFechada = false;
         return renderWhatsapp(null);
       }
       case "alternar-lembretes-todos": {
