@@ -3331,7 +3331,7 @@
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${(state.buscaConversas || state.buscaData) ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
-           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
+           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroNegociacoes() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes)}</div>
