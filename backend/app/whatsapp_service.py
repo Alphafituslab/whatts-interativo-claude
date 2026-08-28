@@ -2301,6 +2301,13 @@ def fechar_conversa(conn, conversa_id: int, resultado: str = None):
     if eh_grupo is not None and eh_grupo["eh_grupo"]:
         conn.execute("UPDATE whatsapp_conversas SET aguardando_avaliacao = 0 WHERE id = ?", (conversa_id,))
         return
+    # Sem dono na hora de encerrar = ninguém de verdade atendeu (ex.:
+    # cliente caiu num setor sem ninguém online, e a conversa acabou
+    # sendo encerrada assim mesmo) — não faz sentido perguntar "como foi
+    # o atendimento" de um atendimento que não aconteceu.
+    if conversa["atribuida_usuario_id"] is None:
+        conn.execute("UPDATE whatsapp_conversas SET aguardando_avaliacao = 0 WHERE id = ?", (conversa_id,))
+        return
 
     config = obter_configuracao(conn, conversa["empresa_id"])
     try:
