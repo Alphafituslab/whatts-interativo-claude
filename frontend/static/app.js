@@ -3026,7 +3026,6 @@
       </div>
       <div class="rodape-modal">
         <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
-        <button type="button" class="botao" data-acao="marcar-negociacao" data-id="${conversaId}">💰 Marcar negociação fechada</button>
       </div>`);
   }
 
@@ -3079,6 +3078,7 @@
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Só a equipe vê, nunca vai pro cliente">🗒️ Notas internas${(notas || []).length ? ` (${notas.length})` : ""}</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
+          ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}
