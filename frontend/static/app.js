@@ -3640,7 +3640,7 @@
     const saida = souAlheio ? m.usuario_id === conversa.criado_por_id : m.usuario_id === eu;
     const nomeAutor = m.usuario_id === conversa.criado_por_id ? conversa.criado_por_nome : (conversa.participante_nome || "—");
     return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.excluida_em ? "wpp-bolha-apagada" : ""}">
-      ${!saida || souAlheio ? `<div class="texto-suave" style="font-size:11px; font-weight:700; margin-bottom:2px;">${escapeHtml(nomeAutor)}</div>` : ""}
+      <div class="texto-suave" style="font-size:11px; font-weight:700; margin-bottom:2px;">${escapeHtml(nomeAutor)}</div>
       ${htmlSeloApagada(m)}
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
