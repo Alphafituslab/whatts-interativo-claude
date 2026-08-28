@@ -2409,13 +2409,106 @@ def listar_negociacoes_fechadas(conversa_id):
     if not _pode_visualizar(usuario, conversa):
         raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
     rows = conn.execute(
-        "SELECT n.id, n.marcado_em, u.nome AS usuario_nome FROM whatsapp_negociacoes_fechadas n "
+        "SELECT n.id, n.marcado_em, n.usuario_id, u.nome AS usuario_nome FROM whatsapp_negociacoes_fechadas n "
         "JOIN usuarios u ON u.id = n.usuario_id WHERE n.conversa_id = ? ORDER BY n.marcado_em",
         (conversa_id,),
     ).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
+@bp.put("/conversas/<int:conversa_id>/negociacoes/<int:negociacao_id>")
+@requires_admin
+def trocar_dono_negociacao(conversa_id, negociacao_id):
+    """Troca quem fica com o crédito de uma negociação fechada -- só
+    admin. (Pedido comum: marcou em nome de quem realmente vendeu, mas
+    foi outra pessoa que atendeu/registrou.)"""
+    dados = request.get_json(silent=True) or {}
+    novo_usuario_id = dados.get("usuario_id")
+    if not novo_usuario_id:
+        raise ApiError("Informe usuario_id.", status=400)
+    conn = get_db()
+    linha = conn.execute(
+        "SELECT * FROM whatsapp_negociacoes_fechadas WHERE id = ? AND conversa_id = ?",
+        (negociacao_id, conversa_id),
+    ).fetchone()
+    if linha is None:
+        raise ApiError("Marcação não encontrada.", status=404, codigo="nao_encontrado")
+    alvo = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE id = ? AND empresa_id = ?", (novo_usuario_id, g.empresa_id)
+    ).fetchone()
+    if alvo is None:
+        raise ApiError("Usuário não encontrado.", status=404, codigo="nao_encontrado")
+    conn.execute(
+        "UPDATE whatsapp_negociacoes_fechadas SET usuario_id = ?, solicitado_por_id = NULL WHERE id = ?",
+        (novo_usuario_id, negociacao_id),
+    )
+    # Se essa troca veio de um pedido, avisa quem pediu que já foi
+    # feito — sem isso a pessoa fica sem saber se o admin viu ou não.
+    if linha["solicitado_por_id"]:
+        conversa_interna_id = chat_interno_service.buscar_conversa_existente(
+            conn, g.usuario_atual["id"], linha["solicitado_por_id"]
+        )
+        texto_aviso = f"✅ Troca feita: a negociação agora está com {alvo['nome']}."
+        if conversa_interna_id is None:
+            chat_interno_service.iniciar_conversa(
+                conn, g.usuario_atual["id"], linha["solicitado_por_id"], setor_destino=None, texto=texto_aviso
+            )
+        else:
+            chat_interno_service.enviar_mensagem(conn, conversa_interna_id, g.usuario_atual["id"], texto_aviso)
+    return jsonify({"ok": True, "usuario_id": novo_usuario_id, "usuario_nome": alvo["nome"]})
+
+
+@bp.post("/conversas/<int:conversa_id>/negociacoes/<int:negociacao_id>/solicitar-troca")
+@requires_auth
+def solicitar_troca_negociacao(conversa_id, negociacao_id):
+    """Quem NÃO é admin pede a troca -- manda mensagem no chat interno
+    pro admin escolhido, com link direto pra revisar (nova aba, já cai
+    aberto no lugar certo). Não altera nada sozinho."""
+    usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
+    admin_id = dados.get("admin_id")
+    usuario_desejado_id = dados.get("usuario_id_desejado")
+    if not admin_id or not usuario_desejado_id:
+        raise ApiError("Informe admin_id e usuario_id_desejado.", status=400)
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_visualizar(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    linha = conn.execute(
+        "SELECT n.*, u.nome AS atual_nome FROM whatsapp_negociacoes_fechadas n JOIN usuarios u ON u.id = n.usuario_id "
+        "WHERE n.id = ? AND n.conversa_id = ?", (negociacao_id, conversa_id),
+    ).fetchone()
+    if linha is None:
+        raise ApiError("Marcação não encontrada.", status=404, codigo="nao_encontrado")
+    admin_alvo = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE id = ? AND empresa_id = ? AND admin = 1", (admin_id, g.empresa_id)
+    ).fetchone()
+    if admin_alvo is None:
+        raise ApiError("Escolha um administrador válido.", status=400)
+    desejado = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE id = ? AND empresa_id = ?", (usuario_desejado_id, g.empresa_id)
+    ).fetchone()
+    if desejado is None:
+        raise ApiError("Escolha um usuário válido.", status=400)
+
+    conn.execute("UPDATE whatsapp_negociacoes_fechadas SET solicitado_por_id = ? WHERE id = ?", (usuario["id"], negociacao_id))
+    conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, usuario["id"], admin_alvo["id"])
+    link = f"{request.scheme}://{request.host}/#/whatsapp/{conversa_id}/negociacoes"
+    texto = (
+        f"\U0001f501 Pedido de troca de negociação fechada\n\n"
+        f"Cliente: {conversa['telefone']}\n"
+        f"Marcada por: {linha['atual_nome']} em {linha['marcado_em'][:16].replace('T', ' ')}\n"
+        f"{usuario['nome']} pede pra trocar pra: {desejado['nome']}\n\n"
+        f"Abrir e revisar: {link}"
+    )
+    if conversa_interna_id is None:
+        conversa_interna_id = chat_interno_service.iniciar_conversa(
+            conn, usuario["id"], admin_alvo["id"], setor_destino=None, texto=texto
+        )
+    else:
+        chat_interno_service.enviar_mensagem(conn, conversa_interna_id, usuario["id"], texto)
+    return jsonify({"ok": True})
+@requires_auth
 @bp.delete("/conversas/<int:conversa_id>/negociacoes/<int:negociacao_id>")
 @requires_auth
 def desfazer_negociacao_fechada(conversa_id, negociacao_id):

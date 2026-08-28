@@ -246,7 +246,7 @@
     try {
       await (async () => {
         switch (pagina) {
-          case "whatsapp": return renderWhatsapp(param ? Number(param) : null);
+          case "whatsapp": return renderWhatsapp(param ? Number(param) : null, rota.split("/")[3] === "negociacoes");
           case "chat-interno": return renderChatInterno(param ? Number(param) : null);
           case "_sem_acesso_conversas": break; // nunca casa; só pra deixar o switch legível
           case "agendamentos": return renderAgendamentos();
@@ -2998,21 +2998,58 @@
       </form>`);
   }
 
-  function modalNegociacoesFechadas(conversaId, negociacoes) {
+  async function modalNegociacoesFechadas(conversaId, negociacoes) {
+    const souAdmin = !!state.usuarioAtual.admin;
+    // Só busca a lista de colegas se precisar (admin trocando, ou
+    // alguém pedindo troca) — sem isso todo mundo pagava essa chamada
+    // à toa, mesmo sem nenhuma negociação marcada ainda.
+    const colegas = negociacoes.length ? await chamarApi("/usuarios").catch(() => []) : [];
     abrirModal(`
       <h3 style="margin-top:0;">💰 Negociações fechadas</h3>
       <p class="dica">Só visível pra equipe — nunca vai pro cliente. Cada marcação conta separado no Dashboard, mesmo repetindo com o mesmo cliente ao longo do tempo.</p>
       <div class="wpp-negociacoes-lista" style="margin-bottom:14px;">
         ${negociacoes.length ? negociacoes.map((n) => `
-          <div class="wpp-negociacao-item">
-            <span>Marcada por <strong>${escapeHtml(n.usuario_nome)}</strong> em ${fmtData(n.marcado_em)}</span>
-            <button type="button" class="wpp-tag-tirar" data-acao="desfazer-negociacao" data-id="${conversaId}" data-negociacao="${n.id}" title="Desfazer — marquei por engano">✕</button>
+          <div class="wpp-negociacao-item" style="flex-direction:column; align-items:stretch; gap:6px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span>Marcada por <strong>${escapeHtml(n.usuario_nome)}</strong> em ${fmtData(n.marcado_em)}</span>
+              ${(souAdmin || n.usuario_id === state.usuarioAtual.id) ? `<button type="button" class="wpp-tag-tirar" data-acao="desfazer-negociacao" data-id="${conversaId}" data-negociacao="${n.id}" title="Desfazer — marquei por engano">✕</button>` : ""}
+            </div>
+            ${souAdmin ? `
+              <div style="display:flex; gap:6px; align-items:center;">
+                <select data-negociacao-select="${n.id}" style="flex:1; font-size:12px;">
+                  ${colegas.map((u) => `<option value="${u.id}" ${u.id === n.usuario_id ? "selected" : ""}>${escapeHtml(u.nome)}</option>`).join("")}
+                </select>
+                <button type="button" class="botao secundario pequeno" data-acao="trocar-negociacao" data-id="${conversaId}" data-negociacao="${n.id}">Trocar</button>
+              </div>` : `
+              <button type="button" class="botao secundario pequeno" data-acao="abrir-solicitar-troca" data-id="${conversaId}" data-negociacao="${n.id}" data-usuario-atual="${escapeHtml(n.usuario_nome)}">🔁 Solicitar troca pro admin</button>`}
           </div>`).join("") : '<p class="texto-suave">Nenhuma marcada ainda.</p>'}
       </div>
       <div class="rodape-modal">
         <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
         <button type="button" class="botao" data-acao="marcar-negociacao" data-id="${conversaId}">💰 Marcar negociação fechada</button>
       </div>`);
+  }
+
+  async function modalSolicitarTroca(conversaId, negociacaoId, nomeAtual) {
+    const [colegas, admins] = await Promise.all([
+      chamarApi("/usuarios").catch(() => []),
+      chamarApi("/usuarios").then((us) => us.filter((u) => u.admin)).catch(() => []),
+    ]);
+    abrirModal(`
+      <h3 style="margin-top:0;">🔁 Solicitar troca</h3>
+      <p class="dica">Está marcada com <strong>${escapeHtml(nomeAtual)}</strong>. Escolha pra quem deveria ir, e qual admin avisar — manda uma mensagem no chat interno com o link direto pra ele revisar. Só o admin troca de verdade.</p>
+      <form data-form="solicitar-troca-negociacao" data-conversa-id="${conversaId}" data-negociacao-id="${negociacaoId}">
+        <div class="campo"><label>Trocar para</label>
+          <select name="usuario_id_desejado" required>${colegas.map((u) => `<option value="${u.id}">${escapeHtml(u.nome)}</option>`).join("")}</select>
+        </div>
+        <div class="campo"><label>Avisar qual admin</label>
+          <select name="admin_id" required>${admins.map((u) => `<option value="${u.id}">${escapeHtml(u.nome)}</option>`).join("")}</select>
+        </div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Enviar pedido</button>
+        </div>
+      </form>`);
   }
 
   function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes) {
@@ -3194,7 +3231,7 @@
     return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}${atendente}${negociacao}`;
   }
 
-  async function renderWhatsapp(conversaId) {
+  async function renderWhatsapp(conversaId, abrirNegociacoes) {
     if (!_podeVerConversas()) {
       // Chegou aqui digitando o endereço ou por um link antigo — manda
       // pro chat interno em vez de deixar a tela quebrada carregando
@@ -3303,6 +3340,10 @@
     );
 
     _irParaOFim(document.querySelector("[data-wpp-mensagens]"));
+    if (abrirNegociacoes && conversaAtual) {
+      const negociacoesFrescas = await chamarApi(`/whatsapp/conversas/${conversaAtual.id}/negociacoes`).catch(() => []);
+      modalNegociacoesFechadas(conversaAtual.id, negociacoesFrescas);
+    }
     _mostrarBotaoCatalogo();
     iniciarPollingWhatsapp(conversaId);
   }
@@ -5845,6 +5886,18 @@
         const notasAtuais = await chamarApi(`/whatsapp/conversas/${conversaId}/notas`).catch(() => []);
         return modalNotasInternas(conversaId, notasAtuais);
       }
+      case "abrir-solicitar-troca": {
+        return modalSolicitarTroca(Number(alvo.dataset.id), Number(alvo.dataset.negociacao), alvo.dataset.usuarioAtual);
+      }
+      case "trocar-negociacao": {
+        const conversaId = Number(alvo.dataset.id);
+        const negociacaoId = Number(alvo.dataset.negociacao);
+        const select = document.querySelector(`[data-negociacao-select="${negociacaoId}"]`);
+        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes/${negociacaoId}`, { method: "PUT", body: { usuario_id: Number(select.value) } });
+        fecharModais();
+        definirFlash("ok", `Negociação trocada pra ${r.usuario_nome}.`);
+        return renderWhatsapp(conversaId);
+      }
       case "ver-negociacoes": {
         const conversaId = Number(alvo.dataset.id);
         const negociacoes = await chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes`).catch(() => []);
@@ -6767,6 +6820,17 @@
         definirFlash("ok", `${resp.importados} contato(s) novo(s) importado(s)${resp.ja_existiam ? `, ${resp.ja_existiam} já existiam` : ""}${resp.invalidos ? `, ${resp.invalidos} inválido(s)` : ""}.`);
         fecharModais();
         return montarRota();
+      }
+      case "solicitar-troca-negociacao": {
+        const conversaId = Number(form.dataset.conversaId);
+        const negociacaoId = Number(form.dataset.negociacaoId);
+        await chamarApi(`/whatsapp/conversas/${conversaId}/negociacoes/${negociacaoId}/solicitar-troca`, {
+          method: "POST",
+          body: { usuario_id_desejado: Number(dados.get("usuario_id_desejado")), admin_id: Number(dados.get("admin_id")) },
+        });
+        fecharModais();
+        definirFlash("ok", "Pedido enviado — o admin recebeu uma mensagem no chat interno com o link pra revisar.");
+        return;
       }
       case "salvar-edicao-etiqueta": {
         const nome = (dados.get("nome") || "").trim();

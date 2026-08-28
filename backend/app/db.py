@@ -66,6 +66,7 @@ SCHEMA_FILES = [
     "schema_051_chamar_atencao.sql",
     "schema_052_assinar_mensagens.sql",
     "schema_053_negociacoes_fechadas.sql",
+    "schema_054_solicitante_negociacao.sql",
 ]
 
 
