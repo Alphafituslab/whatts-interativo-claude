@@ -3177,6 +3177,16 @@
   // Filtro "ver por atendente" — só admin, e só faz sentido dentro da
   // aba Todas (nas outras a lista já é implicitamente de uma pessoa
   // só: a própria, ou ninguém). Some sozinho se sair dali.
+  function htmlFiltroGrupos() {
+    const ativo = !!state.filtroSoGrupos;
+    return `<div class="wpp-filtro-negociacao">
+      <button type="button" class="wpp-tag-filtro ${ativo ? "ativa" : ""}" data-acao="alternar-filtro-grupos"
+        style="--cor-etiqueta:#7c5cff;" title="${ativo ? "Clique de novo pra tirar o filtro" : "Ver só os grupos"}">
+        👥 Meus grupos
+      </button>
+    </div>`;
+  }
+
   function htmlFiltroNegociacoes() {
     const ativo = !!state.filtroNegociacaoFechada;
     return `<div class="wpp-filtro-negociacao">
@@ -3232,7 +3242,8 @@
     // prática, já que só admin usa), mas assim evita mandar à toa.
     const atendente = (state.usuarioFiltroAtendente && escopoQuery === "todas") ? `&usuario_id=${state.usuarioFiltroAtendente}` : "";
     const negociacao = state.filtroNegociacaoFechada ? "&resultado=venda" : "";
-    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}${atendente}${negociacao}`;
+    const soGrupos = state.filtroSoGrupos ? "&so_grupos=1" : "";
+    return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}${atendente}${negociacao}${soGrupos}`;
   }
 
   async function renderWhatsapp(conversaId, abrirNegociacoes) {
@@ -3335,7 +3346,7 @@
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${(state.buscaConversas || state.buscaData) ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
-           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroNegociacoes() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
+           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroGrupos() + htmlFiltroNegociacoes() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes)}</div>
@@ -5574,6 +5585,10 @@
       }
       case "alternar-filtro-negociacao": {
         state.filtroNegociacaoFechada = !state.filtroNegociacaoFechada;
+        return renderWhatsapp(null);
+      }
+      case "alternar-filtro-grupos": {
+        state.filtroSoGrupos = !state.filtroSoGrupos;
         return renderWhatsapp(null);
       }
       case "alternar-lembretes-todos": {

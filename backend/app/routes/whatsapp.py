@@ -605,6 +605,15 @@ def listar_conversas():
         condicoes.append("c.resultado = ?")
         params.append(resultado_filtro)
 
+    # "Meus grupos": mostra só os grupos -- ajuda a achar rápido um
+    # grupo específico sem ele se perder no meio das conversas de
+    # cliente (pedido do Clayton, 2026-08-28). A visibilidade de QUAIS
+    # grupos já é resolvida pelo escopo escolhido (Minhas só mostra os
+    # que essa pessoa está; Todas, admin vê todos) — isso aqui só filtra
+    # o que já ia aparecer, tirando quem não é grupo.
+    if request.args.get("so_grupos") == "1":
+        condicoes.append("ct.eh_grupo = 1")
+
     # Filtro por atendente — só admin. Vale junto com a aba/etiqueta já
     # escolhidas; na prática só faz sentido dentro de "Todas" (nas
     # outras abas a lista já é implicitamente de uma pessoa só).
