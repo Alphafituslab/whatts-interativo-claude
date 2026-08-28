@@ -1468,8 +1468,15 @@ def reenviar_mensagem(conn, config, mensagem: dict) -> bool:
 # ============================================================
 # ARQUIVAR / EXCLUIR CONVERSA
 # ============================================================
-def arquivar_conversa(conn, conversa_id: int, arquivar: bool):
-    conn.execute("UPDATE whatsapp_conversas SET arquivada = ? WHERE id = ?", (1 if arquivar else 0, conversa_id))
+def arquivar_conversa(conn, conversa_id: int, arquivar: bool, usuario_id: int = None):
+    """arquivada_por: quem arquivou -- é o que deixa cada um ver só o
+    que ELE arquivou em "Arquivadas" (admin continua vendo tudo). Some
+    ao desarquivar, pra não sobrar um "dono" de um estado que já não
+    existe mais."""
+    conn.execute(
+        "UPDATE whatsapp_conversas SET arquivada = ?, arquivada_por = ? WHERE id = ?",
+        (1 if arquivar else 0, usuario_id if arquivar else None, conversa_id),
+    )
 
 
 def excluir_conversa(conn, conversa_id: int):

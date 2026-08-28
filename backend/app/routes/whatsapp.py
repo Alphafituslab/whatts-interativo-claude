@@ -520,7 +520,15 @@ def listar_conversas():
         JOIN whatsapp_contatos ct ON ct.id = c.contato_id
         LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id
     """
-    if escopo == "fila":
+    if incluir_arquivadas and not usuario["admin"]:
+        # "Arquivadas" pra quem não é admin é só o que ELE MESMO
+        # arquivou -- não o que é visível/atribuído a ele em geral (isso
+        # fazia todo membro de um grupo ver "arquivada" pra ele mesmo
+        # sem ter sido ele quem arquivou). Admin continua vendo todas
+        # (ver "todas" mais abaixo, sem entrar aqui).
+        condicoes = ["c.arquivada_por = ?"]
+        params = [usuario["id"]]
+    elif escopo == "fila":
         # "Fila" = SEM DONO, esperando alguém pegar.
         #
         # Antes a fila era "aguardando resposta nossa", e incluía as
@@ -817,12 +825,14 @@ def contagem_abas():
             "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0",
             (g.empresa_id,),
         ).fetchone()["n"] if usuario["admin"] else None,
-        # Arquivadas respeita a mesma regra de visibilidade das outras
-        # (admin vê todas, atendente só as suas/do setor).
+        # Arquivadas: admin vê a contagem de TODAS; atendente só conta
+        # o que ELE MESMO arquivou (mesma régua da lista, ver
+        # listar_conversas — "arquivada_por", não "visível pra ele").
         "arquivadas": conn.execute(
-            f"SELECT COUNT(*) AS n FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
-            f"WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 1{visivel}",
-            [g.empresa_id, *pv],
+            "SELECT COUNT(*) AS n FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 1"
+            + ("" if usuario["admin"] else " AND c.arquivada_por = ?"),
+            [g.empresa_id] if usuario["admin"] else [g.empresa_id, usuario["id"]],
         ).fetchone()["n"],
     })
 
@@ -2558,7 +2568,7 @@ def arquivar_conversa(conversa_id):
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
         raise ApiError("Só o responsável por esta conversa (ou um administrador) pode arquivá-la.", status=403, codigo="sem_permissao")
-    whatsapp_service.arquivar_conversa(conn, conversa_id, bool(arquivar))
+    whatsapp_service.arquivar_conversa(conn, conversa_id, bool(arquivar), usuario["id"])
     # Arquivar é o gesto de "terminei com este". Deixar a conversa aberta
     # depois disso significava que o cliente, ao voltar, caía direto no
     # atendimento antigo — sem passar pelo menu e sem ninguém saber que
