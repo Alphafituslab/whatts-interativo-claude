@@ -286,6 +286,8 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 }
 .wpp-menu-contexto-item:hover { background: var(--superficie-2); }
 .modal { background: var(--superficie); border-radius: var(--raio); padding: 24px; width: 100%; max-width: 460px; box-shadow: var(--sombra-flutuante); max-height: 90vh; overflow-y: auto; overflow-x: hidden; }
+.modal.modal-largo { max-width: 680px; }
+.modal.modal-largo textarea { min-height: 160px; }
 
 /* Nada de rolagem lateral pra alcançar botão cortado.
    A causa: item de flex nasce com min-width:auto, ou seja, um input se

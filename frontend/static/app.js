@@ -829,10 +829,10 @@
     return wrap;
   }
 
-  function abrirModal(html) {
+  function abrirModal(html, classeExtra) {
     const wrap = document.createElement("div");
     wrap.className = "fundo-modal";
-    wrap.innerHTML = `<div class="modal">${html}</div>`;
+    wrap.innerHTML = `<div class="modal ${classeExtra || ""}">${html}</div>`;
     wrap.addEventListener("click", (e) => { if (e.target === wrap) wrap.remove(); });
     document.body.appendChild(wrap);
     return wrap;
@@ -2986,7 +2986,7 @@
     abrirModal(`
       <h3 style="margin-top:0;">🗒️ Notas internas</h3>
       <p class="dica">Só a equipe vê — nunca vai pro cliente.</p>
-      <div class="wpp-notas-lista" style="margin-bottom:14px;">
+      <div class="wpp-notas-lista" style="margin-bottom:14px; max-height:38vh; overflow-y:auto;">
         ${notas.length ? notas.map((n) => `
           <div class="wpp-nota-item">
             <div class="wpp-nota-cabecalho"><strong>${escapeHtml(n.usuario_nome || "—")}</strong><span class="texto-suave">${fmtData(n.criado_em)}</span></div>
@@ -2994,12 +2994,12 @@
           </div>`).join("") : '<p class="texto-suave">Nenhuma nota ainda.</p>'}
       </div>
       <form data-form="criar-nota" data-conversa-id="${conversaId}" class="wpp-resumo-form">
-        <textarea name="texto" rows="2" placeholder="Ex.: cliente pediu desconto, aguardando aprovação da gerência…" required></textarea>
+        <textarea name="texto" rows="8" style="font-size:14.5px;" placeholder="Ex.: cliente pediu desconto, aguardando aprovação da gerência…" required></textarea>
         <div class="rodape-modal">
           <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
           <button type="submit" class="botao secundario">Adicionar</button>
         </div>
-      </form>`);
+      </form>`, "modal-largo");
   }
 
   async function modalNegociacoesFechadas(conversaId, negociacoes) {
