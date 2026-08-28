@@ -2630,6 +2630,10 @@
               partes.push(`<span class="wpp-mini-bolinha ${c.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${c.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> ${escapeHtml(c.atribuida_usuario_nome)}`);
             }
             if (c.status === "fechada") partes.push('<span class="selo inativo">Fechada</span>');
+            // Só o admin usa isso pra saber de quem cobrar/perguntar --
+            // faz sentido só na aba Arquivadas (é onde arquivada_por_nome
+            // vem preenchido; nas outras abas o campo nem é buscado).
+            if (c.arquivada && c.arquivada_por_nome) partes.push(`📦 Arquivada por ${escapeHtml(c.arquivada_por_nome)}`);
             // O setor aparece sempre, em qualquer aba — não só em "Todas"/"Fila" — é informação útil pra qualquer atendente ver de cara.
             // Só em conversa de uma pessoa: esse 🏷️ é o setor que o
             // CLIENTE escolheu no menu, e grupo não passa por menu.

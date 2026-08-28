@@ -515,10 +515,12 @@ def listar_conversas():
                (SELECT COUNT(*) FROM whatsapp_conversa_usuarios cu
                  WHERE cu.conversa_id = c.id) AS equipe_no_grupo,
                u.nome AS atribuida_usuario_nome,
-               u.ultimo_acesso AS _u_ultimo_acesso, u.offline_forcado AS _u_offline_forcado
+               u.ultimo_acesso AS _u_ultimo_acesso, u.offline_forcado AS _u_offline_forcado,
+               ua.nome AS arquivada_por_nome
         FROM whatsapp_conversas c
         JOIN whatsapp_contatos ct ON ct.id = c.contato_id
         LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id
+        LEFT JOIN usuarios ua ON ua.id = c.arquivada_por
     """
     if incluir_arquivadas and not usuario["admin"]:
         # "Arquivadas" pra quem não é admin é só o que ELE MESMO
