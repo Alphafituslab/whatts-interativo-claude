@@ -3025,9 +3025,10 @@ def usuarios_online_do_setor(conn, empresa_id: int, setor: str):
     limite = (datetime.datetime.utcnow() - datetime.timedelta(minutes=MINUTOS_ONLINE)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     rows = conn.execute(
         """
-        SELECT id, nome FROM usuarios
-        WHERE empresa_id = ? AND setor = ? AND ativo = 1 AND ultimo_acesso >= ? AND offline_forcado = 0 AND ausente = 0
-        ORDER BY nome
+        SELECT u.id, u.nome FROM usuarios u
+        JOIN usuario_setores us ON us.usuario_id = u.id
+        WHERE u.empresa_id = ? AND us.setor = ? AND u.ativo = 1 AND u.ultimo_acesso >= ? AND u.offline_forcado = 0 AND u.ausente = 0
+        ORDER BY u.nome
         """,
         (empresa_id, setor, limite),
     ).fetchall()
