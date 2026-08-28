@@ -3177,23 +3177,22 @@
   // Filtro "ver por atendente" — só admin, e só faz sentido dentro da
   // aba Todas (nas outras a lista já é implicitamente de uma pessoa
   // só: a própria, ou ninguém). Some sozinho se sair dali.
-  function htmlFiltroGrupos() {
-    const ativo = !!state.filtroSoGrupos;
-    return `<div class="wpp-filtro-negociacao">
-      <button type="button" class="wpp-tag-filtro ${ativo ? "ativa" : ""}" data-acao="alternar-filtro-grupos"
-        style="--cor-etiqueta:#7c5cff;" title="${ativo ? "Clique de novo pra tirar o filtro" : "Ver só os grupos"}">
-        👥 Meus grupos
-      </button>
-    </div>`;
-  }
-
-  function htmlFiltroNegociacoes() {
-    const ativo = !!state.filtroNegociacaoFechada;
-    return `<div class="wpp-filtro-negociacao">
-      <button type="button" class="wpp-tag-filtro ${ativo ? "ativa" : ""}" data-acao="alternar-filtro-negociacao"
-        style="--cor-etiqueta:#0a7d67;" title="${ativo ? "Clique de novo pra tirar o filtro" : "Ver só as conversas marcadas como negociação fechada"}">
-        💰 Negociações fechadas
-      </button>
+  function htmlFiltrosExtras() {
+    const aberto = !!state.filtrosExtrasAbertos;
+    const ativoGrupos = !!state.filtroSoGrupos;
+    const ativoNegociacoes = !!state.filtroNegociacaoFechada;
+    return `<div class="wpp-tags-filtro-bloco">
+      <button type="button" class="wpp-tags-filtro-alternar" data-acao="alternar-filtros-extras">🔧 Mais filtros ${aberto ? "▾" : "▸"}</button>
+      <div class="wpp-tags-filtro" ${aberto ? "" : "hidden"}>
+        <button type="button" class="wpp-tag-filtro ${ativoGrupos ? "ativa" : ""}" data-acao="alternar-filtro-grupos"
+          style="--cor-etiqueta:#7c5cff;" title="${ativoGrupos ? "Clique de novo pra tirar o filtro" : "Ver só os grupos"}">
+          👥 Meus grupos
+        </button>
+        <button type="button" class="wpp-tag-filtro ${ativoNegociacoes ? "ativa" : ""}" data-acao="alternar-filtro-negociacao"
+          style="--cor-etiqueta:#0a7d67;" title="${ativoNegociacoes ? "Clique de novo pra tirar o filtro" : "Ver só as conversas marcadas como negociação fechada"}">
+          💰 Negociações fechadas
+        </button>
+      </div>
     </div>`;
   }
 
@@ -3346,7 +3345,7 @@
              <button type="button" class="botao-icone" data-acao="abrir-contatos" title="Ver todos os contatos salvos">📇</button>
              ${(state.buscaConversas || state.buscaData) ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
-           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltroGrupos() + htmlFiltroNegociacoes() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
+           ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltrosExtras() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes)}</div>
@@ -5586,6 +5585,15 @@
       case "alternar-filtro-negociacao": {
         state.filtroNegociacaoFechada = !state.filtroNegociacaoFechada;
         return renderWhatsapp(null);
+      }
+      case "alternar-filtros-extras": {
+        state.filtrosExtrasAbertos = !state.filtrosExtrasAbertos;
+        const aberto = state.filtrosExtrasAbertos;
+        const bloco = alvo.closest(".wpp-tags-filtro-bloco");
+        const chips = bloco && bloco.querySelector(".wpp-tags-filtro");
+        if (chips) chips.hidden = !aberto;
+        alvo.textContent = `🔧 Mais filtros ${aberto ? "▾" : "▸"}`;
+        return;
       }
       case "alternar-filtro-grupos": {
         state.filtroSoGrupos = !state.filtroSoGrupos;
