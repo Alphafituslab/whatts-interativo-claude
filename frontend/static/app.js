@@ -3142,6 +3142,7 @@
         <div class="wpp-emoji-envolucro" data-wpp-catalogo-envolucro hidden>
           <button type="button" class="botao-icone" data-acao="alternar-catalogos" data-id="${conversa.id}" title="Enviar portfólio ou catálogo">📚</button>
         <button type="button" class="botao-icone" data-acao="abrir-compartilhar-contato" data-id="${conversa.id}" data-interna="0" title="Compartilhar um contato salvo">👤</button>
+        <button type="button" class="botao-icone" data-acao="compartilhar-localizacao" data-id="${conversa.id}" title="Compartilhar a localização da empresa">📍</button>
           <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
         </div>
         <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1">${escapeHtml(_lerRascunho("cliente", conversa.id))}</textarea>
@@ -3789,6 +3790,7 @@
         <div class="wpp-emoji-envolucro" data-wpp-catalogo-envolucro-interno hidden>
           <button type="button" class="botao-icone" data-acao="alternar-catalogos-interno" data-id="${conversa.id}" title="Enviar portfólio ou catálogo pro colega">📚</button>
         <button type="button" class="botao-icone" data-acao="abrir-compartilhar-contato" data-id="${conversa.id}" data-interna="1" title="Compartilhar um contato salvo">👤</button>
+        <button type="button" class="botao-icone" data-acao="compartilhar-localizacao-interno" data-id="${conversa.id}" title="Compartilhar a localização da empresa">📍</button>
           <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
         </div>
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
@@ -4581,6 +4583,21 @@
          <p class="dica">O WhatsApp não mostra pro cliente qual atendente da equipe está falando — ele só vê o número/perfil da empresa. Ligando isto, toda mensagem de texto sai com o nome de quem respondeu na frente (ex.: "<strong>Andreia:</strong> Bom dia!"). Vale só pra texto digitado na hora — não mexe em áudio, imagem, documento nem nas mensagens automáticas do menu.</p>
          <form data-form="salvar-assinar-mensagens">
            <div class="campo campo-checkbox"><label><input type="checkbox" name="assinar_mensagens" ${config.assinar_mensagens ? "checked" : ""}> Assinar com o nome do atendente</label></div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao secundario">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">📍 Localização</h3>
+         <p class="dica">Cadastre uma vez o endereço da empresa — depois é só clicar em 📍 em qualquer conversa (WhatsApp ou chat interno) pra compartilhar, sem digitar de novo. Se estiver no local agora, "Usar minha localização atual" preenche latitude/longitude sozinho.</p>
+         <form data-form="salvar-localizacao">
+           <div class="campo"><label>Nome do lugar</label><input name="localizacao_nome" placeholder="Ex.: Alphafitus — sede" value="${escapeHtml(config.localizacao_nome || "")}"></div>
+           <div class="campo"><label>Endereço (aparece embaixo do nome)</label><input name="localizacao_endereco" placeholder="Rua Exemplo, 123 — Bairro, Cidade/UF" value="${escapeHtml(config.localizacao_endereco || "")}"></div>
+           <div style="display:flex; gap:8px;">
+             <div class="campo" style="flex:1;"><label>Latitude</label><input name="localizacao_lat" type="number" step="any" value="${config.localizacao_lat != null ? config.localizacao_lat : ""}"></div>
+             <div class="campo" style="flex:1;"><label>Longitude</label><input name="localizacao_lng" type="number" step="any" value="${config.localizacao_lng != null ? config.localizacao_lng : ""}"></div>
+           </div>
+           <button type="button" class="botao secundario pequeno" data-acao="usar-localizacao-atual" style="margin-bottom:12px;">📍 Usar minha localização atual</button>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao secundario">Salvar</button></div>
          </form>
        </div>
@@ -5954,6 +5971,45 @@
         return montarRota();
       }
       case "fechar-conversa": modalFecharConversa(Number(alvo.dataset.id)); return;
+      case "usar-localizacao-atual": {
+        if (!navigator.geolocation) { definirFlash("erro", "Este navegador não sabe pegar localização."); return renderWhatsappConfiguracao(); }
+        alvo.disabled = true;
+        alvo.textContent = "Buscando…";
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const form = alvo.closest("form");
+            form.querySelector('[name="localizacao_lat"]').value = pos.coords.latitude;
+            form.querySelector('[name="localizacao_lng"]').value = pos.coords.longitude;
+            alvo.disabled = false;
+            alvo.textContent = "📍 Usar minha localização atual";
+            definirFlash("ok", "Preenchido — confira e clique em Salvar.");
+          },
+          () => {
+            alvo.disabled = false;
+            alvo.textContent = "📍 Usar minha localização atual";
+            definirFlash("erro", "Não consegui pegar a localização — seu navegador pode ter bloqueado a permissão.");
+          }
+        );
+        return;
+      }
+      case "compartilhar-localizacao": {
+        const conversaId = Number(alvo.dataset.id);
+        if (!confirm("Compartilhar a localização da empresa nesta conversa?")) return;
+        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/compartilhar-localizacao`, { method: "POST" });
+        definirFlash(r.status === "enviada" ? "ok" : "erro", r.status === "enviada" ? "Localização compartilhada." : `Não foi possível enviar: ${r.erro || "erro desconhecido"}`);
+        await Promise.all([atualizarMensagensNoDom(conversaId), atualizarListaConversasNoDom()]);
+        return;
+      }
+      case "compartilhar-localizacao-interno": {
+        const conversaId = Number(alvo.dataset.id);
+        const config = await chamarApi("/whatsapp/configuracao").catch(() => null);
+        if (!config || config.localizacao_lat == null) { definirFlash("erro", "Nenhuma localização cadastrada ainda — configure em Configuração > Localização."); return; }
+        const link = `https://www.google.com/maps?q=${config.localizacao_lat},${config.localizacao_lng}`;
+        const texto = `📍 ${config.localizacao_nome || "Localização"}${config.localizacao_endereco ? `\n${config.localizacao_endereco}` : ""}\n${link}`;
+        await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto } });
+        await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
+        return;
+      }
       case "abrir-compartilhar-contato": {
         return modalCompartilharContato(Number(alvo.dataset.id), alvo.dataset.interna === "1");
       }
@@ -7114,6 +7170,19 @@
           },
         });
         definirFlash("ok", "Configuração salva.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-localizacao": {
+        await chamarApi("/whatsapp/configuracao", {
+          method: "PUT",
+          body: {
+            localizacao_nome: dados.get("localizacao_nome") || "",
+            localizacao_endereco: dados.get("localizacao_endereco") || "",
+            localizacao_lat: dados.get("localizacao_lat") || "",
+            localizacao_lng: dados.get("localizacao_lng") || "",
+          },
+        });
+        definirFlash("ok", "Localização salva.");
         return renderWhatsappConfiguracao();
       }
       case "salvar-assinar-mensagens": {

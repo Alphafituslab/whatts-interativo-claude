@@ -68,6 +68,7 @@ SCHEMA_FILES = [
     "schema_053_negociacoes_fechadas.sql",
     "schema_054_solicitante_negociacao.sql",
     "schema_055_arquivada_por.sql",
+    "schema_056_localizacao_empresa.sql",
 ]
 
 

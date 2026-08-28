@@ -178,6 +178,8 @@ def obter_configuracao(conn, empresa_id: int):
             "dashboard_reset_em": None,
             "logo_url": None,
             "assinar_mensagens": 0,
+            "localizacao_nome": None, "localizacao_endereco": None,
+            "localizacao_lat": None, "localizacao_lng": None,
         }
     return dict(row)
 
@@ -267,13 +269,29 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     # régua de "ativo"/"expediente_ativo": só mexe se vier explicitamente.
     assinar_mensagens = (1 if dados.get("assinar_mensagens") else 0) if "assinar_mensagens" in dados else (1 if anterior.get("assinar_mensagens") else 0)
 
+    # Localização padrão da empresa — formulário próprio em Configuração.
+    if "localizacao_nome" in dados:
+        localizacao_nome = (dados.get("localizacao_nome") or "").strip() or None
+        localizacao_endereco = (dados.get("localizacao_endereco") or "").strip() or None
+        try:
+            localizacao_lat = float(dados["localizacao_lat"]) if dados.get("localizacao_lat") not in (None, "") else None
+            localizacao_lng = float(dados["localizacao_lng"]) if dados.get("localizacao_lng") not in (None, "") else None
+        except (TypeError, ValueError):
+            raise ApiError("Latitude/longitude inválidas.", status=400)
+    else:
+        localizacao_nome = anterior.get("localizacao_nome")
+        localizacao_endereco = anterior.get("localizacao_endereco")
+        localizacao_lat = anterior.get("localizacao_lat")
+        localizacao_lng = anterior.get("localizacao_lng")
+
     conn.execute(
         """
         INSERT INTO configuracoes_whatsapp (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome,
                                               webhook_segredo, webhook_base_url, expediente_ativo, expediente_janelas,
                                               expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
-                                              limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?)
+                                              limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
+                                              localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -291,13 +309,18 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             limite_novos_contatos_hora = excluded.limite_novos_contatos_hora,
             minutos_liberar_sem_menu = excluded.minutos_liberar_sem_menu,
             assinar_mensagens = excluded.assinar_mensagens,
+            localizacao_nome = excluded.localizacao_nome,
+            localizacao_endereco = excluded.localizacao_endereco,
+            localizacao_lat = excluded.localizacao_lat,
+            localizacao_lng = excluded.localizacao_lng,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
         (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome, webhook_segredo, webhook_base_url,
          expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta,
          minutos_sem_menu, empresa_id, _now_iso(), usuario_id,
-         limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens),
+         limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
+         localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -1046,6 +1069,30 @@ def verificar_ritmo_envio(conn, empresa_id: int, config=None, telefone_destino: 
                     "no WhatsApp — espere um pouco antes de abrir outra.",
                     status=429, codigo="ritmo_contatos_novos",
                 )
+
+
+def enviar_localizacao(config, telefone: str, lat: float, lng: float, nome: str = None, endereco: str = None) -> str:
+    """Manda um card de localização de verdade — no celular do cliente
+    aparece o mapa clicável, igual quando alguém compartilha localização
+    pelo WhatsApp comum (não é só um link de texto)."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento. Peça a um administrador para reconectar em Configurações.", status=400)
+    requests = _requests()
+    resp = requests.post(
+        f"{config['evolution_url']}/message/sendLocation/{config['instancia_nome']}",
+        json={
+            "number": destino_whatsapp(telefone),
+            "latitude": lat,
+            "longitude": lng,
+            "name": nome or "",
+            "address": endereco or "",
+        },
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    corpo = _tratar_resposta(resp)
+    chave = corpo.get("key") or {}
+    return chave.get("id")
 
 
 def enviar_contato(config, telefone: str, nome_contato: str, telefone_contato: str) -> str:
