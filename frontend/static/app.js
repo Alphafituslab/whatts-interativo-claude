@@ -3040,7 +3040,7 @@
         <div class="wpp-chat-acoes">
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
-          <button type="button" class="botao-icone ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Notas internas — só a equipe vê, nunca vai pro cliente${(notas || []).length ? ` (${notas.length})` : ""}">🗒️</button>
+          <button type="button" class="botao secundario pequeno ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Só a equipe vê, nunca vai pro cliente">🗒️ Notas internas${(notas || []).length ? ` (${notas.length})` : ""}</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`

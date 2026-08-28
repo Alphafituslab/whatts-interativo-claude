@@ -817,6 +817,13 @@ def contagem_abas():
             "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0",
             (g.empresa_id,),
         ).fetchone()["n"] if usuario["admin"] else None,
+        # Arquivadas respeita a mesma regra de visibilidade das outras
+        # (admin vê todas, atendente só as suas/do setor).
+        "arquivadas": conn.execute(
+            f"SELECT COUNT(*) AS n FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            f"WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 1{visivel}",
+            [g.empresa_id, *pv],
+        ).fetchone()["n"],
     })
 
 
