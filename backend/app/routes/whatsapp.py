@@ -2556,6 +2556,43 @@ def desfazer_negociacao_fechada(conversa_id, negociacao_id):
     return jsonify({"ok": True})
 
 
+@bp.post("/conversas/<int:conversa_id>/compartilhar-contato")
+@requires_auth
+def compartilhar_contato(conversa_id):
+    usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
+    nome_contato = (dados.get("nome") or "").strip()
+    telefone_contato = (dados.get("telefone") or "").strip()
+    if not telefone_contato:
+        raise ApiError("Informe o telefone do contato.", status=400)
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa, " Encaminhe para si mesmo antes de responder."), status=403, codigo="sem_permissao")
+    whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    agora = _now_iso()
+    texto_registro = f"👤 Contato compartilhado: {nome_contato or telefone_contato} ({telefone_contato})"
+    try:
+        externo_id = whatsapp_service.enviar_contato(config, conversa["telefone"], nome_contato, telefone_contato)
+        status_msg, erro = "enviada", None
+    except ApiError as e:
+        externo_id, status_msg, erro = None, "falhou", e.mensagem
+    conn.execute(
+        """
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, usuario_id, status, erro, criado_em)
+        VALUES (?, 'saida', 'outro', ?, ?, ?, ?, ?, ?)
+        """,
+        (conversa_id, texto_registro, externo_id, usuario["id"], status_msg, erro, agora),
+    )
+    conn.execute(
+        "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "
+        "ultima_msg_operador_em = ?, proximo_contato_em = NULL, followup_adiado_ate = NULL WHERE id = ?",
+        (agora, texto_registro[:120], agora, conversa_id),
+    )
+    return jsonify({"ok": True, "status": status_msg, "erro": erro})
+
+
 @bp.post("/conversas/<int:conversa_id>/reabrir")
 @requires_auth
 def reabrir_conversa(conversa_id):

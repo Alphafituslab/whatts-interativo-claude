@@ -3141,6 +3141,7 @@
         </div>
         <div class="wpp-emoji-envolucro" data-wpp-catalogo-envolucro hidden>
           <button type="button" class="botao-icone" data-acao="alternar-catalogos" data-id="${conversa.id}" title="Enviar portfólio ou catálogo">📚</button>
+        <button type="button" class="botao-icone" data-acao="abrir-compartilhar-contato" data-id="${conversa.id}" data-interna="0" title="Compartilhar um contato salvo">👤</button>
           <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
         </div>
         <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1">${escapeHtml(_lerRascunho("cliente", conversa.id))}</textarea>
@@ -3787,6 +3788,7 @@
         <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" multiple hidden>
         <div class="wpp-emoji-envolucro" data-wpp-catalogo-envolucro-interno hidden>
           <button type="button" class="botao-icone" data-acao="alternar-catalogos-interno" data-id="${conversa.id}" title="Enviar portfólio ou catálogo pro colega">📚</button>
+        <button type="button" class="botao-icone" data-acao="abrir-compartilhar-contato" data-id="${conversa.id}" data-interna="1" title="Compartilhar um contato salvo">👤</button>
           <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
         </div>
         <button type="button" class="botao-icone" data-acao="abrir-seletor-arquivo" title="Anexar imagem, vídeo ou documento">📎</button>
@@ -3945,6 +3947,27 @@
           <button type="submit" class="botao">Enviar</button>
         </div>
       </form>`);
+  }
+
+  function htmlListaContatosCompartilhar(contatos, conversaId, interna) {
+    const semGrupo = contatos.filter((c) => !c.eh_grupo);
+    if (!semGrupo.length) return '<p class="texto-suave">Nenhum contato ainda.</p>';
+    return semGrupo.map((c) => `
+      <div class="wpp-contato-linha">
+        ${htmlAvatarContato(c.foto_url, c.nome, c.telefone, 32)}
+        <div style="flex:1; min-width:0;"><strong>${escapeHtml(c.nome || c.telefone)}</strong>${c.nome ? `<div class="texto-suave">${escapeHtml(c.telefone)}</div>` : ""}</div>
+        <button type="button" class="botao secundario pequeno" data-acao="compartilhar-contato" data-id="${conversaId}" data-interna="${interna ? "1" : "0"}" data-nome="${escapeHtml(c.nome || "")}" data-telefone="${escapeHtml(c.telefone)}">Compartilhar</button>
+      </div>`).join("");
+  }
+
+  async function modalCompartilharContato(conversaId, interna) {
+    const contatos = await chamarApi("/whatsapp/contatos");
+    abrirModal(`
+      <h3 style="margin-top:0;">👤 Compartilhar contato</h3>
+      <p class="dica">${interna ? "Manda o nome e telefone numa mensagem pro colega — ele já consegue clicar no número pra falar direto." : "Manda um cartão de contato de verdade — o cliente consegue salvar na agenda dele com um toque."}</p>
+      <input type="search" placeholder="Buscar por nome ou telefone…" data-acao-change="buscar-contatos-compartilhar" data-conversa-id="${conversaId}" data-interna="${interna ? "1" : "0"}" style="width:100%; margin-bottom:10px;" autofocus>
+      <div data-wpp-contatos-compartilhar-lista style="max-height:50vh; overflow-y:auto;">${htmlListaContatosCompartilhar(contatos, conversaId, interna)}</div>
+      <div class="rodape-modal"><button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button></div>`);
   }
 
   function htmlListaContatosModal(contatos) {
@@ -5931,6 +5954,30 @@
         return montarRota();
       }
       case "fechar-conversa": modalFecharConversa(Number(alvo.dataset.id)); return;
+      case "abrir-compartilhar-contato": {
+        return modalCompartilharContato(Number(alvo.dataset.id), alvo.dataset.interna === "1");
+      }
+      case "compartilhar-contato": {
+        const conversaId = Number(alvo.dataset.id);
+        const interna = alvo.dataset.interna === "1";
+        const nome = alvo.dataset.nome;
+        const telefone = alvo.dataset.telefone;
+        fecharModais();
+        if (interna) {
+          // Chat interno não é WhatsApp de verdade — manda como
+          // mensagem normal mesmo; o número vira clicável sozinho
+          // (ver textoComTelefones), o colega já consegue "Conversar"
+          // direto a partir daí.
+          const texto = `👤 Contato: *${nome || telefone}*\n📞 ${telefone}`;
+          await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto } });
+          await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
+        } else {
+          const r = await chamarApi(`/whatsapp/conversas/${conversaId}/compartilhar-contato`, { method: "POST", body: { nome, telefone } });
+          definirFlash(r.status === "enviada" ? "ok" : "erro", r.status === "enviada" ? "Contato compartilhado." : `Não foi possível enviar: ${r.erro || "erro desconhecido"}`);
+          await Promise.all([atualizarMensagensNoDom(conversaId), atualizarListaConversasNoDom()]);
+        }
+        return;
+      }
       case "abrir-notas": {
         const conversaId = Number(alvo.dataset.id);
         const notasAtuais = await chamarApi(`/whatsapp/conversas/${conversaId}/notas`).catch(() => []);
@@ -6663,6 +6710,14 @@
         await chamarApi(`/usuarios/${alvo.dataset.id}/reativar`, { method: "POST" });
         definirFlash("ok", "Usuário reativado.");
         return renderUsuarios();
+      }
+      case "buscar-contatos-compartilhar": {
+        const conversaId = Number(alvo.dataset.conversaId);
+        const interna = alvo.dataset.interna === "1";
+        const contatos = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(alvo.value || "")}`).catch(() => []);
+        const lista = document.querySelector("[data-wpp-contatos-compartilhar-lista]");
+        if (lista) lista.innerHTML = htmlListaContatosCompartilhar(contatos, conversaId, interna);
+        return;
       }
       case "filtrar-followup-usuario": {
         state.followupUsuario = alvo.value || null;

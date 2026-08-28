@@ -1048,6 +1048,33 @@ def verificar_ritmo_envio(conn, empresa_id: int, config=None, telefone_destino: 
                 )
 
 
+def enviar_contato(config, telefone: str, nome_contato: str, telefone_contato: str) -> str:
+    """Manda um cartão de contato de verdade — o cliente consegue salvar
+    na agenda dele com um toque, do WhatsApp mesmo (não é só texto com o
+    número). wuid é o JID do contato compartilhado; sem o "+" na frente,
+    a Evolution API entende como formato inválido em alguns clientes."""
+    _exigir_configurado(config)
+    if config.get("status_conexao") != "conectado":
+        raise ApiError("O WhatsApp não está conectado no momento. Peça a um administrador para reconectar em Configurações.", status=400)
+    requests = _requests()
+    digitos_contato = _somente_digitos(telefone_contato)
+    resp = requests.post(
+        f"{config['evolution_url']}/message/sendContact/{config['instancia_nome']}",
+        json={
+            "number": destino_whatsapp(telefone),
+            "contact": [{
+                "wuid": f"{digitos_contato}@s.whatsapp.net",
+                "phoneNumber": f"+{digitos_contato}",
+                "fullName": nome_contato or telefone_contato,
+            }],
+        },
+        headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
+    )
+    corpo = _tratar_resposta(resp)
+    chave = corpo.get("key") or {}
+    return chave.get("id")
+
+
 def enviar_texto(config, telefone: str, texto: str, citar_externo_id: str = None) -> str:
     """citar_externo_id: id da mensagem que está sendo respondida. Vai no
     campo `quoted` da Evolution API pra que, no celular do cliente, a
