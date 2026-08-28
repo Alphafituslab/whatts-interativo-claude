@@ -1350,12 +1350,18 @@ def enviar_mensagem(conversa_id):
     # GRAVADO aqui (e o que a equipe vê dentro do Seja Alpha) continua
     # limpo, sem repetir nada — o nome já aparece em cima da bolha.
     if config.get("assinar_mensagens"):
-        setores_row = conn.execute(
-            "SELECT GROUP_CONCAT(setor, '/') AS s FROM usuario_setores WHERE usuario_id = ?", (usuario["id"],)
-        ).fetchone()
+        setor_da_conversa = conversa["menu_setor"]
+        if not setor_da_conversa:
+            # Só quando esta conversa nunca passou pelo menu (não devia
+            # acontecer no fluxo normal) — cai pra lista de todos os
+            # setores da pessoa, melhor que assinar sem setor nenhum.
+            setores_row = conn.execute(
+                "SELECT GROUP_CONCAT(setor, '/') AS s FROM usuario_setores WHERE usuario_id = ?", (usuario["id"],)
+            ).fetchone()
+            setor_da_conversa = setores_row["s"] if setores_row else None
         assinatura = usuario["nome"]
-        if setores_row and setores_row["s"]:
-            assinatura += f" - {setores_row['s']}"
+        if setor_da_conversa:
+            assinatura += f" - {setor_da_conversa}"
         texto_para_cliente = f"*{assinatura}:*\n\n{texto}"  # linha em branco depois da assinatura, mais respiro (pedido do Clayton, viu isso no print do concorrente)
     else:
         texto_para_cliente = texto
