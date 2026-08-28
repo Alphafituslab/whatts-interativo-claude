@@ -2536,12 +2536,17 @@
   }
 
   async function atualizarMensagensInternasNoDom(conversaId) {
-    const painel = document.querySelector("[data-wpp-mensagens-interno]");
-    if (!painel) return;
+    const painelPedido = document.querySelector("[data-wpp-mensagens-interno]");
+    if (!painelPedido || Number(painelPedido.dataset.conversaId) !== conversaId) return;
     const conversas = await chamarApi(`/chat-interno/conversas${_queryChatInterno()}`);
     const conversa = conversas.find((c) => c.id === conversaId);
     if (!conversa) return;
     const mensagens = await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`);
+    // Re-consulta o painel: a pessoa pode ter trocado de conversa
+    // enquanto os pedidos acima estavam no ar. Resposta atrasada de
+    // uma conversa que não é mais a aberta é descartada, não colada.
+    const painel = document.querySelector("[data-wpp-mensagens-interno]");
+    if (!painel || Number(painel.dataset.conversaId) !== conversaId) return;
     // Compara o HTML pronto: pega mensagem nova, mensagem apagada E o
     // ✓✓ do outro lado (que não cria mensagem nenhuma, e por isso
     // aparecia só na mensagem seguinte quando a checagem era só a
@@ -3116,7 +3121,7 @@
           <button type="button" class="botao pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>
         </div>` : ""}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}" data-contato-nome="${escapeHtml(conversa.contato_nome || "")}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo, conversa.contato_nome)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens data-conversa-id="${conversa.id}" data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}" data-contato-nome="${escapeHtml(conversa.contato_nome || "")}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo, conversa.contato_nome)).join("")}</div>
       ${htmlAgendadas(agendadas)}
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem" data-conversa-id="${conversa.id}">
@@ -3245,7 +3250,9 @@
     return `escopo=${escopoQuery}${arquivadas ? "&arquivadas=1" : ""}${etiqueta}${atendente}${negociacao}${soGrupos}`;
   }
 
+  let _geracaoRenderWhatsapp = 0;
   async function renderWhatsapp(conversaId, abrirNegociacoes) {
+    const _minhaGeracao = ++_geracaoRenderWhatsapp;
     if (!_podeVerConversas()) {
       // Chegou aqui digitando o endereço ou por um link antigo — manda
       // pro chat interno em vez de deixar a tela quebrada carregando
@@ -3328,6 +3335,7 @@
       }
     }
 
+    if (_minhaGeracao !== _geracaoRenderWhatsapp) return; // uma chamada mais nova já assumiu — essa aqui desiste
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Conversas</h2>
@@ -3388,9 +3396,14 @@
   }
 
   async function atualizarMensagensNoDom(conversaId) {
-    const painel = document.querySelector("[data-wpp-mensagens]");
-    if (!painel) return;
+    const painelPedido = document.querySelector("[data-wpp-mensagens]");
+    if (!painelPedido || Number(painelPedido.dataset.conversaId) !== conversaId) return;
     const mensagens = await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`);
+    // Re-consulta o painel: a pessoa pode ter trocado de conversa
+    // enquanto o pedido acima estava no ar. Resposta atrasada de uma
+    // conversa que não é mais a aberta é descartada, não colada aqui.
+    const painel = document.querySelector("[data-wpp-mensagens]");
+    if (!painel || Number(painel.dataset.conversaId) !== conversaId) return;
     const estavaNoFim = painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 40;
     // Precisa saber se é grupo (e o nome do contato) pra desenhar o autor
     // de cada mensagem — sem isso o redesenho apagava os nomes que a
@@ -3768,7 +3781,7 @@
         <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens-interno>${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens-interno data-conversa-id="${conversa.id}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa)).join("")}</div>
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
         <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" multiple hidden>
@@ -3794,7 +3807,9 @@
     if (state._citandoDe !== chave) { state.citando = null; state._citandoDe = chave; }
   }
 
+  let _geracaoRenderChatInterno = 0;
   async function renderChatInterno(conversaId) {
+    const _minhaGeracaoInterno = ++_geracaoRenderChatInterno;
     _limparCitacaoSeTrocou(`interno:${conversaId}`);
     _carregandoSeTrocouDeTela("chat-interno");
     const etiquetas = await obterEtiquetas();
@@ -3832,6 +3847,7 @@
     const abas = [{ chave: "minhas", label: "Minhas" }, { chave: "encerradas", label: "Encerradas" }];
     if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
 
+    if (_minhaGeracaoInterno !== _geracaoRenderChatInterno) return; // uma chamada mais nova já assumiu — essa aqui desiste
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Chat interno</h2>
