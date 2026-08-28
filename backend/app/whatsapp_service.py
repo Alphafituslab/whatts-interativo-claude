@@ -2964,6 +2964,30 @@ def _iniciar_menu_setor(conn, empresa_id: int, conversa_id: int, telefone: str):
         pass
 
 
+DIAS_PARA_ENCERRAR_CONVERSA_PARADA = 30
+
+
+def encerrar_conversas_paradas(conn):
+    """Fecha sozinha qualquer conversa (não-grupo) ABERTA que ninguém
+    mexe há DIAS_PARA_ENCERRAR_CONVERSA_PARADA dias — em vez de ficar
+    pra sempre "em aberto" sem ninguém olhar. Se o cliente escrever de
+    novo depois, já cai no fluxo normal de conversa encerrada (pergunta
+    se quer retomar com quem atendeu antes, ou vai pro menu de setor —
+    ver _iniciar_retomar_atendimento). Chamada pelo agendador em
+    segundo plano (ver scheduler.py), não é rota — ninguém clica nisso.
+    Grupo fica de fora: nunca tem "um" dono parado, e fechar sozinho um
+    grupo ativo faria mais mal que bem."""
+    limite = (datetime.datetime.utcnow() - datetime.timedelta(days=DIAS_PARA_ENCERRAR_CONVERSA_PARADA)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    rows = conn.execute(
+        "SELECT c.id FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+        "WHERE c.status = 'aberta' AND ct.eh_grupo = 0 "
+        "AND COALESCE(c.ultima_mensagem_em, c.criado_em) <= ?",
+        (limite,),
+    ).fetchall()
+    for r in rows:
+        fechar_conversa(conn, r["id"])
+
+
 def _iniciar_retomar_atendimento(conn, empresa_id: int, conversa_id: int, telefone: str, atendente):
     opcoes = [{"acao": "retomar", "usuario_id": atendente["id"]}, {"acao": "novo_menu"}]
     conn.execute(

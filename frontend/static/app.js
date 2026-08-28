@@ -5557,6 +5557,11 @@
       }
       case "trocar-escopo-conversas": {
         state.escopoConversas = alvo.dataset.escopo;
+        // O filtro de atendente só faz sentido dentro de "Todas" — sair
+        // de lá sem limpar fazia outras abas (ex.: Arquivadas) mostrarem
+        // a lista vazia mesmo com contagem > 0, porque o filtro de uma
+        // pessoa específica continuava grudado.
+        if (alvo.dataset.escopo !== "todas") state.usuarioFiltroAtendente = null;
         return renderWhatsapp(null);
       }
       case "filtrar-por-atendente": {

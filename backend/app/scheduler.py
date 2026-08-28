@@ -21,15 +21,24 @@ from . import db as db_module
 from . import whatsapp_service
 
 INTERVALO_SEGUNDOS = 30
+# Encerrar conversa parada é bem mais raro/caro que checar agendadas —
+# não precisa rodar a cada 30s. 1x por hora (120 voltas de 30s) já
+# sobra pra pegar qualquer uma que passou dos 30 dias.
+VOLTAS_ATE_ENCERRAR_PARADAS = 120
 _thread_iniciada = False
 
 
 def _loop():
+    voltas = 0
     while True:
         try:
             conn = db_module._connect()
             try:
                 whatsapp_service.processar_agendadas_vencidas(conn)
+                voltas += 1
+                if voltas >= VOLTAS_ATE_ENCERRAR_PARADAS:
+                    voltas = 0
+                    whatsapp_service.encerrar_conversas_paradas(conn)
                 conn.commit()
             finally:
                 conn.close()
