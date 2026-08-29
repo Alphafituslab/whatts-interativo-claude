@@ -3213,9 +3213,15 @@ def _tratar_resposta_menu(conn, empresa_id, conversa, telefone, texto, externo_i
             _responder("Digite apenas o número correspondente.")
             return {"processado": True, "tipo": "menu_resposta_invalida", "conversa_id": conversa["id"]}
 
-        # 2ª tentativa errada — para de pedir e resolve por ele.
-        _responder(f"Deixa eu te ajudar! Vou te transferir para um de nossos consultores de {SETOR_FALLBACK_PADRAO} 🙂")
-        return _rotear_para_setor(conn, empresa_id, conversa, SETOR_FALLBACK_PADRAO, _responder)
+        # 2ª tentativa errada — não transfere pra setor nenhum sozinho
+        # (não é a pessoa que escolheu). Só desiste de pedir e deixa a
+        # conversa seguir sem dono/sem setor — cai na fila de "Sem
+        # escolha", pra alguém da equipe assumir de lá.
+        conn.execute(
+            "UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
+            (conversa["id"],),
+        )
+        return {"processado": True, "tipo": "menu_desistiu", "conversa_id": conversa["id"]}
 
     escolha = int(match.group()) - 1
 
