@@ -3164,7 +3164,7 @@ def _tratar_resposta_menu(conn, empresa_id, conversa, telefone, texto, externo_i
         (conversa["id"], texto, externo_id, agora),
     )
     conn.execute(
-        "UPDATE whatsapp_conversas SET ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
+        "UPDATE whatsapp_conversas SET nao_lidas = nao_lidas + 1, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
         (agora, (texto or "")[:120], conversa["id"]),
     )
 
