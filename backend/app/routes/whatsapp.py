@@ -598,7 +598,7 @@ def listar_conversas():
     if resultado_filtro and resultado_filtro not in ("venda", "perdido"):
         raise ApiError("Filtro de resultado inválido.", status=400)
 
-    if escopo in ("minhas", "fila", "sem_menu") and not incluir_arquivadas and not resultado_filtro:
+    if escopo in ("minhas", "fila", "sem_menu", "todas") and not incluir_arquivadas and not resultado_filtro:
         condicoes.append("c.status = 'aberta'")
 
     if resultado_filtro:
@@ -833,7 +833,7 @@ def contagem_abas():
         "todas": conn.execute(
             "SELECT COUNT(*) AS n FROM whatsapp_conversas c "
             "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
-            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0",
+            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0 AND c.status = 'aberta'",
             (g.empresa_id,),
         ).fetchone()["n"] if usuario["admin"] else None,
         # Arquivadas: admin vê a contagem de TODAS; atendente só conta
