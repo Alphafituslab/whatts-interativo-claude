@@ -2602,25 +2602,35 @@ def compartilhar_contato(conversa_id):
 @bp.post("/conversas/<int:conversa_id>/compartilhar-localizacao")
 @requires_auth
 def compartilhar_localizacao(conversa_id):
-    """Manda a localização PADRÃO da empresa (cadastrada em
-    Configuração > Localização) — não é a localização de quem está
-    usando o sistema, é sempre o endereço da empresa."""
+    """Manda localização de verdade pro cliente. Por padrão é a
+    localização ATUAL de quem está atendendo (o navegador manda lat/lng
+    no corpo do pedido, sem precisar cadastrar nada antes). Se o
+    navegador não mandar nada (permissão negada, sem GPS...), cai pra
+    localização salva em Configuração como reserva."""
     usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
         raise ApiError(_recusa_atribuida(conversa, " Encaminhe para si mesmo antes de responder."), status=403, codigo="sem_permissao")
     whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
-    if config.get("localizacao_lat") is None or config.get("localizacao_lng") is None:
-        raise ApiError("Nenhuma localização cadastrada ainda — configure em Configuração > Localização.", status=400, codigo="localizacao_nao_configurada")
-    agora = _now_iso()
-    texto_registro = f"📍 Localização compartilhada: {config.get('localizacao_nome') or config.get('localizacao_endereco') or 'endereço da empresa'}"
-    try:
-        externo_id = whatsapp_service.enviar_localizacao(
-            config, conversa["telefone"], config["localizacao_lat"], config["localizacao_lng"],
-            config.get("localizacao_nome"), config.get("localizacao_endereco"),
+
+    lat, lng, nome, endereco = dados.get("lat"), dados.get("lng"), None, None
+    if lat is not None and lng is not None:
+        nome = f"Localização de {usuario['nome']}"
+    else:
+        lat, lng = config.get("localizacao_lat"), config.get("localizacao_lng")
+        nome, endereco = config.get("localizacao_nome"), config.get("localizacao_endereco")
+    if lat is None or lng is None:
+        raise ApiError(
+            "Não consegui pegar sua localização atual (permissão do navegador?), e não há uma localização cadastrada como reserva em Configuração.",
+            status=400, codigo="localizacao_indisponivel",
         )
+    agora = _now_iso()
+    texto_registro = f"📍 Localização compartilhada: {nome or endereco or 'localização enviada'}"
+    try:
+        externo_id = whatsapp_service.enviar_localizacao(config, conversa["telefone"], lat, lng, nome, endereco)
         status_msg, erro = "enviada", None
     except ApiError as e:
         externo_id, status_msg, erro = None, "falhou", e.mensagem

@@ -3962,6 +3962,20 @@
       </div>`).join("");
   }
 
+  // Pega a localização atual do navegador — devolve null (sem travar
+  // nada) se a pessoa negar a permissão, o navegador não suportar, ou
+  // demorar demais (10s). Quem chamar decide o que fazer sem GPS.
+  function _obterLocalizacaoAtual() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) { resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => resolve(null),
+        { timeout: 10000, maximumAge: 60000 }
+      );
+    });
+  }
+
   async function modalCompartilharContato(conversaId, interna) {
     const contatos = await chamarApi("/whatsapp/contatos");
     abrirModal(`
@@ -5994,18 +6008,26 @@
       }
       case "compartilhar-localizacao": {
         const conversaId = Number(alvo.dataset.id);
-        if (!confirm("Compartilhar a localização da empresa nesta conversa?")) return;
-        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/compartilhar-localizacao`, { method: "POST" });
+        if (!confirm("Compartilhar sua localização atual nesta conversa?")) return;
+        const pos = await _obterLocalizacaoAtual();
+        const body = pos ? { lat: pos.lat, lng: pos.lng } : {};
+        const r = await chamarApi(`/whatsapp/conversas/${conversaId}/compartilhar-localizacao`, { method: "POST", body });
         definirFlash(r.status === "enviada" ? "ok" : "erro", r.status === "enviada" ? "Localização compartilhada." : `Não foi possível enviar: ${r.erro || "erro desconhecido"}`);
         await Promise.all([atualizarMensagensNoDom(conversaId), atualizarListaConversasNoDom()]);
         return;
       }
       case "compartilhar-localizacao-interno": {
         const conversaId = Number(alvo.dataset.id);
-        const config = await chamarApi("/whatsapp/configuracao").catch(() => null);
-        if (!config || config.localizacao_lat == null) { definirFlash("erro", "Nenhuma localização cadastrada ainda — configure em Configuração > Localização."); return; }
-        const link = `https://www.google.com/maps?q=${config.localizacao_lat},${config.localizacao_lng}`;
-        const texto = `📍 ${config.localizacao_nome || "Localização"}${config.localizacao_endereco ? `\n${config.localizacao_endereco}` : ""}\n${link}`;
+        const pos = await _obterLocalizacaoAtual();
+        let lat = pos ? pos.lat : null, lng = pos ? pos.lng : null, nome = "Localização atual";
+        if (lat == null) {
+          // Sem GPS no navegador: cai pra localização salva em Configuração, se tiver.
+          const config = await chamarApi("/whatsapp/configuracao").catch(() => null);
+          if (config && config.localizacao_lat != null) { lat = config.localizacao_lat; lng = config.localizacao_lng; nome = config.localizacao_nome || "Localização"; }
+        }
+        if (lat == null) { definirFlash("erro", "Não consegui pegar sua localização (permissão do navegador?), e não há uma cadastrada em Configuração como reserva."); return; }
+        const link = `https://www.google.com/maps?q=${lat},${lng}`;
+        const texto = `📍 ${nome}\n${link}`;
         await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto } });
         await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
         return;
