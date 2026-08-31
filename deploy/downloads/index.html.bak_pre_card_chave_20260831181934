@@ -265,22 +265,6 @@
     </div>
   </div>
 
-  <div class="cartao">
-    <div class="cartao-icone">🔑</div>
-    <div class="cartao-texto">
-      <h2>Chave do banco do Alphafitus OS</h2>
-      <p>O banco do ERP (<code>alphafitus.db</code>) é criptografado (<strong>SQLCipher</strong>) —
-         sem essa chave, nenhum programa consegue abrir o arquivo, nem o DB Browser acima.</p>
-    </div>
-    <a class="botao" href="/downloads/AlphafitusOS_ChaveBanco.txt">Baixar chave</a>
-    <div class="aviso">
-      <strong>Guarde com cuidado.</strong>
-      Já está configurada em <code>config_ambiente.bat</code> na instalação de produção —
-      este download é só uma cópia de emergência, caso precise reinstalar do zero. Não
-      repasse por WhatsApp/e-mail comum.
-    </div>
-  </div>
-
 <!--/ADMIN-->
 </main>
 <footer>

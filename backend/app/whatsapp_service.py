@@ -128,27 +128,54 @@ def eh_id_de_grupo(valor: str) -> bool:
 def destino_whatsapp(valor: str) -> str:
     """Endereço que a Evolution API espera. Pessoa vira número
     normalizado; grupo vai como <id>@g.us, sem passar pela normalização
-    de telefone (que inseriria DDI e o 9 do celular e quebraria o id)."""
+    de telefone (que inseriria DDI e o 9 do celular e quebraria o id).
+
+    completar_ddi=False: quem chama aqui é sempre código de ENVIO, com o
+    telefone que já está gravado no contato -- ou seja, um número que já
+    passou por normalização (na criação do contato, ou vindo direto do
+    webhook do WhatsApp) e já está completo. Achado pelo Clayton
+    (2026-08-31): assumir Brasil de novo aqui e grudar "55" na frente de
+    um número internacional já completo (ex.: Espanha, 11 dígitos)
+    quebrava o envio -- toda mensagem saía com "Bad Request"."""
     if not valor:
         raise ApiError("Destino inválido.", status=400)
     if "@" in valor:
         return valor
     if eh_id_de_grupo(valor):
         return f"{_somente_digitos(valor)}@g.us"
-    return normalizar_telefone(valor)
+    return normalizar_telefone(valor, completar_ddi=False)
 
 
-def normalizar_telefone(numero: str) -> str:
+def normalizar_telefone(numero: str, completar_ddi: bool = True) -> str:
     """Celular brasileiro tem 9 dígitos (começando com 9) depois do DDD.
     O WhatsApp às vezes manda/aceita o número SEM esse 9 (formato antigo
     — variação real observada vinda do próprio Baileys), o que gerava
     contato duplicado (mesma pessoa virando dois cadastros diferentes) e
     fazia nosso próprio envio cair num número que na prática não existe.
-    Por isso sempre normalizamos pro formato completo com o 9."""
+    Por isso sempre normalizamos pro formato completo com o 9.
+
+    completar_ddi: só faz sentido pra número que uma PESSOA digitou (ela
+    naturalmente omite o "55" do Brasil). Achado pelo Clayton
+    (2026-08-31): o número que chega no WEBHOOK do WhatsApp (remoteJid)
+    já vem completo e correto, com o código do país dele -- forçar "55"
+    na frente de um número de 10/11 dígitos que já é internacional
+    (ex.: Espanha, DDI 34, 11 dígitos) o transformava num número
+    brasileiro que não existe. Quem processa o webhook chama com
+    completar_ddi=False.
+
+    Além disso: um "+" (ou "00") na frente é o jeito padrão de escrever
+    "isto já é um número internacional completo, não mexe" -- vem assim
+    de importação de contato (.vcf exportado de celular sempre traz o
+    "+"). Detecta isso ANTES de arrancar os dígitos e nunca assume
+    Brasil nesse caso, mesmo que quem chamou tenha pedido
+    completar_ddi=True por padrão."""
+    bruto = (numero or "").strip()
+    if bruto.startswith("+") or bruto.startswith("00"):
+        completar_ddi = False
     digitos = _somente_digitos(numero)
     if not digitos:
         raise ApiError("Telefone inválido.", status=400)
-    if len(digitos) in (10, 11):
+    if completar_ddi and len(digitos) in (10, 11):
         digitos = "55" + digitos
     # 55 + DDD (2) + 8 dígitos = 12. Aqui mora a ambiguidade: pode ser um
     # CELULAR que veio sem o 9 (aí falta o 9) ou um FIXO (aí está certo
@@ -1677,7 +1704,9 @@ def _processar_presenca(conn, empresa_id: int, dados: dict):
     if not digitando:
         return
     try:
-        telefone = normalizar_telefone(telefone_bruto)
+        # Mesmo motivo do processamento de mensagem recebida: o número
+        # já vem completo/correto do próprio WhatsApp.
+        telefone = normalizar_telefone(telefone_bruto, completar_ddi=False)
     except ApiError:
         telefone = telefone_bruto
     ate = (datetime.datetime.utcnow() + datetime.timedelta(seconds=SEGUNDOS_DIGITANDO_WHATSAPP)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -2636,7 +2665,10 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         # — sem isso, a mesma pessoa vira dois contatos diferentes
         # dependendo de qual formato de JID o WhatsApp mandou daquela vez.
         try:
-            telefone = normalizar_telefone(telefone_bruto)
+            # completar_ddi=False: telefone_bruto já veio do JID que o
+            # próprio WhatsApp mandou -- já é internacional e completo,
+            # nunca precisa (nem deve) ganhar um "55" na frente.
+            telefone = normalizar_telefone(telefone_bruto, completar_ddi=False)
         except ApiError:
             telefone = telefone_bruto
 

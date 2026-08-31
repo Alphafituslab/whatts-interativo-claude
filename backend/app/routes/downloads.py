@@ -133,7 +133,7 @@ def _tela_login(erro: str = None):
 # Arquivos que só administrador pode baixar. O instalador do atalho é
 # pra equipe inteira; a ferramenta de banco não — ela vem junto com o
 # endereço do servidor e o caminho do arquivo do banco.
-SO_ADMIN = ("DBBrowserForSQLite-instalador.msi",)
+SO_ADMIN = ("DBBrowserForSQLite-instalador.msi", "AlphafitusOS_ChaveBanco.txt")
 
 # Onde a compilação deixa o APK. Servido de lá direto, sem cópia: assim
 # uma recompilação já entrega a versão nova, sem ninguém lembrar de
