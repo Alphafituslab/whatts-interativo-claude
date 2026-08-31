@@ -3194,6 +3194,7 @@
           <div class="wpp-respostas-painel" data-wpp-catalogos-painel hidden></div>
         </div>
         <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1">${escapeHtml(_lerRascunho("cliente", conversa.id))}</textarea>
+        <button type="button" class="botao-icone" data-acao="pre-visualizar-mensagem" data-interna="0" title="Ver o texto inteiro antes de enviar">👁️</button>
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
         <button type="button" class="botao-icone" data-acao="gravar-video" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
         <button type="button" class="botao-icone" data-acao="abrir-agendar" data-id="${conversa.id}" title="Agendar envio">🕒</button>
@@ -3858,6 +3859,7 @@
           <div class="wpp-emoji-painel" data-wpp-emoji-painel hidden>${EMOJIS_COMUNS.map((e) => `<button type="button" class="wpp-emoji-item" data-acao="inserir-emoji" data-emoji="${e}">${e}</button>`).join("")}</div>
         </div>
         <textarea name="texto" class="wpp-textarea" placeholder="Digite uma mensagem…" rows="1">${escapeHtml(_lerRascunho("interna", conversa.id))}</textarea>
+        <button type="button" class="botao-icone" data-acao="pre-visualizar-mensagem" data-interna="1" title="Ver o texto inteiro antes de enviar">👁️</button>
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio-interno" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
         <button type="button" class="botao-icone" data-acao="gravar-video-interno" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
         <button type="submit" class="botao wpp-botao-enviar" title="Enviar">➤</button>
@@ -6125,6 +6127,35 @@
       }
       case "abrir-compartilhar-contato": {
         return modalCompartilharContato(Number(alvo.dataset.id), alvo.dataset.interna === "1");
+      }
+      case "pre-visualizar-mensagem": {
+        // Pedido do Clayton: texto comprido crescia demais na caixinha
+        // de escrever, ficava difícil de reler tudo antes de mandar.
+        // Aqui mostra o texto inteiro, do jeito que vai sair na
+        // conversa (quebra de linha preservada), sem precisar sair da
+        // tela — Fechar volta pra continuar editando, Enviar manda
+        // direto daqui.
+        const interna = alvo.dataset.interna === "1";
+        const form = alvo.closest("form");
+        const textarea = form.querySelector('textarea[name="texto"]');
+        const texto = (textarea.value || "").trim();
+        if (!texto) { definirFlash("erro", "Escreva algo antes de pré-visualizar."); return; }
+        abrirModal(`
+          <h3 style="margin-top:0;">Pré-visualização</h3>
+          <div class="wpp-previsualizacao-texto">${textoComTelefones(texto)}</div>
+          <div class="rodape-modal">
+            <button type="button" class="botao secundario" data-acao="fechar-modal">Voltar a editar</button>
+            <button type="button" class="botao" data-acao="enviar-da-previsualizacao" data-interna="${interna ? "1" : "0"}">Enviar</button>
+          </div>
+        `);
+        return;
+      }
+      case "enviar-da-previsualizacao": {
+        fecharModais();
+        const seletor = alvo.dataset.interna === "1" ? 'form[data-form="enviar-mensagem-interna"]' : 'form[data-form="enviar-mensagem"]';
+        const form = document.querySelector(seletor);
+        if (form) form.requestSubmit();
+        return;
       }
       case "compartilhar-contato": {
         const conversaId = Number(alvo.dataset.id);
