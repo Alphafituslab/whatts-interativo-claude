@@ -20,7 +20,7 @@ import zipfile
 import jwt
 from flask import Blueprint, make_response, redirect, request, send_file, send_from_directory
 
-from .. import security
+from .. import VERSAO_SERVIDOR, security
 from ..context import get_db
 
 bp = Blueprint("downloads", __name__, url_prefix="/downloads")
@@ -124,6 +124,11 @@ def pagina():
         return html, status
     html = _pagina("index.html")
     html = html.replace("<!--NOME-->", _escapar(usuario["nome"] or usuario["email"]))
+    # Mesmo número que aparece em /api/v1/versao -- muda sozinho a cada
+    # vez que o servidor sobe (deploy novo), então a página de downloads
+    # nunca mostra um número velho: é sempre o do backend rodando AGORA,
+    # o mesmo que gerou o instalador/APK que a pessoa está baixando.
+    html = html.replace("<!--VERSAO-->", VERSAO_SERVIDOR)
     if not apk_existe():
         html = re.sub(r"<!--APK-->.*?<!--/APK-->", "", html, flags=re.S)
     if not usuario["admin"]:

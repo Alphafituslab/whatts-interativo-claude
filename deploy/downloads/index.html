@@ -1,9 +1,9 @@
 <!doctype html>
 <!--
-  Página central de downloads da Alphafitus — servida pelo Caddy direto
-  de /opt/alphafitus-downloads (ver /etc/caddy/Caddyfile), FORA do app
-  Flask. Fica versionada aqui pra não se perder; pra publicar, copie
-  este arquivo pra aquela pasta no servidor (ver deploy/README.md).
+  Página central de downloads da Alphafitus — servida pelo Flask (ver
+  backend/app/routes/downloads.py), atrás do mesmo login do sistema.
+  Editar este arquivo direto já vale: a rota lê ele daqui na hora,
+  sem precisar copiar pra lugar nenhum.
 -->
 <html lang="pt-BR">
 <head>
@@ -125,6 +125,7 @@
 <header>
   <h1>Downloads Alphafitus</h1>
   <p>Instaladores e ferramentas dos sistemas internos da empresa</p>
+  <p style="margin-top:8px; font-size:12px; opacity:0.7;">Versão atual do sistema: <strong><!--VERSAO--></strong></p>
 </header>
 <main>
 
