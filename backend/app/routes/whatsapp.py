@@ -565,9 +565,17 @@ def listar_conversas():
         condicoes.append("c.atribuida_usuario_id IS NULL")
         condicoes.append("ct.eh_grupo = 0")
     elif escopo == "todas":
-        if not usuario["admin"]:
-            raise ApiError("Só um administrador pode ver todas as conversas.", status=403, codigo="sem_permissao")
-        condicoes, params = [], []
+        # Admin vê literalmente tudo da empresa. Quem não é admin também
+        # tem "Todas" -- mas escopada no que ela pode ver (o que está
+        # com ela + a fila dos setores que ela atende), mesma régua de
+        # "Fila"/"Sem escolha". Pedido do Clayton: cada atendente vê a
+        # quantidade real das SUAS conversas ali, não trava a aba pra
+        # admin só.
+        if usuario["admin"]:
+            condicoes, params = [], []
+        else:
+            sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
+            condicoes = [sql_visivel]
     else:
         # "Minhas" = tudo o que está comigo, tenha falado quem tiver
         # falado por último. Se é meu atendimento, ele não sai daqui
@@ -828,14 +836,12 @@ def contagem_abas():
         # não mostrava — a aba piscava "1" e abria vazia.
         "fila": contar("AND c.atribuida_usuario_id IS NULL AND ct.eh_grupo = 0"),
         "sem_menu": contar("AND c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL AND ct.eh_grupo = 0"),
-        # "Todas" é a visão de supervisão: conta encerrada também, porque
-        # a lista dela mostra encerrada. As outras três contam só aberta.
-        "todas": conn.execute(
-            "SELECT COUNT(*) AS n FROM whatsapp_conversas c "
-            "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
-            "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0 AND c.status = 'aberta'",
-            (g.empresa_id,),
-        ).fetchone()["n"] if usuario["admin"] else None,
+        # "Todas" agora existe pra todo mundo: admin conta a empresa
+        # inteira (visivel="" pra ele, então "base" sozinha já é isso);
+        # quem não é admin conta só o que aparece na régua de "visivel"
+        # (mesma usada em Fila/Sem escolha) -- sempre a quantidade real
+        # do que É DELE, ao vivo, sem precisar abrir a aba pra saber.
+        "todas": contar(""),
         # Arquivadas: admin vê a contagem de TODAS; atendente só conta
         # o que ELE MESMO arquivou (mesma régua da lista, ver
         # listar_conversas — "arquivada_por", não "visível pra ele").

@@ -3175,8 +3175,12 @@
       { chave: "minhas", label: "Minhas", dica: "Seus atendimentos. O número mostra quantos têm mensagem esperando resposta." },
       { chave: "fila", label: "Fila", dica: "Clientes que ainda são de ninguém, esperando alguém assumir — do seu setor, mais os que não escolheram setor e já esperaram demais" },
       { chave: "sem_menu", label: "Sem escolha", dica: "Clientes que escreveram e não escolheram nenhum número do menu. Passados alguns minutos, eles também entram na Fila de todos, até alguém assumir." },
+      // "Todas" é de todo mundo agora: admin vê a empresa inteira, quem
+      // não é admin vê escopado no que já pode ver (mesma régua de
+      // "Fila"/"Sem escolha") — sempre a quantidade real das SUAS
+      // conversas ali, sem depender de ser admin pra existir a aba.
+      { chave: "todas", label: "Todas" },
     ];
-    if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
     abas.push({ chave: "arquivadas", label: "Arquivadas" });
     // O número em cada aba evita ter que clicar pra descobrir se caiu
     // alguém. Fila e "Sem escolha" piscam quando têm gente esperando:
