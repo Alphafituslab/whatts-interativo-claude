@@ -338,6 +338,28 @@ def encaminhar_conversa(conn, conversa_id: int, novo_participante_id: int, novo_
     )
 
 
+_ROTULOS_TIPO = {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento", "audio": "🎵 Áudio"}
+
+
+def recalcular_preview_apos_exclusao(conn, conversa_id: int):
+    """Quando a mensagem apagada era a que aparecia como prévia na
+    lista de conversas, a prévia tem que voltar a refletir a última
+    mensagem que sobrou (ou ficar vazia, se não sobrou nenhuma) --
+    senão o texto de algo já apagado continua aparecendo pra sempre."""
+    ultima = conn.execute(
+        "SELECT texto, tipo FROM chat_interno_mensagens WHERE conversa_id = ? AND excluida_em IS NULL "
+        "ORDER BY criado_em DESC, id DESC LIMIT 1",
+        (conversa_id,),
+    ).fetchone()
+    if ultima is None:
+        preview = ""
+    elif ultima["tipo"] == "texto":
+        preview = (ultima["texto"] or "")[:120]
+    else:
+        preview = _ROTULOS_TIPO.get(ultima["tipo"], "📎 Anexo")
+    conn.execute("UPDATE chat_interno_conversas SET ultima_mensagem_preview = ? WHERE id = ?", (preview, conversa_id))
+
+
 def fechar_conversa(conn, conversa_id: int):
     conn.execute("UPDATE chat_interno_conversas SET status = 'fechada', fechada_em = ? WHERE id = ?", (_now_iso(), conversa_id))
 

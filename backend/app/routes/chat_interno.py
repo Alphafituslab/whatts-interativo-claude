@@ -322,6 +322,10 @@ def excluir_mensagem(conversa_id, mensagem_id):
         "UPDATE chat_interno_mensagens SET excluida_em = ?, excluida_por = ? WHERE id = ?",
         (whatsapp_service._now_iso(), usuario["id"], mensagem_id),
     )
+    # Se era a mensagem que aparecia como prévia na lista de conversas, a
+    # prévia precisa refletir a que sobrou — senão fica mostrando texto
+    # já apagado indefinidamente.
+    chat_interno_service.recalcular_preview_apos_exclusao(conn, conversa_id)
     # Fica no registro de atividades pro administrador saber que algo foi
     # apagado — a mensagem some da tela de quem apagou, mas não do
     # histórico da empresa.

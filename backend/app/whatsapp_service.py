@@ -1511,7 +1511,23 @@ def excluir_mensagem(conn, config, mensagem: dict, excluida_por: int = None) -> 
         except Exception:
             pass
     conn.execute("UPDATE whatsapp_mensagens SET excluida_em = ?, excluida_por = ? WHERE id = ?", (_now_iso(), excluida_por, mensagem["id"]))
+    recalcular_preview_apos_exclusao(conn, mensagem["conversa_id"])
     return apagada_no_whatsapp
+
+
+def recalcular_preview_apos_exclusao(conn, conversa_id: int):
+    """Quando a mensagem apagada era a que aparecia como prévia na lista
+    de conversas, a prévia tem que voltar a refletir a última mensagem
+    que sobrou (ou ficar vazia, se não sobrou nenhuma) -- senão o texto
+    de algo já apagado continua aparecendo pra sempre na lista."""
+    rotulos = {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento", "audio": "🎵 Áudio", "figurinha": "🌟 Figurinha"}
+    ultima = conn.execute(
+        "SELECT texto, tipo FROM whatsapp_mensagens WHERE conversa_id = ? AND excluida_em IS NULL "
+        "ORDER BY criado_em DESC, id DESC LIMIT 1",
+        (conversa_id,),
+    ).fetchone()
+    preview = "" if ultima is None else (ultima["texto"] or rotulos.get(ultima["tipo"], ""))
+    conn.execute("UPDATE whatsapp_conversas SET ultima_mensagem_preview = ? WHERE id = ?", (preview, conversa_id))
 
 
 def reenviar_mensagem(conn, config, mensagem: dict) -> bool:

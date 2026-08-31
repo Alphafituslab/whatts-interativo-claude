@@ -2838,16 +2838,32 @@
     });
   }
 
-  function textoComTelefones(texto) {
-    const escapado = textoComLinks(escapeHtml(texto));
-    return escapado.replace(RE_TELEFONE, (achado) => {
+  function _telefonizarTrecho(trecho) {
+    return trecho.replace(RE_TELEFONE, (achado) => {
       const digitos = achado.replace(/\D/g, "");
       const nu = digitos.startsWith("55") ? digitos.slice(2) : digitos;
       if (nu.length !== 10 && nu.length !== 11) return achado;
-      // Não mexe no que já virou link (o endereço pode ter números).
-      if (/[/=&?]/.test(achado)) return achado;
       return `<button type="button" class="wpp-telefone-no-texto" data-acao="conversar-com-numero" data-telefone="${digitos}" title="Iniciar uma conversa com este número">${achado}</button>`;
     });
+  }
+
+  function textoComTelefones(texto) {
+    const linkificado = textoComLinks(escapeHtml(texto));
+    // Nunca mexe DENTRO de um <a>...</a> já pronto -- uma coordenada ou
+    // qualquer número dentro do endereço do link pode enganar o regex de
+    // telefone (ex.: "-28.7038,-49.3041" batendo como se fosse um
+    // número de celular) e quebrar a tag HTML do link ao inserir outra
+    // tag no meio dela. Processa só os pedaços de texto FORA dos links.
+    const RE_TAG_LINK = /<a[^>]*>.*?<\/a>/gi;
+    let resultado = "";
+    let ultimoIndex = 0;
+    let m;
+    while ((m = RE_TAG_LINK.exec(linkificado)) !== null) {
+      resultado += _telefonizarTrecho(linkificado.slice(ultimoIndex, m.index)) + m[0];
+      ultimoIndex = m.index + m[0].length;
+    }
+    resultado += _telefonizarTrecho(linkificado.slice(ultimoIndex));
+    return resultado;
   }
 
   // 5548991234567 -> (48) 99123-4567. Quando não dá pra ter o nome, um
