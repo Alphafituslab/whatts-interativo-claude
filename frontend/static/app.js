@@ -584,8 +584,8 @@
     // hora de achar o anexo no histórico.
     const carimbo = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
     const comNome = new File([arquivo], `print-${carimbo}.png`, { type: arquivo.type || "image/png" });
-    if (comNome.size > 35 * 1024 * 1024) {
-      definirFlash("erro", "A imagem colada é maior que 35MB.");
+    if (comNome.size > 90 * 1024 * 1024) {
+      definirFlash("erro", "A imagem colada é maior que 90MB.");
       return montarRota();
     }
     // Mostra ANTES de mandar. Colar é rápido demais pra não ter uma
@@ -1107,7 +1107,7 @@
 
   // Sobe um arquivo pra uma conversa (de cliente ou interna) — as duas
   // telas mandam do mesmo jeito, só muda o endereço.
-  const LIMITE_ANEXO_MB = 35;
+  const LIMITE_ANEXO_MB = 90; // pedido do Clayton 2026-08-31 -- servidor tem disco de sobra, sem motivo pra segurar PDF/vídeo comum de trabalho
 
   async function _enviarVariosAnexos(campo, url) {
     const arquivos = [...(campo.files || [])];
@@ -7178,7 +7178,7 @@
         let agendada;
         try {
           if (arquivo) {
-            if (arquivo.size > 35 * 1024 * 1024) { definirFlash("erro", "Arquivo maior que 35MB."); return; }
+            if (arquivo.size > 90 * 1024 * 1024) { definirFlash("erro", "Arquivo maior que 90MB."); return; }
             const formData = new FormData();
             formData.append("texto", dados.get("texto"));
             formData.append("agendado_para", agendadoPara);

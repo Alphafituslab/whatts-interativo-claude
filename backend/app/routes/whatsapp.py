@@ -70,13 +70,13 @@ def _barrar_sem_acesso_a_conversas():
 
 
 PASTA_UPLOADS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "uploads")
-# Limite de anexo. O do WhatsApp pra documento é bem maior que o nosso;
-# 35MB é o que cobre foto, vídeo e PDF do dia a dia sem encher o disco.
+# Limite de anexo. O do WhatsApp pra documento é bem maior que o nosso.
 #
-# Administrador vai até 90MB: é quem manda instalador e catálogo pesado,
-# e barrar isso obrigava a usar outro caminho pra mandar um arquivo que
-# o próprio sistema distribui.
-MAX_ANEXO_MB = 35
+# Pedido do Clayton (2026-08-31): o Adrian não conseguiu mandar um PDF
+# de contrato por passar dos 35MB antigos -- servidor tem disco de
+# sobra (18GB livres na época), sem motivo pra segurar documento comum
+# de trabalho. Subiu pra 90MB pra todo mundo (era só pro admin antes).
+MAX_ANEXO_MB = 90
 MAX_ANEXO_MB_ADMIN = 90
 
 
