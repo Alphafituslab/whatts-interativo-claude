@@ -2265,15 +2265,20 @@ def atribuir_conversa(conn, conversa_id: int, usuario_id, atribuido_por: int):
     # a etiqueta da conversa (e a assinatura nas mensagens) mostrando o
     # setor antigo, mesmo já estando com outra pessoa/departamento --
     # achado pelo Clayton: conversa foi pra Adrian (Televendas) e a lista
-    # continuava marcando "Controladoria". Só troca quando o destino tem
-    # exatamente UM setor (com mais de um seria chute; com zero não tem
-    # o que pôr no lugar) e é realmente diferente do que já estava.
+    # continuava marcando "Controladoria". Pedido dele: NUNCA misturar,
+    # forçar sempre a troca -- então sempre que a pessoa tem pelo menos
+    # um setor, o rótulo passa a ser o PRINCIPAL dela (usuarios.setor,
+    # a mesma coluna que já serve de rótulo em qualquer outro lugar do
+    # sistema quando ela atende mais de um setor -- ver
+    # definir_setores_do_usuario). Só fica sem trocar se a pessoa não
+    # tiver setor nenhum cadastrado (nada pra pôr no lugar).
     if usuario_id is not None:
-        setores = setores_do_usuario(conn, usuario_id)
-        if len(setores) == 1:
+        alvo = conn.execute("SELECT setor FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+        setor_principal = alvo["setor"] if alvo else None
+        if setor_principal:
             conn.execute(
                 "UPDATE whatsapp_conversas SET menu_setor = ? WHERE id = ? AND menu_setor IS NOT ?",
-                (setores[0], conversa_id, setores[0]),
+                (setor_principal, conversa_id, setor_principal),
             )
 
 
