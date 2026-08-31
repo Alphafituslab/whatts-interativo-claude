@@ -65,6 +65,11 @@
   }
   .cartao-texto { flex: 1; min-width: 190px; }
   .cartao-texto h2 { margin: 0 0 4px; font-size: 16px; }
+  .rotulo-versao {
+    font-size: 11px; font-weight: 600; color: var(--texto-suave);
+    background: var(--fundo); border: 1px solid var(--borda); border-radius: 6px;
+    padding: 2px 7px; vertical-align: middle; white-space: nowrap;
+  }
   .cartao-texto p { margin: 0; font-size: 13px; color: var(--texto-suave); }
   .botao {
     display: inline-flex; align-items: center; gap: 6px;
@@ -125,7 +130,6 @@
 <header>
   <h1>Downloads Alphafitus</h1>
   <p>Instaladores e ferramentas dos sistemas internos da empresa</p>
-  <p style="margin-top:8px; font-size:12px; opacity:0.7;">Versão atual do sistema: <strong><!--VERSAO--></strong></p>
 </header>
 <main>
 
@@ -134,7 +138,7 @@
   <div class="cartao">
     <div class="cartao-icone">A</div>
     <div class="cartao-texto">
-      <h2>Alphafitus OS</h2>
+      <h2>Alphafitus OS <span class="rotulo-versao"><!--VERSAO_ALPHAFITUS--></span></h2>
       <p>ERP completo — instala no computador, com banco de dados próprio (Windows).</p>
     </div>
     <a class="botao" href="/downloads/AlphafitusOS_Servidor_Instalar.exe">Baixar</a>
@@ -143,7 +147,7 @@
   <div class="cartao">
     <div class="cartao-icone">W</div>
     <div class="cartao-texto">
-      <h2>Seja Alpha — computador (Windows)</h2>
+      <h2>Seja Alpha — computador (Windows) <span class="rotulo-versao"><!--VERSAO_SEJAALPHA--></span></h2>
       <p>Cria o atalho na área de trabalho, com a logo da empresa, abrindo o sistema em
          janela limpa. Não instala programa nenhum e não precisa ser administrador.</p>
     </div>

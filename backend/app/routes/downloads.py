@@ -69,6 +69,25 @@ def _escapar(texto: str) -> str:
             .replace(">", "&gt;").replace('"', "&quot;"))
 
 
+def _versao_por_data_do_arquivo(nome_arquivo: str) -> str:
+    """Pra produto que não tem número de versão próprio aqui dentro:
+    quando o arquivo foi trocado pela última vez no servidor é o dado
+    mais honesto que dá pra mostrar, no mesmo formato usado no resto do
+    sistema (data.hora, horário de Brasília)."""
+    caminho = os.path.join(ARQUIVOS_DIR, nome_arquivo)
+    try:
+        import datetime
+        try:
+            from zoneinfo import ZoneInfo
+            fuso = ZoneInfo("America/Sao_Paulo")
+        except Exception:
+            fuso = datetime.timezone.utc
+        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(caminho), tz=fuso)
+        return mtime.strftime("%Y.%m.%d.%H%M%S")
+    except OSError:
+        return "indisponível"
+
+
 def _pagina(nome_arquivo: str):
     pasta = os.path.dirname(os.path.abspath(__file__))
     caminho = os.path.abspath(os.path.join(pasta, "..", "..", "..", "deploy", "downloads", nome_arquivo))
@@ -124,11 +143,15 @@ def pagina():
         return html, status
     html = _pagina("index.html")
     html = html.replace("<!--NOME-->", _escapar(usuario["nome"] or usuario["email"]))
-    # Mesmo número que aparece em /api/v1/versao -- muda sozinho a cada
-    # vez que o servidor sobe (deploy novo), então a página de downloads
-    # nunca mostra um número velho: é sempre o do backend rodando AGORA,
-    # o mesmo que gerou o instalador/APK que a pessoa está baixando.
-    html = html.replace("<!--VERSAO-->", VERSAO_SERVIDOR)
+    # Seja Alpha é montado na hora a partir DESTE mesmo servidor -- o
+    # número de versão dele é o mesmo que aparece em /api/v1/versao,
+    # sempre o do backend rodando agora.
+    html = html.replace("<!--VERSAO_SEJAALPHA-->", VERSAO_SERVIDOR)
+    # Alphafitus OS é outro produto (outro repositório) hospedado aqui
+    # só como arquivo -- não tem número de versão próprio disponível
+    # neste sistema. A data/hora da última vez que o .exe foi trocado no
+    # servidor é o que dá pra saber com certeza sem inventar número.
+    html = html.replace("<!--VERSAO_ALPHAFITUS-->", _versao_por_data_do_arquivo("AlphafitusOS_Servidor_Instalar.exe"))
     if not apk_existe():
         html = re.sub(r"<!--APK-->.*?<!--/APK-->", "", html, flags=re.S)
     if not usuario["admin"]:
