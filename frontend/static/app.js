@@ -3847,12 +3847,21 @@
       if (!conversaAtual) {
         // Pode ser uma conversa de outro escopo acessada direto pelo link
         // (ex.: aba "Minhas" selecionada mas o link é de uma encerrada) —
-        // busca nos outros escopos antes de desistir.
-        for (const outroEscopo of ["minhas", "encerradas", "todas"]) {
-          if (outroEscopo === escopo) continue;
-          if (outroEscopo === "todas" && !usuario.admin) continue;
-          const q = outroEscopo === "encerradas" ? "?encerradas=1" : outroEscopo === "todas" ? "?todas=1" : "";
-          const outras = await chamarApi(`/chat-interno/conversas${q}`);
+        // busca nos outros escopos antes de desistir. Em PARALELO (não
+        // uma de cada vez): eram até 3 idas ao servidor em fila, e cada
+        // clique enquanto isso corria via de novo do zero (o clique
+        // anterior se abandona sozinho, ver _minhaGeracaoInterno) —
+        // dava a sensação de precisar clicar várias vezes pra abrir.
+        const escoposFaltando = ["minhas", "encerradas", "todas"].filter(
+          (e) => e !== escopo && (e !== "todas" || usuario.admin)
+        );
+        const resultados = await Promise.all(
+          escoposFaltando.map((e) => {
+            const q = e === "encerradas" ? "?encerradas=1" : e === "todas" ? "?todas=1" : "";
+            return chamarApi(`/chat-interno/conversas${q}`).catch(() => []);
+          })
+        );
+        for (const outras of resultados) {
           conversaAtual = outras.find((c) => c.id === conversaId) || null;
           if (conversaAtual) break;
         }
