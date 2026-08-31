@@ -3843,10 +3843,19 @@
     const _minhaGeracaoInterno = ++_geracaoRenderChatInterno;
     _limparCitacaoSeTrocou(`interno:${conversaId}`);
     _carregandoSeTrocouDeTela("chat-interno");
-    const etiquetas = await obterEtiquetas();
     const usuario = state.usuarioAtual;
     const escopo = state.chatInternoEscopo;
-    const conversas = await chamarApi(`/chat-interno/conversas${_queryChatInterno()}`);
+    // Etiquetas, lista de conversas e (se tiver uma conversa aberta) as
+    // mensagens dela saem TODAS ao mesmo tempo, não uma esperando a
+    // outra -- eram até 3 idas sequenciais ao servidor toda vez que a
+    // tela abria, e isso pesava especialmente ao alternar entre
+    // WhatsApp e Chat interno, onde tudo recomeça do zero. Pedido do
+    // Clayton (2026-08-31): "como se estivesse pesado" ao ir e voltar.
+    const [etiquetas, conversas, mensagensAdiantadas] = await Promise.all([
+      obterEtiquetas(),
+      chamarApi(`/chat-interno/conversas${_queryChatInterno()}`),
+      conversaId ? chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`).catch(() => null) : Promise.resolve(null),
+    ]);
 
     let conversaAtual = null, mensagens = [];
     if (conversaId) {
@@ -3874,7 +3883,11 @@
         }
       }
       if (conversaAtual) {
-        mensagens = await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`);
+        // Já veio pronta do pedido em paralelo lá em cima (caminho
+        // normal); só busca de novo se aquele pedido falhou por algum
+        // motivo, ou se a conversa só foi achada no fallback de outro
+        // escopo (aí o pedido adiantado mirou o escopo errado).
+        mensagens = mensagensAdiantadas || await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`);
         // Só zera não-lida de quem a mensagem é DE VERDADE — um admin
         // espiando (na aba "Todas") uma conversa que não é dele não deve
         // mexer no contador de ninguém, mesma régua da supervisão em
