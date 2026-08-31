@@ -2261,6 +2261,20 @@ def atribuir_conversa(conn, conversa_id: int, usuario_id, atribuido_por: int):
         "INSERT INTO whatsapp_atribuicoes (conversa_id, usuario_id, atribuido_por, criado_em) VALUES (?, ?, ?, ?)",
         (conversa_id, usuario_id, atribuido_por, _now_iso()),
     )
+    # Encaminhar pra alguém de OUTRO setor sem atualizar o rótulo deixava
+    # a etiqueta da conversa (e a assinatura nas mensagens) mostrando o
+    # setor antigo, mesmo já estando com outra pessoa/departamento --
+    # achado pelo Clayton: conversa foi pra Adrian (Televendas) e a lista
+    # continuava marcando "Controladoria". Só troca quando o destino tem
+    # exatamente UM setor (com mais de um seria chute; com zero não tem
+    # o que pôr no lugar) e é realmente diferente do que já estava.
+    if usuario_id is not None:
+        setores = setores_do_usuario(conn, usuario_id)
+        if len(setores) == 1:
+            conn.execute(
+                "UPDATE whatsapp_conversas SET menu_setor = ? WHERE id = ? AND menu_setor IS NOT ?",
+                (setores[0], conversa_id, setores[0]),
+            )
 
 
 TEXTO_PESQUISA_SATISFACAO = (
