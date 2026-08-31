@@ -6130,31 +6130,49 @@
       }
       case "pre-visualizar-mensagem": {
         // Pedido do Clayton: texto comprido crescia demais na caixinha
-        // de escrever, ficava difícil de reler tudo antes de mandar.
-        // Aqui mostra o texto inteiro, do jeito que vai sair na
-        // conversa (quebra de linha preservada), sem precisar sair da
-        // tela — Fechar volta pra continuar editando, Enviar manda
-        // direto daqui.
+        // de escrever, ficava difícil reler tudo antes de mandar. Aqui
+        // mostra o texto inteiro numa caixa BEM maior — e editável: dá
+        // pra corrigir ali mesmo, sem voltar pra caixinha pequena.
         const interna = alvo.dataset.interna === "1";
         const form = alvo.closest("form");
-        const textarea = form.querySelector('textarea[name="texto"]');
-        const texto = (textarea.value || "").trim();
+        const textareaOriginal = form.querySelector('textarea[name="texto"]');
+        const texto = (textareaOriginal.value || "").trim();
         if (!texto) { definirFlash("erro", "Escreva algo antes de pré-visualizar."); return; }
         abrirModal(`
           <h3 style="margin-top:0;">Pré-visualização</h3>
-          <div class="wpp-previsualizacao-texto">${textoComTelefones(texto)}</div>
+          <textarea class="wpp-previsualizacao-texto" data-previsualizacao-texto>${escapeHtml(texto)}</textarea>
           <div class="rodape-modal">
-            <button type="button" class="botao secundario" data-acao="fechar-modal">Voltar a editar</button>
+            <button type="button" class="botao secundario" data-acao="voltar-a-editar-previsualizacao" data-interna="${interna ? "1" : "0"}">Voltar a editar</button>
             <button type="button" class="botao" data-acao="enviar-da-previsualizacao" data-interna="${interna ? "1" : "0"}">Enviar</button>
           </div>
         `);
+        // Cursor já no fim, pra continuar escrevendo/corrigindo sem
+        // precisar clicar dentro da caixa primeiro.
+        const areaPrevia = document.querySelector("[data-previsualizacao-texto]");
+        areaPrevia.focus();
+        areaPrevia.setSelectionRange(areaPrevia.value.length, areaPrevia.value.length);
         return;
       }
+      // Some o texto (editado ou não) da pré-visualização de volta pra
+      // caixinha real, antes de fechar o modal ou enviar — assim uma
+      // correção feita ali nunca se perde, seja voltando ou mandando.
+      case "voltar-a-editar-previsualizacao":
       case "enviar-da-previsualizacao": {
-        fecharModais();
-        const seletor = alvo.dataset.interna === "1" ? 'form[data-form="enviar-mensagem-interna"]' : 'form[data-form="enviar-mensagem"]';
+        const interna = alvo.dataset.interna === "1";
+        const seletor = interna ? 'form[data-form="enviar-mensagem-interna"]' : 'form[data-form="enviar-mensagem"]';
         const form = document.querySelector(seletor);
-        if (form) form.requestSubmit();
+        const areaPrevia = document.querySelector("[data-previsualizacao-texto]");
+        if (form && areaPrevia) {
+          form.querySelector('textarea[name="texto"]').value = areaPrevia.value;
+          // Sem isto a edição feita na pré-visualização não ia pro
+          // rascunho (localStorage) -- só pro campo na tela. Bastava a
+          // tela atualizar sozinha (o polling troca a tela a cada
+          // poucos segundos) pra correção se perder, voltando pro texto
+          // de antes de abrir a pré-visualização.
+          _salvarRascunho(interna ? "interna" : "cliente", form.dataset.conversaId, areaPrevia.value);
+        }
+        fecharModais();
+        if (acao === "enviar-da-previsualizacao" && form) form.requestSubmit();
         return;
       }
       case "compartilhar-contato": {

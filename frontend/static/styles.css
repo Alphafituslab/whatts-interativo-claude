@@ -1222,11 +1222,13 @@ nav { perspective: 800px; }
 .wpp-transcricao-texto { font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
 
 .wpp-previsualizacao-texto {
-  white-space: pre-wrap; word-break: break-word; line-height: 1.5; font-size: 14px;
-  max-height: 50vh; overflow-y: auto; padding: 12px 14px; border-radius: 10px;
+  width: 100%; box-sizing: border-box; resize: vertical; font: inherit;
+  word-break: break-word; line-height: 1.5; font-size: 14px;
+  min-height: 160px; max-height: 55vh; padding: 12px 14px; border-radius: 10px;
   background: var(--superficie-2); border: 1px solid var(--borda); margin-bottom: 4px;
+  color: var(--texto);
 }
-.wpp-previsualizacao-texto a { color: var(--primaria); }
+.wpp-previsualizacao-texto:focus { outline: none; border-color: var(--primaria); }
 .wpp-transcricao-vazia { color: var(--texto-suave); font-style: italic; }
 
 /* Cabeçalho da transcrição, com o ✕ para fechar */
