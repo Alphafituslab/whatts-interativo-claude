@@ -146,18 +146,14 @@ def transcrever_audio_interno(conversa_id, mensagem_id):
     caminho = rotas_whatsapp._caminho_do_anexo(mensagem["midia_url"])
     if caminho is None:
         raise ApiError("O arquivo deste áudio não está mais no servidor.", status=404, codigo="nao_encontrado")
-    try:
-        texto = transcricao.transcrever(caminho)
-    except transcricao.TranscricaoIndisponivel as e:
-        raise ApiError(str(e), status=503)
-    except Exception:
-        raise ApiError("Não consegui transcrever este áudio. Tente de novo em instantes.", status=500)
-
-    conn.execute(
-        "UPDATE chat_interno_mensagens SET transcricao = ?, transcricao_em = ? WHERE id = ?",
-        (texto, whatsapp_service._now_iso(), mensagem_id),
-    )
-    return jsonify({"transcricao": texto, "de_cache": False})
+    if not transcricao.disponivel():
+        raise ApiError("O transcritor de áudio não está instalado neste servidor.", status=503)
+    # Roda em SEGUNDO PLANO -- o servidor tem só 1 CPU, transcrever de
+    # forma bloqueante travava o sistema inteiro pra todo mundo pelo
+    # tempo que durava. A tela mostra "Transcrevendo..." e o polling
+    # normal troca pelo texto pronto sozinho, assim que terminar.
+    transcricao.transcrever_em_segundo_plano(mensagem_id, "chat_interno_mensagens", caminho)
+    return jsonify({"status": "processando"})
 
 
 @bp.put("/conversas/<int:conversa_id>/tags")

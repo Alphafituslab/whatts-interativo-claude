@@ -24,6 +24,7 @@
     // Transcrições que a pessoa fechou. Só nesta aba e nesta sessão: é
     // preferência de quem está olhando, não algo que valha pros colegas.
     transcricoesFechadas: new Set(),
+    _transcricoesPendentes: new Set(), // mensagens com transcrição rodando em segundo plano, aguardando o polling trazer o resultado
     // Quantas não lidas na contagem anterior — o aviso sonoro só toca
     // quando o número sobe. null = ainda não contamos nenhuma vez (não
     // toca pras mensagens que já estavam lá quando a pessoa entrou).
@@ -2737,6 +2738,15 @@
   function htmlTranscricao(m) {
     const interna = m.direcao === undefined ? "1" : "0";
     const fechada = state.transcricoesFechadas && state.transcricoesFechadas.has(_chaveTranscricao(m));
+
+    // Transcrição roda em segundo plano no servidor -- terminou quando
+    // transcricao_em aparece na mensagem (o polling normal traz isso
+    // sozinho). Até lá, mantém o botão desabilitado em vez de deixar
+    // clicar de novo (dispararia outra transcrição à toa).
+    if (m.transcricao_em) state._transcricoesPendentes.delete(m.id);
+    else if (state._transcricoesPendentes.has(m.id)) {
+      return `<button type="button" class="wpp-transcricao-botao" disabled>📝 Transcrevendo…</button>`;
+    }
 
     if (m.transcricao_em && !fechada) {
       const texto = (m.transcricao || "").trim();
@@ -5670,8 +5680,13 @@
           alvo.textContent = original;
           throw e;
         }
-        // Redesenha pra transcrição aparecer embaixo do áudio — e ela já
-        // vem junto das mensagens daqui pra frente, sem pedir de novo.
+        // A transcrição agora roda em SEGUNDO PLANO no servidor (pra não
+        // travar o sistema todo enquanto processa — só 1 CPU) — o pedido
+        // acima só avisa "comecei", não espera terminar. O botão fica
+        // "Transcrevendo…" (marcado como pendente) até o polling normal
+        // da tela trazer a transcrição pronta sozinho, em alguns
+        // segundos, e trocar o botão pelo texto.
+        state._transcricoesPendentes.add(id);
         return interna ? atualizarMensagensInternasNoDom(conversaId) : atualizarMensagensNoDom(conversaId);
       }
       case "ampliar-foto": {
