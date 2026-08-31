@@ -3844,6 +3844,11 @@
 
   // Trocar de conversa/tela descarta a citação pendente — citar algo numa
   // conversa e mandar em outra seria confuso (e o servidor recusaria).
+  function _rolarParaOFimAgora(seletorPainel) {
+    const painel = document.querySelector(seletorPainel);
+    if (painel) painel.scrollTop = painel.scrollHeight;
+  }
+
   function _limparCitacaoSeTrocou(chave) {
     if (state._citandoDe !== chave) { state.citando = null; state._citandoDe = chave; }
   }
@@ -7125,7 +7130,14 @@
         // pra parecer instantâneo (a mensagem sempre fica registrada do
         // lado do servidor mesmo se o envio real ao WhatsApp falhar, ver
         // routes/whatsapp.py::enviar_mensagem).
-        form.reset();
+        //
+        // NÃO usa form.reset(): reset() volta pro valor "padrão" do
+        // campo, que é o texto que estava escrito no HTML quando a tela
+        // foi desenhada — e depois de restaurar um rascunho salvo, o
+        // "padrão" passa a SER o rascunho. Resultado: mandava a
+        // mensagem e ela reaparecia sozinha na caixa. Limpa o valor
+        // direto.
+        textarea.value = "";
         textarea.focus();
         _salvarRascunho("cliente", conversaId, "");
         const citada = state.citando && !state.citando.interna ? state.citando.id : null;
@@ -7137,6 +7149,11 @@
         // respostas prontas, notas, agendadas...) que é o que deixava
         // lento.
         await Promise.all([atualizarMensagensNoDom(conversaId), atualizarListaConversasNoDom()]);
+        // Quem ACABOU de mandar sempre vê a própria mensagem — mesmo se
+        // tinha rolado pra cima lendo histórico antes de escrever. Isso
+        // é diferente do polling normal, que respeita onde a pessoa
+        // estava lendo quando é mensagem de OUTRA pessoa chegando.
+        _rolarParaOFimAgora("[data-wpp-mensagens]");
         return;
       }
       case "iniciar-conversa-interna": {
@@ -7153,7 +7170,9 @@
         if (!texto) return;
         const conversaId = Number(form.dataset.conversaId);
         const textarea = form.querySelector("textarea");
-        form.reset();
+        // Mesmo motivo do WhatsApp acima: NÃO usa form.reset() (volta
+        // pro rascunho restaurado, não pro vazio).
+        textarea.value = "";
         textarea.focus();
         _salvarRascunho("interna", conversaId, "");
         // Pega e já limpa a citação: se o envio falhar, a pessoa reescreve
@@ -7164,6 +7183,9 @@
         _desenharBarraCitacao();
         await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto, responde_a: citada } });
         await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
+        // Mesma regra do WhatsApp: quem manda sempre vê a própria
+        // mensagem, mesmo tendo rolado pra cima antes de escrever.
+        _rolarParaOFimAgora("[data-wpp-mensagens-interno]");
         return;
       }
       case "encaminhar-interno": {
