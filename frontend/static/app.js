@@ -155,17 +155,35 @@
   // ---------------------------------------------------------------------
   // Cliente da API
   // ---------------------------------------------------------------------
+  // Sem limite de tempo, uma rede que trava (wifi ruim, VPN caindo no
+  // meio) deixava o pedido esperando pra sempre, sem erro nenhum — quem
+  // clicou via a tela "não fazer nada" e clicava de novo achando que
+  // tinha falhado, sem nunca saber que era a rede. 25s é mais que
+  // suficiente pra qualquer pedido normal (mesmo com o servidor
+  // ocupado); passado isso, avisa em vez de ficar mudo.
+  const TEMPO_LIMITE_PEDIDO_MS = 25000;
+  function _fetchComLimite(url, opcoes) {
+    const controlador = new AbortController();
+    const timer = setTimeout(() => controlador.abort(), TEMPO_LIMITE_PEDIDO_MS);
+    return fetch(url, { ...opcoes, signal: controlador.signal })
+      .catch((e) => {
+        if (e.name === "AbortError") throw new Error("A internet demorou demais pra responder. Confira sua conexão e tente de novo.");
+        throw e;
+      })
+      .finally(() => clearTimeout(timer));
+  }
+
   async function chamarApi(caminho, { method = "GET", body, semAuth = false } = {}) {
     const headers = { "Content-Type": "application/json" };
     if (!semAuth && state.accessToken) headers["Authorization"] = "Bearer " + state.accessToken;
 
-    let resp = await fetch(API + caminho, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+    let resp = await _fetchComLimite(API + caminho, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
 
     if (resp.status === 401 && !semAuth && state.refreshToken) {
       const renovou = await tentarRenovarToken();
       if (renovou) {
         headers["Authorization"] = "Bearer " + state.accessToken;
-        resp = await fetch(API + caminho, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+        resp = await _fetchComLimite(API + caminho, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
       }
     }
 
@@ -187,7 +205,11 @@
 
   async function tentarRenovarToken() {
     try {
-      const resp = await fetch(API + "/auth/refresh", {
+      // Também com limite de tempo: essa chamada acontece bem no início,
+      // ANTES de qualquer tela abrir ("Restaurando sessão…") -- se
+      // travasse sem limite, a tela nunca chegava a abrir de jeito
+      // nenhum, o que parecia bem pior do que só um pedido lento.
+      const resp = await _fetchComLimite(API + "/auth/refresh", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: state.refreshToken }),
       });
@@ -6950,21 +6972,45 @@
       case "login": {
         const email = dados.get("email");
         const senha = dados.get("senha");
-        const resp = await chamarApi("/auth/login", { method: "POST", semAuth: true, body: { email, senha } });
-        if (resp.requer_2fa) {
-          state._aguardando2fa = true;
-          state._loginPendente = { email, senha, lembrar: !!dados.get("lembrar") };
-          return renderLogin();
+        // Sem isto o clique não mostrava nada enquanto esperava o
+        // servidor — uma resposta um pouco mais lenta parecia "não fez
+        // nada", e a pessoa clicava de novo (e de novo) achando que não
+        // tinha funcionado, empilhando pedidos à toa.
+        const botao = form.querySelector('button[type="submit"]');
+        const rotuloOriginal = botao.textContent;
+        botao.disabled = true;
+        botao.textContent = "Entrando…";
+        try {
+          const resp = await chamarApi("/auth/login", { method: "POST", semAuth: true, body: { email, senha } });
+          if (resp.requer_2fa) {
+            state._aguardando2fa = true;
+            state._loginPendente = { email, senha, lembrar: !!dados.get("lembrar") };
+            return renderLogin();
+          }
+          return _finalizarLogin(resp, email, !!dados.get("lembrar"));
+        } catch (erro) {
+          botao.disabled = false;
+          botao.textContent = rotuloOriginal;
+          throw erro;
         }
-        return _finalizarLogin(resp, email, !!dados.get("lembrar"));
       }
       case "login-2fa": {
         const { email, senha, lembrar } = state._loginPendente || {};
-        const resp = await chamarApi("/auth/login", {
-          method: "POST", semAuth: true,
-          body: { email, senha, codigo_2fa: dados.get("codigo_2fa") },
-        });
-        return _finalizarLogin(resp, email, lembrar);
+        const botao = form.querySelector('button[type="submit"]');
+        const rotuloOriginal = botao.textContent;
+        botao.disabled = true;
+        botao.textContent = "Confirmando…";
+        try {
+          const resp = await chamarApi("/auth/login", {
+            method: "POST", semAuth: true,
+            body: { email, senha, codigo_2fa: dados.get("codigo_2fa") },
+          });
+          return _finalizarLogin(resp, email, lembrar);
+        } catch (erro) {
+          botao.disabled = false;
+          botao.textContent = rotuloOriginal;
+          throw erro;
+        }
       }
       case "confirmar-2fa": {
         const resp = await chamarApi("/auth/2fa/confirmar", { method: "POST", body: { codigo: dados.get("codigo") } });
