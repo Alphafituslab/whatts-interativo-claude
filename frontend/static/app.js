@@ -3677,7 +3677,14 @@
       // de escrever. Na supervisão (admin), mostra a do participante,
       // que costuma ser quem deve a resposta.
       const outroOnline = souCriador ? c.participante_online : (souAlheio ? c.participante_online : c.criado_por_online);
-      const outraFoto = souCriador ? c.participante_foto : (souAlheio ? c.participante_foto : c.criado_por_foto);
+      // Foto acompanha o nome que aparece PRIMEIRO na linha (outroNome,
+      // acima): quando sou o criador, quem aparece é o participante; nos
+      // outros dois casos (sou participante, ou sou admin supervisionando
+      // "Todas") quem aparece primeiro é sempre o criador. Antes a
+      // supervisão usava a foto do participante mesmo com o nome do
+      // criador na frente -- parecia foto trocada (ex.: "Daiana →
+      // Adrian" com a foto do Adrian ao lado do nome da Daiana).
+      const outraFoto = souCriador ? c.participante_foto : c.criado_por_foto;
       return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""}" href="#/chat-interno/${c.id}" data-wpp-interno-id="${c.id}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}'>
         <span style="position:relative; flex-shrink:0;">
           ${htmlAvatarContato(outraFoto, outroNome, outroNome, 36)}
