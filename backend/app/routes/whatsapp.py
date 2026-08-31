@@ -546,6 +546,14 @@ def listar_conversas():
             sql_visivel, params = _sql_visivel_nao_admin(conn, usuario)
             condicoes = [sql_visivel]
         condicoes.append("c.atribuida_usuario_id IS NULL")
+        # Só é "Fila" de verdade quem JÁ escolheu um número válido do
+        # menu (ou é grupo, que não passa por menu nenhum) -- quem não
+        # clicou em nada, ou clicou em algo que não é um dos números de
+        # acesso, fica em "Sem escolha" e não conta aqui. Sem isso os
+        # dois quadros mostravam a mesma pessoa duas vezes, e não dava
+        # pra saber na Fila quem já tinha escolhido setor e só está
+        # esperando o primeiro contato de alguém.
+        condicoes.append("(c.menu_setor IS NOT NULL OR ct.eh_grupo = 1)")
         # Grupo só entra na fila enquanto ninguém daqui está nele — é o
         # grupo novo, que alguém precisa pegar. Assim que a primeira
         # pessoa entra, ele sai da fila e vira conversa dela (e de quem
@@ -834,7 +842,9 @@ def contagem_abas():
         # escolha" (não há o que assumir num grupo, e ele não passa pelo
         # menu). Sem esta condição o número contava um grupo que a lista
         # não mostrava — a aba piscava "1" e abria vazia.
-        "fila": contar("AND c.atribuida_usuario_id IS NULL AND ct.eh_grupo = 0"),
+        # Mesma régua da lista: só conta como Fila quem já escolheu um
+        # número do menu -- quem não escolheu fica só em "sem_menu".
+        "fila": contar("AND c.atribuida_usuario_id IS NULL AND ct.eh_grupo = 0 AND c.menu_setor IS NOT NULL"),
         "sem_menu": contar("AND c.atribuida_usuario_id IS NULL AND c.menu_setor IS NULL AND ct.eh_grupo = 0"),
         # "Todas" agora existe pra todo mundo: admin conta a empresa
         # inteira (visivel="" pra ele, então "base" sozinha já é isso);
