@@ -572,7 +572,16 @@ def editar_mensagem_whatsapp(config, telefone: str, externo_id: str, texto: str)
         },
         headers=_cabecalhos(config), timeout=TIMEOUT_PROVEDOR_SEGUNDOS,
     )
-    return _tratar_resposta(resp)
+    corpo = _tratar_resposta(resp)
+    # A Evolution às vezes devolve 200/201 mesmo quando o WhatsApp
+    # recusou por baixo dos panos (mensagem velha demais etc.) — mesma
+    # pegadinha documentada em excluir_mensagem, abaixo. Confirmado
+    # testando contra a instância real (2026-08-31): uma edição que
+    # realmente foi aceita sempre volta com "key" preenchida no corpo;
+    # só confia no sucesso se isso vier.
+    if not (isinstance(corpo, dict) and corpo.get("key")):
+        raise ApiError("O WhatsApp não confirmou a edição (mensagem antiga demais ou fora da janela permitida).", status=400)
+    return corpo
 
 
 def reagir_mensagem(config, telefone: str, externo_id: str, emoji: str, minha: bool = False):
