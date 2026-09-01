@@ -461,6 +461,42 @@
     catch (erro) { definirFlash("erro", erro.message || "Ocorreu um erro."); montarRota(); }
   });
 
+  // Arrastar um arquivo do computador e soltar em cima da conversa
+  // aberta anexa ele, igual clicar no clipe -- pedido do Clayton
+  // (2026-08-31), vale pro WhatsApp e pro chat interno (os dois usam a
+  // mesma classe .wpp-painel-chat no painel da direita).
+  let _arrastandoArquivo = false;
+  document.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer || ![...e.dataTransfer.types].includes("Files")) return;
+    const painel = e.target.closest(".wpp-painel-chat");
+    if (!painel) return;
+    e.preventDefault();
+    if (!_arrastandoArquivo) { _arrastandoArquivo = true; painel.classList.add("wpp-arrastando-arquivo"); }
+  });
+  document.addEventListener("dragleave", (e) => {
+    const painel = e.target.closest(".wpp-painel-chat");
+    if (!painel || painel.contains(e.relatedTarget)) return; // ainda dentro do mesmo painel, não soltou de verdade
+    painel.classList.remove("wpp-arrastando-arquivo");
+    _arrastandoArquivo = false;
+  });
+  document.addEventListener("drop", async (e) => {
+    const painel = e.target.closest(".wpp-painel-chat");
+    if (!painel || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    painel.classList.remove("wpp-arrastando-arquivo");
+    _arrastandoArquivo = false;
+    const interna = !!painel.querySelector("[data-wpp-mensagens-interno]");
+    const painelMensagens = painel.querySelector(interna ? "[data-wpp-mensagens-interno]" : "[data-wpp-mensagens]");
+    const conversaId = painelMensagens ? Number(painelMensagens.dataset.conversaId) : null;
+    if (!conversaId) { definirFlash("erro", "Abra uma conversa antes de soltar o arquivo aqui."); return; }
+    const url = interna ? `${API}/chat-interno/conversas/${conversaId}/anexo` : `${API}/whatsapp/conversas/${conversaId}/anexo`;
+    try {
+      await _enviarVariosAnexos(e.dataTransfer.files, url);
+    } finally {
+      if (interna) renderChatInterno(conversaId); else renderWhatsapp(conversaId);
+    }
+  });
+
   document.addEventListener("submit", async (e) => {
     const form = e.target.closest("form[data-form]");
     if (!form) return;
@@ -1121,8 +1157,13 @@
   // telas mandam do mesmo jeito, só muda o endereço.
   const LIMITE_ANEXO_MB = 90; // pedido do Clayton 2026-08-31 -- servidor tem disco de sobra, sem motivo pra segurar PDF/vídeo comum de trabalho
 
-  async function _enviarVariosAnexos(campo, url) {
-    const arquivos = [...(campo.files || [])];
+  // Aceita tanto o <input type="file"> (seletor de arquivo normal) quanto
+  // uma lista de arquivos "solta" (drag-and-drop, sem input nenhum por
+  // trás) -- por isso o primeiro parâmetro pode ser os dois.
+  async function _enviarVariosAnexos(campoOuArquivos, url) {
+    const ehCampo = campoOuArquivos instanceof HTMLElement;
+    const campo = ehCampo ? campoOuArquivos : null;
+    const arquivos = [...((ehCampo ? campoOuArquivos.files : campoOuArquivos) || [])];
     if (!arquivos.length) return;
 
     // Grandes demais saem da fila aqui, com nome e tudo: antes o arquivo
@@ -1132,9 +1173,9 @@
     if (grandes.length) {
       definirFlash("erro", `Passaram de ${LIMITE_ANEXO_MB}MB e não foram enviados: ${grandes.map((a) => a.name).join(", ")}.`);
     }
-    if (!fila.length) { campo.value = ""; return; }
+    if (!fila.length) { if (campo) campo.value = ""; return; }
 
-    campo.disabled = true;
+    if (campo) campo.disabled = true;
     // Um de cada vez, na ordem em que foram escolhidos. Em paralelo
     // seria mais rápido e chegaria fora de ordem — numa conversa, a
     // ordem é a informação.
@@ -1147,8 +1188,7 @@
         falhas.push(`${fila[i].name} (${erro.message || "falhou"})`);
       }
     }
-    campo.disabled = false;
-    campo.value = "";   // sem isso, escolher os mesmos arquivos de novo não dispara nada
+    if (campo) { campo.disabled = false; campo.value = ""; }   // sem isso, escolher os mesmos arquivos de novo não dispara nada
 
     if (falhas.length) definirFlash("erro", `Não consegui enviar: ${falhas.join("; ")}.`);
     else if (fila.length > 1) definirFlash("ok", `${fila.length} arquivos enviados.`);

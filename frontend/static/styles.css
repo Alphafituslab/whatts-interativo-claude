@@ -383,7 +383,17 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-painel-chat {
   flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
   background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio);
-  box-shadow: var(--sombra); overflow: hidden;
+  box-shadow: var(--sombra); overflow: hidden; position: relative;
+}
+/* Arrastando um arquivo do computador por cima da conversa (pedido do
+   Clayton, 2026-08-31) -- destaca a borda e mostra um aviso por cima,
+   sem esconder a conversa (:before, não bloqueia o drop). */
+.wpp-painel-chat.wpp-arrastando-arquivo { border-color: var(--primaria); border-style: dashed; border-width: 2px; }
+.wpp-painel-chat.wpp-arrastando-arquivo::after {
+  content: "📎 Solte aqui para anexar"; position: absolute; inset: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--primaria) 12%, transparent);
+  color: var(--primaria); font-weight: 700; font-size: 15px; pointer-events: none;
 }
 .wpp-chat-vazio { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 32px; }
 .wpp-chat-vazio-icone { font-size: 44px; opacity: 0.45; }
