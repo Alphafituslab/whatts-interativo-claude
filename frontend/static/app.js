@@ -1842,6 +1842,12 @@
           <a class="botao pequeno" href="#/whatsapp/${i.conversa_id}" data-acao="fechar-followup">Abrir</a>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-agendar-contato" data-id="${i.conversa_id}">Agendar</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-adiar" data-id="${i.conversa_id}">Adiar</button>
+          ${i.responsavel_id && i.responsavel_id !== state.usuarioAtual.id
+            ? `<button type="button" class="botao secundario pequeno" data-acao="avisar-atraso-followup"
+                 data-usuario="${i.responsavel_id}" data-nome="${escapeHtml(i.responsavel_nome || "")}"
+                 data-cliente="${escapeHtml(i.contato_nome || "")}" data-dias="${i.dias_parado || 0}" data-prazo="${i.prazo_dias || 0}"
+                 title="Manda um lembrete no chat interno pra ${escapeHtml(i.responsavel_nome || "o responsável")}">🔔 Avisar</button>`
+            : ""}
         </div>
       </div>`;
   }
@@ -6401,6 +6407,29 @@
       }
       case "abrir-adiar": {
         modalAdiar(Number(alvo.dataset.id));
+        return;
+      }
+      case "avisar-atraso-followup": {
+        // Manda um lembrete direto no chat interno pro responsável --
+        // sem sair da tela de Follow-up. Reaproveita a mesma rota que
+        // "Nova conversa interna" usa (acha a conversa com essa pessoa
+        // se já existir, ou cria).
+        const usuarioId = Number(alvo.dataset.usuario);
+        const cliente = alvo.dataset.cliente || "um cliente";
+        const dias = alvo.dataset.dias;
+        const prazo = alvo.dataset.prazo;
+        const texto = `🔔 Lembrete de follow-up: *${cliente}* está há ${dias} dia(s) sem retorno (prazo combinado: ${prazo}d). Dá uma olhada quando puder!`;
+        alvo.disabled = true;
+        const rotuloOriginal = alvo.textContent;
+        alvo.textContent = "Avisando…";
+        try {
+          await chamarApi("/chat-interno/conversas", { method: "POST", body: { participante_id: usuarioId, texto } });
+          alvo.textContent = "✓ Avisado";
+        } catch (erro) {
+          alvo.disabled = false;
+          alvo.textContent = rotuloOriginal;
+          throw erro;
+        }
         return;
       }
       case "adiar-rapido": {
