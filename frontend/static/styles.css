@@ -185,6 +185,12 @@ h1, h2, h3 { letter-spacing: -0.02em; font-weight: 800; }
 .mensagem-erro, .mensagem-ok {
   padding: 10px 14px; border-radius: var(--raio-peq); font-size: 13px; margin: 0 0 16px;
 }
+.flash-aviso { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.flash-fechar {
+  border: none; background: none; cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 2px 4px; opacity: 0.6; color: inherit; flex-shrink: 0;
+}
+.flash-fechar:hover { opacity: 1; }
 .mensagem-erro { background: color-mix(in srgb, var(--vermelho) 12%, var(--superficie)); color: var(--vermelho); border: 1px solid color-mix(in srgb, var(--vermelho) 30%, transparent); }
 .mensagem-ok { background: color-mix(in srgb, var(--verde) 12%, var(--superficie)); color: var(--verde); border: 1px solid color-mix(in srgb, var(--verde) 30%, transparent); }
 

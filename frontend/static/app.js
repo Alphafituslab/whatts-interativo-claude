@@ -382,7 +382,10 @@
          </button>`;
 
     const flashHtml = state.flash
-      ? `<p class="${state.flash.tipo === "erro" ? "mensagem-erro" : "mensagem-ok"}">${escapeHtml(state.flash.texto)}</p>`
+      ? `<div class="${state.flash.tipo === "erro" ? "mensagem-erro" : "mensagem-ok"} flash-aviso">
+           <span>${escapeHtml(state.flash.texto)}</span>
+           <button type="button" class="flash-fechar" data-acao="fechar-flash" title="Fechar">✕</button>
+         </div>`
       : "";
 
     app.innerHTML = `
@@ -1080,7 +1083,12 @@
   // LOGIN
   // =======================================================================
   function renderLogin() {
-    const flashHtml = state.flash ? `<p class="mensagem-erro">${escapeHtml(state.flash.texto)}</p>` : "";
+    const flashHtml = state.flash
+      ? `<div class="mensagem-erro flash-aviso">
+           <span>${escapeHtml(state.flash.texto)}</span>
+           <button type="button" class="flash-fechar" data-acao="fechar-flash" title="Fechar">✕</button>
+         </div>`
+      : "";
     const corpo = state._aguardando2fa ? `
         <form data-form="login-2fa" autocomplete="off">
           <p class="texto-suave">Digite o código de 6 dígitos do seu app autenticador (ou um código de recuperação).</p>
@@ -5617,6 +5625,11 @@
         return montarRota();
       }
       case "fechar-modal": fecharModais(); return;
+      // Pedido do Clayton (2026-08-31): fecha o aviso (erro/sucesso) do
+      // topo da tela na hora, sem esperar sumir sozinho -- ele só some
+      // de verdade no PRÓXIMO redesenho da tela inteira (fica queimado
+      // até lá, mesmo que a pessoa já tenha lido e siga trabalhando).
+      case "fechar-flash": { alvo.closest(".flash-aviso")?.remove(); state.flash = null; return; }
       case "cancelar-2fa": {
         state._aguardando2fa = false;
         state._loginPendente = null;
@@ -6166,7 +6179,11 @@
         const form = alvo.closest("form");
         const textareaOriginal = form.querySelector('textarea[name="texto"]');
         const texto = (textareaOriginal.value || "").trim();
-        if (!texto) { definirFlash("erro", "Escreva algo antes de pré-visualizar."); return; }
+        // montarRota() pra aparecer NA HORA -- só chamar definirFlash não
+        // redesenha nada sozinho, o aviso ficava "pendurado" e só surgia
+        // (sem contexto nenhum) na próxima vez que a tela mudasse por
+        // outro motivo qualquer.
+        if (!texto) { definirFlash("erro", "Escreva algo antes de pré-visualizar."); return montarRota(); }
         abrirModal(`
           <h3 style="margin-top:0;">Pré-visualização</h3>
           <textarea class="wpp-previsualizacao-texto" data-previsualizacao-texto>${escapeHtml(texto)}</textarea>
