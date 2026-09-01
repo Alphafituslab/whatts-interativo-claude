@@ -3282,7 +3282,15 @@ def _tratar_resposta_menu(conn, empresa_id, conversa, telefone, texto, externo_i
         tentativas = (conversa["menu_tentativas_invalidas"] or 0) + 1
         if tentativas < TENTATIVAS_MENU_ANTES_DO_FALLBACK:
             conn.execute("UPDATE whatsapp_conversas SET menu_tentativas_invalidas = ? WHERE id = ?", (tentativas, conversa["id"]))
-            _responder("Digite apenas o número correspondente.")
+            # Pedido do Clayton (2026-08-31): aqui o cliente JA escolheu um
+            # setor antes (esta so esperando, ou mandou uma imagem/algo
+            # que nao e numero nesse meio tempo) -- diferente do menu
+            # inicial, onde ele ainda nao escolheu nada. Mensagem mais
+            # tranquilizadora em vez do "digite o numero" seco.
+            _responder(
+                "Se desejar falar com outro setor apenas digite outro número do menu, "
+                "mas caso desejar esperar fique tranquilo, logo você será atendido."
+            )
             return {"processado": True, "tipo": "menu_resposta_invalida", "conversa_id": conversa["id"]}
 
         # 2ª tentativa errada — não transfere pra setor nenhum sozinho
