@@ -3188,19 +3188,15 @@ def _rotear_para_setor(conn, empresa_id, conversa, setor, _responder):
             "UPDATE whatsapp_conversas SET menu_estado = 'setor', menu_opcoes = ?, menu_tentativas_invalidas = 0, menu_setor = ? WHERE id = ?",
             (json.dumps(setores), setor, conversa["id"]),
         )
-        # Em vez de só mandar "tente outro", diz QUAIS estão atendendo —
-        # senão o cliente fica chutando número até achar um com gente.
-        disponiveis = [s for s in setores if s in setores_com_alguem_online(conn, empresa_id)]
-        if disponiveis:
-            sugestao = (
-                f"\n\nSe preferir falar com alguém agora, estes setores estão atendendo: "
-                f"*{', '.join(disponiveis)}* — é só digitar o número correspondente."
-            )
-        else:
-            sugestao = ""
+        # Pedido do Clayton (2026-08-31): não mostra mais QUAIS setores
+        # estão online (a lista virou uma frase genérica) -- só avisa que
+        # dá pra tentar outro número, e reforça em negrito que o setor
+        # escolhido também vai atender assim que alguém entrar online ali.
         _responder(
             f"No momento não há ninguém disponível em *{setor}*. "
-            f"Sua mensagem já foi registrada e assim que um consultor estiver disponível você será atendido. 🙏{sugestao}"
+            f"Sua mensagem já foi registrada e assim que um consultor estiver disponível você será atendido. 🙏"
+            f"\n\nSe preferir falar com alguém agora, basta digitar outro número. "
+            f"*Mas não se preocupe, assim que o setor {setor} estiver online, já vai te atender.*"
         )
         return {"processado": True, "tipo": "menu_setor_sem_online", "conversa_id": conversa["id"]}
 

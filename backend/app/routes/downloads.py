@@ -177,6 +177,7 @@ def pagina():
     # neste sistema. A data/hora da última vez que o .exe foi trocado no
     # servidor é o que dá pra saber com certeza sem inventar número.
     html = html.replace("<!--VERSAO_ALPHAFITUS-->", _versao_por_data_do_arquivo("AlphafitusOS_Servidor_Instalar.exe"))
+    html = html.replace("<!--VERSAO_MANUAL-->", _versao_por_data_do_arquivo("Manual_AlphafitusOS.html"))
     if not apk_existe():
         html = re.sub(r"<!--APK-->.*?<!--/APK-->", "", html, flags=re.S)
     if not usuario["admin"]:

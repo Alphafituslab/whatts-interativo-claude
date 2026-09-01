@@ -145,15 +145,6 @@
   </div>
 
   <div class="cartao">
-    <div class="cartao-icone">📖</div>
-    <div class="cartao-texto">
-      <h2>Manual do Alphafitus OS <span class="rotulo-versao"><!--VERSAO_MANUAL--></span></h2>
-      <p>O que cada módulo faz, a ordem recomendada de uso e exemplos reais — sempre a versão mais atual, sem precisar baixar de novo.</p>
-    </div>
-    <a class="botao" href="/downloads/Manual_AlphafitusOS.html" target="_blank" rel="noopener">Abrir manual</a>
-  </div>
-
-  <div class="cartao">
     <div class="cartao-icone">W</div>
     <div class="cartao-texto">
       <h2>Seja Alpha — computador (Windows) <span class="rotulo-versao"><!--VERSAO_SEJAALPHA--></span></h2>
