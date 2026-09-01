@@ -415,17 +415,13 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 @keyframes wpp-entra { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .wpp-bolha-texto { font-size: 12.5px; white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
 .wpp-bolha-rodape { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 3px; }
-/* Escondida até clicar na mensagem (pedido do Clayton, 2026-08-27) —
-   só o dia (no divisor) fica sempre visível. width:0 em vez de
-   display:none: sumir de vez empurraria o ✓✓ ao lado pra esquerda no
-   instante do clique; assim o layout nem pisca. */
+/* Sempre visível (pedido do Clayton, 2026-08-31 -- reverte a decisão
+   de 2026-08-27 de esconder até clicar; tinha virado "clicar pra ver a
+   hora", incômodo no dia a dia). */
 .wpp-bolha-hora {
-  font-size: 10.5px; opacity: 0; width: 0; overflow: hidden;
-  white-space: nowrap; display: inline-block; vertical-align: middle;
-  transition: opacity 0.12s ease;
+  font-size: 10.5px; opacity: 0.65; white-space: nowrap;
+  display: inline-block; vertical-align: middle;
 }
-.wpp-bolha.wpp-hora-visivel .wpp-bolha-hora { opacity: 0.65; width: auto; }
-.wpp-bolha { cursor: pointer; }
 .wpp-bolha button, .wpp-bolha a { cursor: pointer; }
 
 /* Divisor de dia — um "chip" centralizado entre as mensagens de datas

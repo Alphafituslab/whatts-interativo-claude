@@ -453,17 +453,6 @@
     } catch (e) { /* fica a padrao */ }
   }
 
-  // A hora de cada mensagem fica escondida até a pessoa clicar nela
-  // (pedido do Clayton, 2026-08-27) — só o dia continua sempre visível,
-  // no divisor. Roda separado do listener de data-acao: aqui é só pra
-  // cliques que NÃO caíram em nenhum botão de ação da bolha (reagir,
-  // citar, editar…), senão clicar num botão também alternaria a hora.
-  document.addEventListener("click", (e) => {
-    if (e.target.closest("[data-acao]")) return;
-    const bolha = e.target.closest(".wpp-bolha");
-    if (bolha) bolha.classList.toggle("wpp-hora-visivel");
-  });
-
   document.addEventListener("click", async (e) => {
     const alvo = e.target.closest("[data-acao]");
     if (!alvo) return;
