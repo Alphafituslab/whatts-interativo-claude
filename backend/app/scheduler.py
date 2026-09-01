@@ -18,6 +18,7 @@ import time
 import traceback
 
 from . import db as db_module
+from . import followup_service
 from . import whatsapp_service
 
 INTERVALO_SEGUNDOS = 30
@@ -25,6 +26,11 @@ INTERVALO_SEGUNDOS = 30
 # não precisa rodar a cada 30s. 1x por hora (120 voltas de 30s) já
 # sobra pra pegar qualquer uma que passou dos 30 dias.
 VOLTAS_ATE_ENCERRAR_PARADAS = 120
+# Aviso automático de follow-up atrasado: não é tão urgente quanto
+# mensagem agendada (que tem hora marcada pra sair), 10 em 10 minutos
+# (20 voltas de 30s) já avisa rápido o suficiente sem martelar o banco
+# à toa a cada 30s.
+VOLTAS_ATE_AVISO_FOLLOWUP = 20
 _thread_iniciada = False
 
 
@@ -36,6 +42,8 @@ def _loop():
             try:
                 whatsapp_service.processar_agendadas_vencidas(conn)
                 voltas += 1
+                if voltas % VOLTAS_ATE_AVISO_FOLLOWUP == 0:
+                    followup_service.processar_avisos_automaticos(conn)
                 if voltas >= VOLTAS_ATE_ENCERRAR_PARADAS:
                     voltas = 0
                     whatsapp_service.encerrar_conversas_paradas(conn)

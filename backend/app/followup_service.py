@@ -217,6 +217,82 @@ def listar(conn, empresa_id, usuario_id=None, setores=None, apenas_pendentes=Fal
     return resultado
 
 
+def processar_avisos_automaticos(conn):
+    """Chamado periodicamente pelo agendador em segundo plano (ver
+    app/scheduler.py) -- nada aqui é uma rota, ninguém clica nisso.
+
+    Pra cada empresa que configurou um limite de dias (Configuração >
+    Follow-up), manda um lembrete automático no CHAT INTERNO pro
+    responsável de toda conversa "atrasada" além desse limite -- ou
+    seja, dias_parado - prazo_dias >= limite (quanto além do prazo já
+    combinado, não o total de dias sem contato). Reaproveita o mesmo
+    texto do botão manual "🔔 Avisar" (ver routes/whatsapp.py) e a
+    mesma régua da rota POST /chat-interno/conversas: acha a conversa
+    interna se já existir, ou cria.
+
+    Uma vez por conversa a cada 24h (followup_aviso_automatico_em) --
+    senão manda o mesmo lembrete a cada volta do agendador enquanto ela
+    continuar atrasada, o que viraria spam."""
+    from . import chat_interno_service
+    empresas = conn.execute(
+        "SELECT empresa_id, followup_dias_aviso_automatico FROM configuracoes_whatsapp "
+        "WHERE followup_dias_aviso_automatico IS NOT NULL AND followup_dias_aviso_automatico > 0"
+    ).fetchall()
+    if not empresas:
+        return 0
+    agora = _now()
+    enviados = 0
+    for emp in empresas:
+        empresa_id = emp["empresa_id"]
+        limite = emp["followup_dias_aviso_automatico"]
+        # Quem manda o lembrete: o admin mais antigo da empresa -- não
+        # existe "usuário sistema" nenhum, e o chat interno sempre
+        # precisa de um remetente de verdade.
+        remetente = conn.execute(
+            "SELECT id FROM usuarios WHERE empresa_id = ? AND admin = 1 AND ativo = 1 ORDER BY id LIMIT 1",
+            (empresa_id,),
+        ).fetchone()
+        if remetente is None:
+            continue
+        remetente_id = remetente["id"]
+        for item in listar(conn, empresa_id):
+            if item["situacao"] != "atrasado" or not item.get("responsavel_id"):
+                continue
+            if item["responsavel_id"] == remetente_id:
+                continue
+            if (item["dias_parado"] - item["prazo_dias"]) < limite:
+                continue
+            conversa_id = item["conversa_id"]
+            ja_avisado = conn.execute(
+                "SELECT followup_aviso_automatico_em FROM whatsapp_conversas WHERE id = ?", (conversa_id,)
+            ).fetchone()
+            if ja_avisado and ja_avisado["followup_aviso_automatico_em"]:
+                enviado_em = _parse(ja_avisado["followup_aviso_automatico_em"])
+                if enviado_em and (agora - enviado_em).total_seconds() < 24 * 3600:
+                    continue
+            texto = (
+                f"🔔 Lembrete de follow-up: *{item['contato_nome']}* está há {item['dias_parado']} dia(s) "
+                f"sem retorno (prazo combinado: {item['prazo_dias']}d). Dá uma olhada quando puder!"
+            )
+            participante = conn.execute(
+                "SELECT id, setor FROM usuarios WHERE id = ? AND ativo = 1", (item["responsavel_id"],)
+            ).fetchone()
+            if participante is None:
+                continue
+            conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, participante["id"])
+            if conversa_interna_id:
+                chat_interno_service.reabrir_conversa(conn, conversa_interna_id)
+                chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
+            else:
+                chat_interno_service.iniciar_conversa(conn, remetente_id, participante["id"], participante["setor"], texto)
+            conn.execute(
+                "UPDATE whatsapp_conversas SET followup_aviso_automatico_em = ? WHERE id = ?",
+                (_now_iso(), conversa_id),
+            )
+            enviados += 1
+    return enviados
+
+
 def resumo(conn, empresa_id, usuario_id=None, setores=None):
     """Números do sino: o que precisa de ação, o que está agendado."""
     itens = listar(conn, empresa_id, usuario_id, setores)

@@ -4770,6 +4770,20 @@
          </form>
        </div>
 
+       <div class="cartao">
+         <h3 style="margin-top:0;">Follow-up</h3>
+         <p class="dica">Quando um cliente fica atrasado além do prazo combinado, manda sozinho um lembrete no chat interno pro responsável — sem precisar clicar em "🔔 Avisar" na mão.</p>
+         <form data-form="salvar-followup-automatico">
+           <div class="campo">
+             <label>Avisar o responsável automaticamente quando o atraso passar de (dias além do prazo)</label>
+             <input type="number" name="followup_dias_aviso_automatico" min="0" max="60"
+               value="${config.followup_dias_aviso_automatico ?? ""}" placeholder="Deixe em branco para desligar" style="max-width:160px;">
+             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">0 ou em branco desliga o aviso automático — o botão manual "🔔 Avisar" no Follow-up continua funcionando do mesmo jeito.</p>
+           </div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
+         </form>
+       </div>
+
        ${!ehSuperAdmin ? "" : `
        <div class="cartao">
          <h3 style="margin-top:0;">Backup</h3>
@@ -7583,6 +7597,17 @@
           },
         });
         definirFlash("ok", "Horário de funcionamento salvo.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-followup-automatico": {
+        const valor = (dados.get("followup_dias_aviso_automatico") || "").trim();
+        await chamarApi("/whatsapp/configuracao", {
+          method: "PUT",
+          body: { followup_dias_aviso_automatico: valor === "" ? null : Number(valor) },
+        });
+        definirFlash("ok", valor === "" || Number(valor) === 0
+          ? "Aviso automático de follow-up desligado."
+          : `Aviso automático ligado — avisa o responsável quando passar de ${valor} dia(s) além do prazo.`);
         return renderWhatsappConfiguracao();
       }
       case "iniciar-conversa": {

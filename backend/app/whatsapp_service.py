@@ -207,6 +207,7 @@ def obter_configuracao(conn, empresa_id: int):
             "assinar_mensagens": 0,
             "localizacao_nome": None, "localizacao_endereco": None,
             "localizacao_lat": None, "localizacao_lng": None,
+            "followup_dias_aviso_automatico": None,
         }
     return dict(row)
 
@@ -296,6 +297,21 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     # régua de "ativo"/"expediente_ativo": só mexe se vier explicitamente.
     assinar_mensagens = (1 if dados.get("assinar_mensagens") else 0) if "assinar_mensagens" in dados else (1 if anterior.get("assinar_mensagens") else 0)
 
+    # Aviso automático de follow-up atrasado -- formulário próprio em
+    # Configuração. NULL/0 desliga (só o botão manual "🔔 Avisar" continua
+    # existindo); número = quantos dias além do prazo já dispara sozinho.
+    if "followup_dias_aviso_automatico" in dados:
+        valor_bruto = dados.get("followup_dias_aviso_automatico")
+        if valor_bruto in (None, ""):
+            followup_dias_aviso_automatico = None
+        else:
+            try:
+                followup_dias_aviso_automatico = max(0, int(valor_bruto))
+            except (TypeError, ValueError):
+                raise ApiError("Valor inválido em followup_dias_aviso_automatico.", status=400)
+    else:
+        followup_dias_aviso_automatico = anterior.get("followup_dias_aviso_automatico")
+
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
         localizacao_nome = (dados.get("localizacao_nome") or "").strip() or None
@@ -317,8 +333,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               webhook_segredo, webhook_base_url, expediente_ativo, expediente_janelas,
                                               expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
                                               limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
-                                              localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
+                                              followup_dias_aviso_automatico)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -340,6 +357,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             localizacao_endereco = excluded.localizacao_endereco,
             localizacao_lat = excluded.localizacao_lat,
             localizacao_lng = excluded.localizacao_lng,
+            followup_dias_aviso_automatico = excluded.followup_dias_aviso_automatico,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -347,7 +365,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta,
          minutos_sem_menu, empresa_id, _now_iso(), usuario_id,
          limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
-         localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng),
+         localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
+         followup_dias_aviso_automatico),
     )
     return obter_configuracao(conn, empresa_id)
 
