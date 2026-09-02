@@ -70,6 +70,7 @@ SCHEMA_FILES = [
     "schema_055_arquivada_por.sql",
     "schema_056_localizacao_empresa.sql",
     "schema_057_followup_aviso_automatico.sql",
+    "schema_058_usuario_sistema.sql",
 ]
 
 

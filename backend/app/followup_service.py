@@ -217,6 +217,30 @@ def listar(conn, empresa_id, usuario_id=None, setores=None, apenas_pendentes=Fal
     return resultado
 
 
+def _remetente_do_sistema(conn, empresa_id):
+    """De quem saem os avisos automáticos (lembrete de follow-up, fila do
+    Sem escolha parada). Usa o "Usuário do sistema" configurado em
+    Configuração se tiver um; sem isso, cai pro admin mais antigo da
+    empresa -- o chat interno sempre precisa de um remetente de verdade,
+    e sem essa opção configurada ainda funciona do jeito que já
+    funcionava antes dela existir."""
+    cfg = conn.execute(
+        "SELECT usuario_sistema_id FROM configuracoes_whatsapp WHERE empresa_id = ?", (empresa_id,)
+    ).fetchone()
+    usuario_sistema_id = cfg["usuario_sistema_id"] if cfg else None
+    if usuario_sistema_id:
+        ativo = conn.execute(
+            "SELECT id FROM usuarios WHERE id = ? AND ativo = 1 AND empresa_id = ?", (usuario_sistema_id, empresa_id)
+        ).fetchone()
+        if ativo:
+            return ativo["id"]
+    admin = conn.execute(
+        "SELECT id FROM usuarios WHERE empresa_id = ? AND admin = 1 AND ativo = 1 ORDER BY id LIMIT 1",
+        (empresa_id,),
+    ).fetchone()
+    return admin["id"] if admin else None
+
+
 def processar_avisos_automaticos(conn):
     """Chamado periodicamente pelo agendador em segundo plano (ver
     app/scheduler.py) -- nada aqui é uma rota, ninguém clica nisso.
@@ -245,16 +269,9 @@ def processar_avisos_automaticos(conn):
     for emp in empresas:
         empresa_id = emp["empresa_id"]
         limite = emp["followup_dias_aviso_automatico"]
-        # Quem manda o lembrete: o admin mais antigo da empresa -- não
-        # existe "usuário sistema" nenhum, e o chat interno sempre
-        # precisa de um remetente de verdade.
-        remetente = conn.execute(
-            "SELECT id FROM usuarios WHERE empresa_id = ? AND admin = 1 AND ativo = 1 ORDER BY id LIMIT 1",
-            (empresa_id,),
-        ).fetchone()
-        if remetente is None:
+        remetente_id = _remetente_do_sistema(conn, empresa_id)
+        if remetente_id is None:
             continue
-        remetente_id = remetente["id"]
         for item in listar(conn, empresa_id):
             if item["situacao"] != "atrasado" or not item.get("responsavel_id"):
                 continue

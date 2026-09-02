@@ -208,6 +208,7 @@ def obter_configuracao(conn, empresa_id: int):
             "localizacao_nome": None, "localizacao_endereco": None,
             "localizacao_lat": None, "localizacao_lng": None,
             "followup_dias_aviso_automatico": None,
+            "usuario_sistema_id": None, "aviso_fila_sem_escolha_ativo": 0, "ultimo_aviso_fila_sem_escolha": None,
         }
     return dict(row)
 
@@ -224,6 +225,7 @@ def config_publica(config):
     d["ativo"] = bool(d.get("ativo"))
     d["expediente_ativo"] = bool(d.get("expediente_ativo"))
     d["assinar_mensagens"] = bool(d.get("assinar_mensagens"))
+    d["aviso_fila_sem_escolha_ativo"] = bool(d.get("aviso_fila_sem_escolha_ativo"))
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -312,6 +314,29 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     else:
         followup_dias_aviso_automatico = anterior.get("followup_dias_aviso_automatico")
 
+    # Usuário do sistema: de quem os avisos automáticos saem (lembrete
+    # de follow-up, fila do Sem escolha parada). None = cai de volta no
+    # "admin mais antigo" só por compatibilidade com quem configurou
+    # antes de este campo existir.
+    if "usuario_sistema_id" in dados:
+        bruto = dados.get("usuario_sistema_id")
+        if bruto in (None, ""):
+            usuario_sistema_id = None
+        else:
+            alvo = conn.execute(
+                "SELECT id FROM usuarios WHERE id = ? AND ativo = 1 AND empresa_id = ?", (bruto, empresa_id)
+            ).fetchone()
+            if alvo is None:
+                raise ApiError("Usuário do sistema inválido ou inativo.", status=400)
+            usuario_sistema_id = alvo["id"]
+    else:
+        usuario_sistema_id = anterior.get("usuario_sistema_id")
+
+    aviso_fila_sem_escolha_ativo = (
+        (1 if dados.get("aviso_fila_sem_escolha_ativo") else 0) if "aviso_fila_sem_escolha_ativo" in dados
+        else (1 if anterior.get("aviso_fila_sem_escolha_ativo") else 0)
+    )
+
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
         localizacao_nome = (dados.get("localizacao_nome") or "").strip() or None
@@ -334,8 +359,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
                                               limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
                                               localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
-                                              followup_dias_aviso_automatico)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -358,6 +383,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             localizacao_lat = excluded.localizacao_lat,
             localizacao_lng = excluded.localizacao_lng,
             followup_dias_aviso_automatico = excluded.followup_dias_aviso_automatico,
+            usuario_sistema_id = excluded.usuario_sistema_id,
+            aviso_fila_sem_escolha_ativo = excluded.aviso_fila_sem_escolha_ativo,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -366,7 +393,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          minutos_sem_menu, empresa_id, _now_iso(), usuario_id,
          limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
          localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
-         followup_dias_aviso_automatico),
+         followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -2911,6 +2938,76 @@ def _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone):
     except ApiError:
         pass
     conn.execute("UPDATE whatsapp_conversas SET ultimo_aviso_expediente = ? WHERE id = ?", (_now_iso(), conversa["id"]))
+
+
+MINUTOS_AVISO_FILA_SEM_ESCOLHA = 10
+HORAS_ENTRE_AVISOS_FILA_SEM_ESCOLHA = 0.5  # 30 minutos de folga entre um aviso e outro
+
+
+def avisar_fila_sem_escolha_se_preciso(conn):
+    """Chamado periodicamente pelo agendador em segundo plano (ver
+    app/scheduler.py) -- não é rota, ninguém clica nisso.
+
+    Se tiver cliente parado no "Sem escolha" (escreveu e não clicou em
+    nenhum número válido do menu) há mais de
+    MINUTOS_AVISO_FILA_SEM_ESCOLHA minutos, avisa todo mundo que está
+    ONLINE na empresa, no chat interno, pra quem estiver livre ir
+    resolver -- não é direcionado a uma pessoa específica porque, por
+    definição, esse cliente ainda não tem responsável nenhum.
+
+    Uma vez a cada meia hora (não a cada rodada do agendador) enquanto a
+    fila continuar parada, senão vira spam."""
+    from . import chat_interno_service, followup_service
+    empresas = conn.execute(
+        "SELECT empresa_id, ultimo_aviso_fila_sem_escolha FROM configuracoes_whatsapp "
+        "WHERE aviso_fila_sem_escolha_ativo = 1"
+    ).fetchall()
+    if not empresas:
+        return 0
+    agora = datetime.datetime.utcnow()
+    limite_espera = (agora - datetime.timedelta(minutes=MINUTOS_AVISO_FILA_SEM_ESCOLHA)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    limite_online = (agora - datetime.timedelta(minutes=MINUTOS_ONLINE)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    avisados = 0
+    for emp in empresas:
+        empresa_id = emp["empresa_id"]
+        if emp["ultimo_aviso_fila_sem_escolha"]:
+            try:
+                ultimo = datetime.datetime.strptime(emp["ultimo_aviso_fila_sem_escolha"], "%Y-%m-%dT%H:%M:%S.%fZ")
+                if (agora - ultimo).total_seconds() < HORAS_ENTRE_AVISOS_FILA_SEM_ESCOLHA * 3600:
+                    continue
+            except ValueError:
+                pass
+        tem_esperando = conn.execute(
+            "SELECT 1 FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE ct.empresa_id = ? AND c.status = 'aberta' AND c.excluida_em IS NULL AND c.arquivada = 0 "
+            "AND c.menu_setor IS NULL AND c.atribuida_usuario_id IS NULL AND ct.eh_grupo = 0 "
+            "AND COALESCE(c.ultima_mensagem_em, c.criado_em) <= ? LIMIT 1",
+            (empresa_id, limite_espera),
+        ).fetchone()
+        if not tem_esperando:
+            continue
+        remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
+        if remetente_id is None:
+            continue
+        online = conn.execute(
+            "SELECT id FROM usuarios WHERE empresa_id = ? AND ativo = 1 AND id != ? "
+            "AND ultimo_acesso >= ? AND offline_forcado = 0 AND ausente = 0",
+            (empresa_id, remetente_id, limite_online),
+        ).fetchall()
+        texto = "🔔 Clientes sem atendimento na fila."
+        for u in online:
+            conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, u["id"])
+            if conversa_interna_id:
+                chat_interno_service.reabrir_conversa(conn, conversa_interna_id)
+                chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
+            else:
+                chat_interno_service.iniciar_conversa(conn, remetente_id, u["id"], None, texto)
+            avisados += 1
+        conn.execute(
+            "UPDATE configuracoes_whatsapp SET ultimo_aviso_fila_sem_escolha = ? WHERE empresa_id = ?",
+            (agora.strftime("%Y-%m-%dT%H:%M:%S.%fZ"), empresa_id),
+        )
+    return avisados
 
 
 # ============================================================

@@ -3251,12 +3251,10 @@
       { chave: "minhas", label: "Minhas", dica: "Seus atendimentos. O número mostra quantos têm mensagem esperando resposta." },
       { chave: "fila", label: "Fila", dica: "Clientes que ainda são de ninguém, esperando alguém assumir — do seu setor, mais os que não escolheram setor e já esperaram demais" },
       { chave: "sem_menu", label: "Sem escolha", dica: "Clientes que escreveram e não escolheram nenhum número do menu. Passados alguns minutos, eles também entram na Fila de todos, até alguém assumir." },
-      // "Todas" é de todo mundo agora: admin vê a empresa inteira, quem
-      // não é admin vê escopado no que já pode ver (mesma régua de
-      // "Fila"/"Sem escolha") — sempre a quantidade real das SUAS
-      // conversas ali, sem depender de ser admin pra existir a aba.
-      { chave: "todas", label: "Todas" },
     ];
+    // Só admin -- revertido em 2026-09-01 (tinha ficado geral desde
+    // 31/08, Clayton pediu pra voltar a ser exclusivo do admin).
+    if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
     abas.push({ chave: "arquivadas", label: "Arquivadas" });
     // O número em cada aba evita ter que clicar pra descobrir se caiu
     // alguém. Fila e "Sem escolha" piscam quando têm gente esperando:
@@ -4771,14 +4769,26 @@
        </div>
 
        <div class="cartao">
-         <h3 style="margin-top:0;">Follow-up</h3>
-         <p class="dica">Quando um cliente fica atrasado além do prazo combinado, manda sozinho um lembrete no chat interno pro responsável — sem precisar clicar em "🔔 Avisar" na mão.</p>
-         <form data-form="salvar-followup-automatico">
+         <h3 style="margin-top:0;">Avisos automáticos</h3>
+         <p class="dica">Mensagens que o próprio sistema manda sozinho no chat interno, sem ninguém precisar clicar em nada.</p>
+         <form data-form="salvar-avisos-automaticos">
            <div class="campo">
-             <label>Avisar o responsável automaticamente quando o atraso passar de (dias além do prazo)</label>
+             <label>Usuário do sistema</label>
+             <select name="usuario_sistema_id">
+               <option value="">Nenhum — usa o administrador mais antigo</option>
+               ${usuarios.filter((u) => u.ativo).map((u) => `<option value="${u.id}" ${config.usuario_sistema_id === u.id ? "selected" : ""}>${escapeHtml(u.nome)}</option>`).join("")}
+             </select>
+             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">De quem saem os avisos abaixo (lembrete de follow-up, fila parada). Pensando também em, mais pra frente, ser a conta da IA quando for liberada.</p>
+           </div>
+           <div class="campo">
+             <label>Follow-up: avisar o responsável quando o atraso passar de (dias além do prazo)</label>
              <input type="number" name="followup_dias_aviso_automatico" min="0" max="60"
                value="${config.followup_dias_aviso_automatico ?? ""}" placeholder="Deixe em branco para desligar" style="max-width:160px;">
-             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">0 ou em branco desliga o aviso automático — o botão manual "🔔 Avisar" no Follow-up continua funcionando do mesmo jeito.</p>
+             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">0 ou em branco desliga — o botão manual "🔔 Avisar" no Follow-up continua funcionando do mesmo jeito.</p>
+           </div>
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="aviso_fila_sem_escolha_ativo" ${config.aviso_fila_sem_escolha_ativo ? "checked" : ""}>
+               Avisar todo mundo online quando tiver cliente esperando no "Sem escolha" há mais de 10 minutos</label>
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
@@ -7599,15 +7609,18 @@
         definirFlash("ok", "Horário de funcionamento salvo.");
         return renderWhatsappConfiguracao();
       }
-      case "salvar-followup-automatico": {
-        const valor = (dados.get("followup_dias_aviso_automatico") || "").trim();
+      case "salvar-avisos-automaticos": {
+        const valorFollowup = (dados.get("followup_dias_aviso_automatico") || "").trim();
+        const valorUsuarioSistema = (dados.get("usuario_sistema_id") || "").trim();
         await chamarApi("/whatsapp/configuracao", {
           method: "PUT",
-          body: { followup_dias_aviso_automatico: valor === "" ? null : Number(valor) },
+          body: {
+            usuario_sistema_id: valorUsuarioSistema === "" ? null : Number(valorUsuarioSistema),
+            followup_dias_aviso_automatico: valorFollowup === "" ? null : Number(valorFollowup),
+            aviso_fila_sem_escolha_ativo: !!dados.get("aviso_fila_sem_escolha_ativo"),
+          },
         });
-        definirFlash("ok", valor === "" || Number(valor) === 0
-          ? "Aviso automático de follow-up desligado."
-          : `Aviso automático ligado — avisa o responsável quando passar de ${valor} dia(s) além do prazo.`);
+        definirFlash("ok", "Avisos automáticos salvos.");
         return renderWhatsappConfiguracao();
       }
       case "iniciar-conversa": {

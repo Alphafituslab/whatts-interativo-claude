@@ -44,6 +44,7 @@ def _loop():
                 voltas += 1
                 if voltas % VOLTAS_ATE_AVISO_FOLLOWUP == 0:
                     followup_service.processar_avisos_automaticos(conn)
+                    whatsapp_service.avisar_fila_sem_escolha_se_preciso(conn)
                 if voltas >= VOLTAS_ATE_ENCERRAR_PARADAS:
                     voltas = 0
                     whatsapp_service.encerrar_conversas_paradas(conn)
