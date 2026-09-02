@@ -2512,10 +2512,12 @@ def resetar_dashboard(conn, empresa_id: int):
 def calcular_dashboard(conn, empresa_id: int):
     config_dash = obter_configuracao(conn, empresa_id)
     reset_em = config_dash.get("dashboard_reset_em")
-    # Mesmo limite usado pelo alerta de conversa parada (ver
-    # listar_conversas_sla_estourado) — o Dashboard conta quantas vezes
-    # cada um passou desse tempo pra responder o cliente.
-    limite_demora_min = config_dash.get("sla_minutos_alerta") or 15
+    # Pedido do Clayton (2026-09-02): a coluna DEMORAS do Dashboard conta
+    # a partir de 10 minutos parado, sempre -- fixo, independente do
+    # limite configurável do alerta de "conversa parada" (que é outra
+    # coisa: aquele é o aviso automático, esse aqui é só a contagem
+    # histórica de quantas vezes cada um demorou).
+    limite_demora_min = 10
     filtro_data = " AND criado_em >= ?" if reset_em else ""
     filtro_data_c = " AND c.criado_em >= ?" if reset_em else ""
     filtro_data_a = " AND a.criado_em >= ?" if reset_em else ""
