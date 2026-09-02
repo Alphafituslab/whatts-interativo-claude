@@ -5211,7 +5211,7 @@
 
        <div class="cartao">
          <h3 style="margin-top:0;">Desempenho por usuário</h3>
-         <p class="dica">Tempo de 1ª resposta: da chegada da conversa até a primeira resposta. Tempo de resposta: média entre cada mensagem do cliente e a resposta seguinte. Tempo de atendimento: duração média das conversas já fechadas. Avaliação: nota que o próprio cliente deu ao final do atendimento.</p>
+         <p class="dica">Tempo de 1ª resposta: da chegada da conversa até a primeira resposta. Tempo de resposta: tempo até responder cada mensagem do cliente. Tempo de atendimento: duração das conversas já fechadas. Os três usam a <strong>mediana</strong> (valor típico do dia a dia), não a média simples — assim uma conversa que ficou dias parada não distorce sozinha o número de todo mundo. Demoras: quantas respostas passaram de 10 minutos. Avaliação: nota que o próprio cliente deu ao final do atendimento.</p>
          <table>
            <thead><tr><th>Usuário</th><th>Conversas</th><th>Não lidas</th><th>Msgs enviadas</th><th>1ª resposta</th><th>Resposta média</th><th>Atendimento</th><th title="Respostas que passaram do limite de ${t.limite_demora_min} min">Demoras</th><th title="Conversas paradas agora, cliente esperando">Paradas agora</th><th>Avaliação</th></tr></thead>
            <tbody>${linhas}</tbody>

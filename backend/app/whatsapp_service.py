@@ -2500,6 +2500,25 @@ def _media(valores):
     return round(sum(valores) / len(valores), 1) if valores else None
 
 
+def _mediana(valores):
+    """Pedido do Clayton (2026-09-02): os tempos do Dashboard (1ª
+    resposta, resposta, atendimento) usam mediana em vez de média
+    simples -- uma conversa que ficou dias parada (dado real, acontece)
+    puxava a MÉDIA inteira pra cima sozinha, deixando o número pouco
+    representativo do dia a dia. A mediana ("valor do meio") não sofre
+    esse puxão de 1-2 casos extremos."""
+    if not valores:
+        return None
+    ordenados = sorted(valores)
+    n = len(ordenados)
+    meio = n // 2
+    if n % 2 == 1:
+        valor = ordenados[meio]
+    else:
+        valor = (ordenados[meio - 1] + ordenados[meio]) / 2
+    return round(valor, 1)
+
+
 def resetar_dashboard(conn, empresa_id: int):
     """Não apaga NADA — só marca a partir de quando os contadores do
     Dashboard voltam a contar (ver calcular_dashboard). As conversas e
@@ -2551,8 +2570,15 @@ def calcular_dashboard(conn, empresa_id: int):
             if c["status"] == "fechada" and c["fechada_em"]:
                 duracoes_atendimento.append(_diferenca_minutos(c["criado_em"], c["fechada_em"]))
 
+            # usuario_id junto: sem isso, mensagem automática do MENU/BOT
+            # (usuario_id NULL -- "Digite apenas o número correspondente",
+            # pesquisa de satisfação, "você foi direcionado para...")
+            # contava como se o atendente tivesse respondido na hora,
+            # derrubando o tempo de resposta pra quase zero sem ninguém
+            # ter respondido de verdade. Achado junto com o pedido do
+            # Clayton de conferir os números do Adrian (2026-09-02).
             msgs = conn.execute(
-                "SELECT direcao, criado_em FROM whatsapp_mensagens WHERE conversa_id = ? ORDER BY criado_em, id",
+                "SELECT direcao, criado_em, usuario_id FROM whatsapp_mensagens WHERE conversa_id = ? ORDER BY criado_em, id",
                 (c["id"],),
             ).fetchall()
             ja_registrou_primeira = False
@@ -2560,7 +2586,7 @@ def calcular_dashboard(conn, empresa_id: int):
                 if m["direcao"] != "entrada":
                     continue
                 for seguinte in msgs[i + 1:]:
-                    if seguinte["direcao"] == "saida":
+                    if seguinte["direcao"] == "saida" and seguinte["usuario_id"] == uid:
                         delta = _diferenca_minutos(m["criado_em"], seguinte["criado_em"])
                         tempos_resposta.append(delta)
                         if not ja_registrou_primeira:
@@ -2580,9 +2606,9 @@ def calcular_dashboard(conn, empresa_id: int):
             "conversas_fechadas": sum(1 for c in conversas if c["status"] == "fechada"),
             "nao_lidas_pendentes": sum(c["nao_lidas"] or 0 for c in conversas),
             "mensagens_enviadas": mensagens_enviadas,
-            "tempo_medio_primeira_resposta_min": _media(tempos_primeira_resposta),
-            "tempo_medio_resposta_min": _media(tempos_resposta),
-            "tempo_medio_atendimento_min": _media(duracoes_atendimento),
+            "tempo_medio_primeira_resposta_min": _mediana(tempos_primeira_resposta),
+            "tempo_medio_resposta_min": _mediana(tempos_resposta),
+            "tempo_medio_atendimento_min": _mediana(duracoes_atendimento),
             "media_avaliacao": _media(notas),
             "total_avaliacoes": len(notas),
             # Demora: quantas vezes deixou o cliente esperando mais que o
