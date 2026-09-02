@@ -4800,6 +4800,20 @@
                  </label>`).join("")}
              </div>
            </div>
+           <hr style="border:none; border-top:1px solid var(--borda); margin:16px 0;">
+           <p class="dica" style="margin-top:0;">Mais avisos (desligados até você ligar aqui):</p>
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="aviso_sla_ativo" ${config.aviso_sla_ativo ? "checked" : ""}>
+               Conversa parada sem resposta — avisar o responsável quando estourar o tempo combinado</label>
+           </div>
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="aviso_resumo_diario_ativo" ${config.aviso_resumo_diario_ativo ? "checked" : ""}>
+               Resumo diário pro administrador (atendimentos, atrasados, nota média)</label>
+           </div>
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="aviso_boasvindas_ativo" ${config.aviso_boasvindas_ativo ? "checked" : ""}>
+               Boas-vindas automáticas quando cadastrar um colaborador novo</label>
+           </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
@@ -7629,6 +7643,9 @@
             followup_dias_aviso_automatico: valorFollowup === "" ? null : Number(valorFollowup),
             aviso_fila_sem_escolha_ativo: !!dados.get("aviso_fila_sem_escolha_ativo"),
             aviso_fila_sem_escolha_setores: dados.getAll("aviso_fila_sem_escolha_setores"),
+            aviso_sla_ativo: !!dados.get("aviso_sla_ativo"),
+            aviso_resumo_diario_ativo: !!dados.get("aviso_resumo_diario_ativo"),
+            aviso_boasvindas_ativo: !!dados.get("aviso_boasvindas_ativo"),
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");

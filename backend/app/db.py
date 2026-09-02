@@ -72,6 +72,7 @@ SCHEMA_FILES = [
     "schema_057_followup_aviso_automatico.sql",
     "schema_058_usuario_sistema.sql",
     "schema_059_setores_aviso_fila.sql",
+    "schema_060_mais_avisos_automaticos.sql",
 ]
 
 

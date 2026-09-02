@@ -207,6 +207,7 @@ def criar():
          _now_iso(), g.empresa_id, 1 if (admin or dados.get("acesso_conversas", True)) else 0),
     )
     whatsapp_service.definir_setores_do_usuario(conn, cur.lastrowid, setores)
+    whatsapp_service.avisar_boasvindas_se_ativo(conn, g.empresa_id, cur.lastrowid, nome)
     usuario = conn.execute("SELECT * FROM usuarios WHERE id = ?", (cur.lastrowid,)).fetchone()
     return jsonify(_publico(usuario, setores)), 201
 
