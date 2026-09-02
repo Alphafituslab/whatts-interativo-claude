@@ -212,6 +212,7 @@ def obter_configuracao(conn, empresa_id: int):
             "aviso_fila_sem_escolha_setores": None,
             "aviso_sla_ativo": 0, "aviso_resumo_diario_ativo": 0, "ultimo_resumo_diario_em": None,
             "aviso_boasvindas_ativo": 0,
+            "aviso_conversa_parada_ativo": 0, "aviso_conversa_parada_horas": 24, "aviso_conversa_parada_minutos_fechar": 10,
         }
     return dict(row)
 
@@ -233,6 +234,7 @@ def config_publica(config):
     d["aviso_sla_ativo"] = bool(d.get("aviso_sla_ativo"))
     d["aviso_resumo_diario_ativo"] = bool(d.get("aviso_resumo_diario_ativo"))
     d["aviso_boasvindas_ativo"] = bool(d.get("aviso_boasvindas_ativo"))
+    d["aviso_conversa_parada_ativo"] = bool(d.get("aviso_conversa_parada_ativo"))
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -355,6 +357,23 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     aviso_sla_ativo = (1 if dados.get("aviso_sla_ativo") else 0) if "aviso_sla_ativo" in dados else (1 if anterior.get("aviso_sla_ativo") else 0)
     aviso_resumo_diario_ativo = (1 if dados.get("aviso_resumo_diario_ativo") else 0) if "aviso_resumo_diario_ativo" in dados else (1 if anterior.get("aviso_resumo_diario_ativo") else 0)
     aviso_boasvindas_ativo = (1 if dados.get("aviso_boasvindas_ativo") else 0) if "aviso_boasvindas_ativo" in dados else (1 if anterior.get("aviso_boasvindas_ativo") else 0)
+    # Aviso de conversa parada esperando o CLIENTE (o "pior atendimento"
+    # de 167h que o Clayton viu no dashboard era exatamente isso: ninguém
+    # fechava a conversa depois que o cliente sumia). Depois de X horas
+    # sem resposta avisa o responsável; se não interagir em Y minutos,
+    # fecha sozinha.
+    aviso_conversa_parada_ativo = (
+        (1 if dados.get("aviso_conversa_parada_ativo") else 0) if "aviso_conversa_parada_ativo" in dados
+        else (1 if anterior.get("aviso_conversa_parada_ativo") else 0)
+    )
+    if dados.get("aviso_conversa_parada_horas") not in (None, ""):
+        aviso_conversa_parada_horas = max(1, int(dados["aviso_conversa_parada_horas"]))
+    else:
+        aviso_conversa_parada_horas = anterior.get("aviso_conversa_parada_horas") or 24
+    if dados.get("aviso_conversa_parada_minutos_fechar") not in (None, ""):
+        aviso_conversa_parada_minutos_fechar = max(1, int(dados["aviso_conversa_parada_minutos_fechar"]))
+    else:
+        aviso_conversa_parada_minutos_fechar = anterior.get("aviso_conversa_parada_minutos_fechar") or 10
 
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
@@ -379,8 +398,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
                                               localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
                                               followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
-                                              aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
+                                              aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -409,6 +429,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             aviso_sla_ativo = excluded.aviso_sla_ativo,
             aviso_resumo_diario_ativo = excluded.aviso_resumo_diario_ativo,
             aviso_boasvindas_ativo = excluded.aviso_boasvindas_ativo,
+            aviso_conversa_parada_ativo = excluded.aviso_conversa_parada_ativo,
+            aviso_conversa_parada_horas = excluded.aviso_conversa_parada_horas,
+            aviso_conversa_parada_minutos_fechar = excluded.aviso_conversa_parada_minutos_fechar,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -418,7 +441,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
          localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
          followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
-         aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo),
+         aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
+         aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -3139,6 +3163,126 @@ def avisar_sla_estourado_se_preciso(conn):
             )
             avisados += 1
     return avisados
+
+
+def manter_usuarios_sistema_online(conn):
+    """Chamado a cada volta do agendador (30s). O 'Assistente Seja Alpha'
+    nunca faz login de verdade pelo navegador, então usuarios.ultimo_acesso
+    nunca era atualizado e ele aparecia sempre 'Indisponível (offline)' na
+    tela de usuários -- o Clayton estranhou, achando que o monitoramento
+    tinha parado. Na real o agendador roda 24/7 independente disso; isso
+    aqui só faz o status refletir isso: enquanto o agendador estiver vivo,
+    o usuário sistema aparece online (e se o agendador cair de verdade,
+    ele volta a aparecer offline depois de alguns minutos -- sinal real,
+    não só cosmético)."""
+    agora = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    conn.execute(
+        "UPDATE usuarios SET ultimo_acesso = ? "
+        "WHERE id IN (SELECT usuario_sistema_id FROM configuracoes_whatsapp WHERE usuario_sistema_id IS NOT NULL)",
+        (agora,),
+    )
+
+
+def avisar_conversa_parada_se_preciso(conn):
+    """Chamado periodicamente pelo agendador. O contrário do SLA: aqui é
+    o AGENTE que já respondeu e está esperando o CLIENTE, e o cliente
+    simplesmente some -- sem ninguém fechar, a conversa fica "aberta"
+    por dias, distorcendo métricas como o "pior atendimento" do
+    dashboard (foi assim que o Clayton achou esse problema, olhando um
+    atendimento de 167h que na real durou uns 35min de conversa real).
+
+    Duas fases, cada empresa com seu prazo configurável em Configuração:
+    1) Passou de aviso_conversa_parada_horas sem resposta do cliente ->
+       avisa o responsável no chat interno, e marca
+       aviso_fechamento_automatico_em (pra saber quando o prazo de
+       fechamento automático vence).
+    2) Passou de aviso_conversa_parada_minutos_fechar desde o aviso, e
+       ninguém mexeu na conversa nesse meio tempo (nem cliente, nem
+       agente) -> fecha sozinha.
+    """
+    from . import chat_interno_service, followup_service
+    empresas = conn.execute(
+        "SELECT empresa_id, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar "
+        "FROM configuracoes_whatsapp WHERE aviso_conversa_parada_ativo = 1"
+    ).fetchall()
+    if not empresas:
+        return 0
+    agora = datetime.datetime.utcnow()
+    total = 0
+    for emp in empresas:
+        empresa_id = emp["empresa_id"]
+        horas = emp["aviso_conversa_parada_horas"] or 24
+        minutos_fechar = emp["aviso_conversa_parada_minutos_fechar"] or 10
+
+        # --- fase 0: se cliente ou agente mexeu DEPOIS do aviso, cancela
+        # o fechamento e libera pra avisar de novo se ficar parada outra
+        # vez no futuro (senão o aviso_fechamento_automatico_em antigo
+        # trava o campo pra sempre e nunca mais avisa essa conversa) ---
+        conn.execute(
+            "UPDATE whatsapp_conversas SET aviso_fechamento_automatico_em = NULL "
+            "WHERE id IN (SELECT c.id FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE ct.empresa_id = ? AND c.aviso_fechamento_automatico_em IS NOT NULL "
+            "AND c.ultima_mensagem_em IS NOT NULL AND c.ultima_mensagem_em > c.aviso_fechamento_automatico_em)",
+            (empresa_id,),
+        )
+
+        # --- fase 2: fecha quem já passou do prazo de aviso ---
+        limite_fechar = (agora - datetime.timedelta(minutes=minutos_fechar)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        paradas_pra_fechar = conn.execute(
+            "SELECT c.id FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE ct.empresa_id = ? AND c.status = 'aberta' "
+            "AND c.aviso_fechamento_automatico_em IS NOT NULL "
+            "AND c.aviso_fechamento_automatico_em <= ? "
+            # se cliente ou agente mexeu DEPOIS do aviso, cancela o fechamento
+            "AND (c.ultima_mensagem_em IS NULL OR c.ultima_mensagem_em <= c.aviso_fechamento_automatico_em)",
+            (empresa_id, limite_fechar),
+        ).fetchall()
+        for c in paradas_pra_fechar:
+            fechar_conversa(conn, c["id"])
+            total += 1
+
+        # --- fase 1: avisa quem ainda não foi avisado ---
+        remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
+        if remetente_id is None:
+            continue
+        limite_aviso = (agora - datetime.timedelta(hours=horas)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        paradas = conn.execute(
+            "SELECT c.id, c.atribuida_usuario_id, ct.nome AS contato_nome, ct.telefone FROM whatsapp_conversas c "
+            "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+            "WHERE ct.empresa_id = ? AND c.status = 'aberta' AND ct.eh_grupo = 0 "
+            "AND c.excluida_em IS NULL AND c.arquivada = 0 "
+            "AND c.atribuida_usuario_id IS NOT NULL "
+            "AND c.aviso_fechamento_automatico_em IS NULL "
+            "AND c.ultima_msg_operador_em IS NOT NULL "
+            "AND (c.ultima_msg_cliente_em IS NULL OR c.ultima_msg_operador_em > c.ultima_msg_cliente_em) "
+            "AND c.ultima_msg_operador_em <= ?",
+            (empresa_id, limite_aviso),
+        ).fetchall()
+        for c in paradas:
+            if c["atribuida_usuario_id"] == remetente_id:
+                continue
+            participante = conn.execute(
+                "SELECT id, setor FROM usuarios WHERE id = ? AND ativo = 1", (c["atribuida_usuario_id"],)
+            ).fetchone()
+            if participante is None:
+                continue
+            texto = (
+                "⚠️ A conversa com *" + str(c["contato_nome"] or c["telefone"]) + "* está parada há mais de " +
+                str(horas) + "h sem resposta do cliente. Se não houver interação nos próximos " +
+                str(minutos_fechar) + " minutos, ela será encerrada automaticamente."
+            )
+            conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, participante["id"])
+            if conversa_interna_id:
+                chat_interno_service.reabrir_conversa(conn, conversa_interna_id)
+                chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
+            else:
+                chat_interno_service.iniciar_conversa(conn, remetente_id, participante["id"], participante["setor"], texto)
+            conn.execute(
+                "UPDATE whatsapp_conversas SET aviso_fechamento_automatico_em = ? WHERE id = ?",
+                (agora.strftime("%Y-%m-%dT%H:%M:%S.%fZ"), c["id"]),
+            )
+            total += 1
+    return total
 
 
 def enviar_resumo_diario_se_preciso(conn):

@@ -4836,6 +4836,21 @@
              <label><input type="checkbox" name="aviso_boasvindas_ativo" ${config.aviso_boasvindas_ativo ? "checked" : ""}>
                Boas-vindas automáticas quando cadastrar um colaborador novo</label>
            </div>
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="aviso_conversa_parada_ativo" ${config.aviso_conversa_parada_ativo ? "checked" : ""}>
+               Cliente sumiu — avisar o responsável e encerrar sozinha se ninguém mexer</label>
+             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">Quando o agente já respondeu e o cliente para de responder, a conversa fica "aberta" pra sempre até alguém fechar — o que distorce até o "pior atendimento" do Dashboard. Ativando isso: depois de X horas sem resposta do cliente, avisa o responsável; se não houver interação em Y minutos, encerra sozinha.</p>
+           </div>
+           <div style="display:flex; gap:16px; flex-wrap:wrap;">
+             <div class="campo" style="max-width:220px;">
+               <label>Avisar depois de quantas horas sem resposta do cliente</label>
+               <input type="number" name="aviso_conversa_parada_horas" min="1" max="720" value="${config.aviso_conversa_parada_horas ?? 24}">
+             </div>
+             <div class="campo" style="max-width:220px;">
+               <label>Encerrar sozinha X minutos depois do aviso</label>
+               <input type="number" name="aviso_conversa_parada_minutos_fechar" min="1" max="1440" value="${config.aviso_conversa_parada_minutos_fechar ?? 10}">
+             </div>
+           </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
@@ -7665,6 +7680,9 @@
             aviso_sla_ativo: !!dados.get("aviso_sla_ativo"),
             aviso_resumo_diario_ativo: !!dados.get("aviso_resumo_diario_ativo"),
             aviso_boasvindas_ativo: !!dados.get("aviso_boasvindas_ativo"),
+            aviso_conversa_parada_ativo: !!dados.get("aviso_conversa_parada_ativo"),
+            aviso_conversa_parada_horas: Number(dados.get("aviso_conversa_parada_horas")) || 24,
+            aviso_conversa_parada_minutos_fechar: Number(dados.get("aviso_conversa_parada_minutos_fechar")) || 10,
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");
