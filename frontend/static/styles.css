@@ -412,6 +412,14 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
   padding: 10px 14px; border-bottom: 1px solid var(--borda);
   flex-shrink: 0; flex-wrap: wrap;
 }
+/* Faixa quieta explicando por que o sistema encerrou sozinho -- sem
+   pulso, sem popup: é informação de contexto, não um alerta pra agir
+   AGORA (o botão "Reabrir" já está logo ali no cabeçalho, embaixo). */
+.wpp-aviso-fechamento-auto {
+  background: color-mix(in srgb, var(--amarelo) 14%, var(--superficie));
+  color: var(--texto); border-bottom: 1px solid color-mix(in srgb, var(--amarelo) 35%, transparent);
+  padding: 7px 14px; font-size: 12.5px; flex-shrink: 0;
+}
 .wpp-chat-identidade { flex: 1 1 210px; min-width: 0; }
 /* Nome sempre numa linha só: quebrar "Clayton Borges" em duas empurrava
    o telefone pra debaixo dos ícones. Nome comprido corta com reticências

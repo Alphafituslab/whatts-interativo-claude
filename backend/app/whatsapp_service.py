@@ -2418,7 +2418,7 @@ TEXTO_PESQUISA_SATISFACAO = (
 MINUTOS_COOLDOWN_PESQUISA = 60
 
 
-def fechar_conversa(conn, conversa_id: int, resultado: str = None):
+def fechar_conversa(conn, conversa_id: int, resultado: str = None, motivo: str = None):
     """Fecha a conversa e dispara a pesquisa de satisfação pro cliente —
     melhor esforço: se o envio falhar (ex.: WhatsApp desconectado), a
     conversa fecha do mesmo jeito, só a mensagem da pesquisa fica
@@ -2431,7 +2431,15 @@ def fechar_conversa(conn, conversa_id: int, resultado: str = None):
     "como foi o atendimento" toda vez.
 
     resultado: 'venda' | 'perdido' | None (não informado) — usado pro
-    dashboard calcular taxa de conversão por região/setor/usuário."""
+    dashboard calcular taxa de conversão por região/setor/usuário.
+
+    motivo: None quando é um humano fechando na tela (é o normal e não
+    precisa de rótulo). Passe um código tipo 'auto_sem_resposta_cliente'
+    quando quem está fechando é uma rotina automática -- fica gravado em
+    motivo_finalizacao pra tela poder mostrar "🤖 Encerrada
+    automaticamente" e o usuário conseguir achar e reabrir se precisar
+    (pedido do Clayton, 2026-09-02, depois do caso do "pior atendimento"
+    de 167h)."""
     agora = _now_iso()
     conversa = conn.execute(
         "SELECT c.*, ct.telefone, ct.empresa_id FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE c.id = ?",
@@ -2453,14 +2461,14 @@ def fechar_conversa(conn, conversa_id: int, resultado: str = None):
     # precisa começar do zero, não continuar de onde parou.
     if pesquisa_recente:
         conn.execute(
-            "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, resultado = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
-            (agora, resultado, conversa_id),
+            "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, resultado = ?, motivo_finalizacao = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
+            (agora, resultado, motivo, conversa_id),
         )
         return
 
     conn.execute(
-        "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, aguardando_avaliacao = 1, resultado = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
-        (agora, resultado, conversa_id),
+        "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, aguardando_avaliacao = 1, resultado = ?, motivo_finalizacao = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
+        (agora, resultado, motivo, conversa_id),
     )
     # Grupo não recebe pesquisa: a pergunta é sobre UM atendimento a UMA
     # pessoa, e num grupo ela chega pra todo mundo — sem falar que a
@@ -3238,7 +3246,7 @@ def avisar_conversa_parada_se_preciso(conn):
             (empresa_id, limite_fechar),
         ).fetchall()
         for c in paradas_pra_fechar:
-            fechar_conversa(conn, c["id"])
+            fechar_conversa(conn, c["id"], motivo="auto_sem_resposta_cliente")
             total += 1
 
         # --- fase 1: avisa quem ainda não foi avisado ---
@@ -3625,7 +3633,7 @@ def encerrar_conversas_paradas(conn):
         (limite,),
     ).fetchall()
     for r in rows:
-        fechar_conversa(conn, r["id"])
+        fechar_conversa(conn, r["id"], motivo="auto_30_dias_parada")
 
 
 def _iniciar_retomar_atendimento(conn, empresa_id: int, conversa_id: int, telefone: str, atendente):

@@ -2710,7 +2710,11 @@
             } else if (state.escopoConversas === "todas" && c.atribuida_usuario_nome) {
               partes.push(`<span class="wpp-mini-bolinha ${c.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${c.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> ${escapeHtml(c.atribuida_usuario_nome)}`);
             }
-            if (c.status === "fechada") partes.push('<span class="selo inativo">Fechada</span>');
+            if (c.status === "fechada") {
+              partes.push((c.motivo_finalizacao || "").startsWith("auto_")
+                ? '<span class="selo inativo" title="O sistema encerrou sozinho -- veja o motivo abrindo a conversa">🤖 Encerrada automaticamente</span>'
+                : '<span class="selo inativo">Fechada</span>');
+            }
             // Só o admin usa isso pra saber de quem cobrar/perguntar --
             // faz sentido só na aba Arquivadas (é onde arquivada_por_nome
             // vem preenchido; nas outras abas o campo nem é buscado).
@@ -3176,7 +3180,13 @@
     const souDono = conversa.atribuida_usuario_id === usuario.id;
     const emSupervisao = usuario.admin && !souDono && conversa.atribuida_usuario_id;
     const fechada = conversa.status === "fechada";
+    const motivosAuto = {
+      auto_sem_resposta_cliente: "🤖 O sistema encerrou sozinho porque o cliente ficou muito tempo sem responder.",
+      auto_30_dias_parada: "🤖 O sistema encerrou sozinho porque a conversa ficou 30 dias sem nenhum movimento.",
+    };
+    const avisoFechamentoAuto = fechada && motivosAuto[conversa.motivo_finalizacao];
     return `
+      ${avisoFechamentoAuto ? `<div class="wpp-aviso-fechamento-auto">${avisoFechamentoAuto} Se não for o caso, é só clicar em "Reabrir".</div>` : ""}
       <div class="wpp-chat-cabecalho">
         <button type="button" class="botao-icone wpp-botao-voltar" data-acao="voltar-lista" title="Voltar">←</button>
         <span style="position:relative;">
