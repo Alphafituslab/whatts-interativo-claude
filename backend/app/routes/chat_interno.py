@@ -25,17 +25,32 @@ bp = Blueprint("chat_interno", __name__, url_prefix="/api/v1/chat-interno")
 
 
 def _pode_ver(usuario, conversa):
-    """Só as duas pessoas da conversa. Nem administrador.
+    """INTERAGIR (mandar mensagem, marcar, encaminhar, fechar, etiquetar,
+    transcrever...) — só as duas pessoas da conversa. Nem administrador.
 
     Era "os dois participantes OU qualquer admin", e a tela prometia
     privacidade que não existia. Numa conversa de cliente a supervisão
     faz sentido: é trabalho da empresa, e alguém precisa poder assumir.
     Numa conversa entre dois colegas, não — e uma promessa de privacidade
     ou vale sempre ou não vale nada.
+
+    Pedido do Clayton (2026-09-02): quer poder VER (só ler, sem poder
+    responder nem mexer em nada) qualquer conversa pela aba "Todas" --
+    ver _pode_visualizar, abaixo, que é quem cobre esse caso.
     """
     if conversa["empresa_id"] != usuario["empresa_id"]:
         return False
     return usuario["id"] in (conversa["criado_por_id"], conversa["participante_id"])
+
+
+def _pode_visualizar(usuario, conversa):
+    """LER as mensagens (sem poder interagir) — os dois participantes,
+    OU o admin espiando pela aba "Todas". Usado só pela rota que lista
+    as mensagens (GET); toda ação que muda alguma coisa continua exigindo
+    _pode_ver (participante de verdade)."""
+    if usuario["admin"] and conversa["empresa_id"] == usuario["empresa_id"]:
+        return True
+    return _pode_ver(usuario, conversa)
 
 
 def _carregar(conn, empresa_id, conversa_id):
@@ -102,7 +117,7 @@ def listar_mensagens(conversa_id):
     usuario = g.usuario_atual
     conn = get_db()
     conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
-    if not _pode_ver(usuario, conversa):
+    if not _pode_visualizar(usuario, conversa):
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
     if conversa["criado_por_id"] == usuario["id"]:
         lado = "criador"

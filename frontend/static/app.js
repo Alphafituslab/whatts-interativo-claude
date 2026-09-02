@@ -3842,9 +3842,9 @@
       ${m.texto ? `<div class="wpp-bolha-texto">${textoComTelefones(m.texto)}</div>` : ""}
       ${m.reacao ? `<span class="wpp-reacao" title="Reagiu${m.reacao_por_nome ? ": " + escapeHtml(m.reacao_por_nome) : ""}${m.reacao_em ? " em " + fmtData(m.reacao_em) : ""}">${escapeHtml(m.reacao)}</span>` : ""}
       <div class="wpp-bolha-rodape">
-        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="abrir-reacao" data-id="${m.id}" data-interna="1" title="Reagir a esta mensagem">😊</button>` : ""}
-        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="1" title="Responder citando esta mensagem">↩️</button>` : ""}
-        ${!m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="encaminhar-mensagem" data-id="${m.id}" data-interna="1" title="Encaminhar para clientes ou colegas">📨</button>` : ""}
+        ${!m.excluida_em && !souAlheio ? `<button type="button" class="wpp-bolha-excluir" data-acao="abrir-reacao" data-id="${m.id}" data-interna="1" title="Reagir a esta mensagem">😊</button>` : ""}
+        ${!m.excluida_em && !souAlheio ? `<button type="button" class="wpp-bolha-excluir" data-acao="citar-mensagem" data-id="${m.id}" data-interna="1" title="Responder citando esta mensagem">↩️</button>` : ""}
+        ${!m.excluida_em && !souAlheio ? `<button type="button" class="wpp-bolha-excluir" data-acao="encaminhar-mensagem" data-id="${m.id}" data-interna="1" title="Encaminhar para clientes ou colegas">📨</button>` : ""}
         ${m.usuario_id === eu && !m.excluida_em && (m.tipo || "texto") === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
         ${htmlEditada(m)}
         ${m.usuario_id === eu && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem-interna" data-id="${m.id}" data-conversa-id="${conversa.id}" title="Apagar (mandei por engano)">🗑️</button>` : ""}
@@ -3884,22 +3884,24 @@
           </div>
         </div>
         <div class="wpp-chat-acoes">
+          ${souAlheio ? "" : `
           <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
           <button type="button" class="botao-icone" data-acao="abrir-agendar-interno" data-id="${conversa.id}" title="Agendar mensagem pro colega">🕒</button>
-          ${!souAlheio ? `<button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" data-nome="${escapeHtml(outroNome)}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>` : ""}
+          <button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" data-nome="${escapeHtml(outroNome)}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar-interno" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-interno" data-id="${conversa.id}">Reabrir</button>`
-            : `<button type="button" class="botao secundario pequeno" data-acao="fechar-interno" data-id="${conversa.id}">Encerrar atendimento</button>`}
+            : `<button type="button" class="botao secundario pequeno" data-acao="fechar-interno" data-id="${conversa.id}">Encerrar atendimento</button>`}`}
         </div>
       </div>
       <div class="wpp-tags-linha">
-        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="1" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="1" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button></span>`).join("")}
-        <button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>
+        ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="1" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}${souAlheio ? "" : `<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="1" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button>`}</span>`).join("")}
+        ${souAlheio ? "" : `<button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>`}
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens-interno data-conversa-id="${conversa.id}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa)).join("")}</div>
       <div data-wpp-citando></div>
+      ${souAlheio ? `<p class="wpp-conversa-fechada-aviso">👁️ Você está só visualizando esta conversa (supervisão) — não é possível responder nem interagir aqui.</p>` : `
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
         <input type="file" class="wpp-input-arquivo-oculto" data-acao-change="anexar-arquivo-interno" data-conversa-id="${conversa.id}" multiple hidden>
         <div class="wpp-emoji-envolucro" data-wpp-catalogo-envolucro-interno hidden>
@@ -3918,7 +3920,7 @@
         <button type="button" class="botao-icone" data-acao="alternar-gravacao-audio-interno" data-id="${conversa.id}" title="Gravar áudio">🎙️</button>
         <button type="button" class="botao-icone" data-acao="gravar-video-interno" data-id="${conversa.id}" title="Gravar vídeo pela câmera">🎥</button>
         <button type="submit" class="botao wpp-botao-enviar" title="Enviar">➤</button>
-      </form>`;
+      </form>`}`;
   }
 
   // Trocar de conversa/tela descarta a citação pendente — citar algo numa
