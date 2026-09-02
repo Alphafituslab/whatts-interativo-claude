@@ -2774,7 +2774,13 @@
         <a class="wpp-bolha-baixar wpp-bolha-baixar-audio" href="${urlImagemSegura(m.midia_url)}" download title="Baixar áudio">⬇</a>
       </div>
       ${htmlTranscricao(m)}`;
-    const rotulo = { documento: "📄 Documento" }[m.tipo] || "📎 Anexo";
+    // Nome de verdade do arquivo em vez do rótulo genérico -- pedido do
+    // Clayton: quem recebe precisa saber o que é o documento sem
+    // precisar abrir. Sem nome guardado (mensagem antiga), cai pro
+    // rótulo genérico de sempre.
+    const rotulo = m.nome_arquivo
+      ? `📄 ${m.nome_arquivo}`
+      : ({ documento: "📄 Documento" }[m.tipo] || "📎 Anexo");
     const extensao = ((m.midia_url || "").split("?")[0].split(".").pop() || "").toLowerCase();
     // PDF e imagens abrem na hora, sem baixar. Os outros formatos o
     // navegador não sabe exibir, então ali "abrir" é baixar mesmo — e é

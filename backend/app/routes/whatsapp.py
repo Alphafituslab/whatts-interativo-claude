@@ -1741,6 +1741,11 @@ def _encaminhar_para_clientes(conn, usuario, destinos_conversas, telefones, mens
     tipo = mensagem.get("tipo") or "texto"
     legenda = mensagem.get("texto") or None
     midia_url = mensagem.get("midia_url")
+    # Nome de verdade do arquivo, não o hex aleatório salvo em disco --
+    # pedido do Clayton: cliente tem que saber o que é o documento que
+    # chegou. Mensagem antiga de antes desta coluna existir cai pro nome
+    # do arquivo em disco mesmo (não tem como recuperar o original).
+    nome_arquivo_origem = mensagem.get("nome_arquivo") or ((midia_url or "").rsplit("/", 1)[-1] or None)
     resultados = []
 
     for destino_id in dict.fromkeys(destinos_conversas):   # sem repetir destino
@@ -1777,12 +1782,11 @@ def _encaminhar_para_clientes(conn, usuario, destinos_conversas, telefones, mens
         try:
             if midia_url:
                 url_completa = whatsapp_service.url_publica(config, midia_url)
-                nome_arquivo = midia_url.rsplit("/", 1)[-1]
                 if tipo == "figurinha":
                     externo_id = whatsapp_service.enviar_figurinha(config, destino["telefone"], url_completa)
                 else:
                     externo_id = whatsapp_service.enviar_midia(
-                        config, destino["telefone"], tipo, url_completa, nome_arquivo, legenda)
+                        config, destino["telefone"], tipo, url_completa, nome_arquivo_origem, legenda)
             else:
                 if not legenda:
                     resultados.append({"conversa_id": destino_id, "ok": False, "motivo": "Mensagem vazia."})
@@ -1794,12 +1798,12 @@ def _encaminhar_para_clientes(conn, usuario, destinos_conversas, telefones, mens
 
         conn.execute(
             """
-            INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id,
+            INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, nome_arquivo, externo_id,
                                             usuario_id, status, erro, criado_em, encaminhada_de)
-            VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (destino_id, tipo if tipo != "texto" or not midia_url else "documento",
-             legenda, midia_url, externo_id, usuario["id"], status_msg, erro, agora, origem_id),
+             legenda, midia_url, nome_arquivo_origem, externo_id, usuario["id"], status_msg, erro, agora, origem_id),
         )
         preview = legenda or PREVIEW_POR_TIPO.get(tipo, "Mensagem")
         conn.execute(
@@ -3430,10 +3434,10 @@ def enviar_anexo(conversa_id):
 
     cur = conn.execute(
         """
-        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, usuario_id, status, erro, criado_em)
-        VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, nome_arquivo, externo_id, usuario_id, status, erro, criado_em)
+        VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (conversa_id, tipo, legenda, midia_url, externo_id, usuario["id"], status_msg, erro, agora),
+        (conversa_id, tipo, legenda, midia_url, arquivo.filename, externo_id, usuario["id"], status_msg, erro, agora),
     )
     conn.execute(
         "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "

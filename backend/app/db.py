@@ -74,6 +74,7 @@ SCHEMA_FILES = [
     "schema_059_setores_aviso_fila.sql",
     "schema_060_mais_avisos_automaticos.sql",
     "schema_061_fechar_chat_interno_por_pessoa.sql",
+    "schema_062_nome_arquivo_whatsapp.sql",
 ]
 
 

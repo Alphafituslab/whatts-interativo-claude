@@ -1653,7 +1653,10 @@ def reenviar_mensagem(conn, config, mensagem: dict) -> bool:
             externo_id = enviar_texto(config, conversa["telefone"], mensagem["texto"] or "")
         else:
             url_completa = url_publica(config, mensagem["midia_url"])
-            nome_arquivo = mensagem["midia_url"].rsplit("/", 1)[-1].split("_", 1)[-1]
+            # Prefere o nome de verdade guardado na mensagem; mensagem
+            # antiga (de antes desta coluna existir) cai pro nome do
+            # arquivo em disco, sem o prefixo hex aleatório.
+            nome_arquivo = mensagem.get("nome_arquivo") or mensagem["midia_url"].rsplit("/", 1)[-1].split("_", 1)[-1]
             externo_id = enviar_midia(config, conversa["telefone"], mensagem["tipo"], url_completa, nome_arquivo, mensagem["texto"] or None)
         conn.execute("UPDATE whatsapp_mensagens SET status = 'enviada', erro = NULL, externo_id = ? WHERE id = ?", (externo_id, mensagem["id"]))
         return True
