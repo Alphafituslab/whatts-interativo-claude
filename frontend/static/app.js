@@ -5139,7 +5139,7 @@
         <td>${u.mensagens_enviadas}</td>
         <td>${fmtMinutos(u.tempo_medio_primeira_resposta_min)}</td>
         <td>${fmtMinutos(u.tempo_medio_resposta_min)}</td>
-        <td>${fmtMinutos(u.tempo_medio_atendimento_min)}</td>
+        <td>${fmtMinutos(u.pior_atendimento_min)}</td>
         <td>${u.paradas_agora > 0 ? `<span class="selo bloqueado piscando">${u.paradas_agora}</span>` : "—"}</td>
         <td>${htmlEstrelas(u.media_avaliacao)}${u.total_avaliacoes ? ` <span class="texto-suave">(${u.total_avaliacoes})</span>` : ""}</td>
       </tr>`).join("");
@@ -5208,9 +5208,9 @@
 
        <div class="cartao">
          <h3 style="margin-top:0;">Desempenho por usuário</h3>
-         <p class="dica">Tempo de 1ª resposta: da chegada da conversa até a primeira resposta. Tempo de resposta: tempo até responder cada mensagem do cliente. Tempo de atendimento: duração das conversas já fechadas. Os três usam a <strong>mediana</strong> (valor típico do dia a dia), não a média simples — assim uma conversa que ficou dias parada não distorce sozinha o número de todo mundo. Avaliação: nota que o próprio cliente deu ao final do atendimento.</p>
+         <p class="dica">Tempo de 1ª resposta: da chegada da conversa até a primeira resposta. Tempo de resposta: tempo até responder cada mensagem do cliente. Pior atendimento: a conversa fechada que demorou mais (não é média) -- pra você ver o pior caso de cada um. Os três usam a <strong>mediana</strong> (valor típico do dia a dia), não a média simples — assim uma conversa que ficou dias parada não distorce sozinha o número de todo mundo. Avaliação: nota que o próprio cliente deu ao final do atendimento.</p>
          <table>
-           <thead><tr><th>Usuário</th><th>Conversas</th><th>Não lidas</th><th>Msgs enviadas</th><th>1ª resposta</th><th>Resposta média</th><th>Atendimento</th><th title="Conversas paradas agora, cliente esperando">Paradas agora</th><th>Avaliação</th></tr></thead>
+           <thead><tr><th>Usuário</th><th>Conversas</th><th>Não lidas</th><th>Msgs enviadas</th><th>1ª resposta</th><th>Resposta média</th><th title="Atendimento mais demorado (pior caso, não é média)">Pior atendimento</th><th title="Conversas paradas agora, cliente esperando">Paradas agora</th><th>Avaliação</th></tr></thead>
            <tbody>${linhas}</tbody>
          </table>
        </div>

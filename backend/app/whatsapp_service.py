@@ -2617,6 +2617,10 @@ def calcular_dashboard(conn, empresa_id: int):
             "total_respostas": len(tempos_resposta),
             "paradas_agora": paradas_por_usuario.get(uid, 0),
             "pior_demora_min": max(tempos_resposta) if tempos_resposta else None,
+            # Pedido do Clayton (2026-09-02): na coluna "Atendimento" da
+            # tabela ele quer ver o PIOR caso, não a média/mediana -- é o
+            # que mostra o atendimento mais demorado de cada um.
+            "pior_atendimento_min": max(duracoes_atendimento) if duracoes_atendimento else None,
         })
 
     # Ranking de negociações fechadas — o "controle total" que o admin
