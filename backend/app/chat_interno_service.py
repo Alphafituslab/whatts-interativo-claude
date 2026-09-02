@@ -96,7 +96,11 @@ def enviar_mensagem(conn, conversa_id: int, usuario_id: int, texto: str, tipo="t
     _atualizar_preview(conn, conversa_id, texto if tipo == "texto" else {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento", "audio": "🎵 Áudio"}.get(tipo, "📎 Anexo"), agora)
     # Quem mandou não soma não-lida pra si mesmo — só pro outro lado.
     campo = "nao_lidas_participante" if usuario_id == conversa["criado_por_id"] else "nao_lidas_criador"
-    conn.execute(f"UPDATE chat_interno_conversas SET status = 'aberta', fechada_em = NULL, {campo} = {campo} + 1 WHERE id = ?", (conversa_id,))
+    conn.execute(
+        f"UPDATE chat_interno_conversas SET status = 'aberta', fechada_em = NULL, "
+        f"fechada_para_criador_em = NULL, fechada_para_participante_em = NULL, {campo} = {campo} + 1 WHERE id = ?",
+        (conversa_id,),
+    )
 
 
 def obter_apelidos(conn, usuario_id: int):
@@ -201,13 +205,24 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
     empresa_id_admin: só um admin deveria pedir isso — em vez de filtrar
     por quem participa, mostra TODAS as conversas da empresa (mesma
     régua de supervisão de 'escopo=todas' nas conversas de clientes)."""
-    condicao_status = "c.status = 'fechada'" if incluir_encerradas else "c.status = 'aberta'"
     if empresa_id_admin is not None:
+        # Supervisão: usa o status geral (fechada só quando os DOIS
+        # lados já encerraram) -- não faz sentido escopar por "usuário
+        # que está pedindo" quando quem pede é o admin olhando de fora.
+        condicao_status = "c.status = 'fechada'" if incluir_encerradas else "c.status = 'aberta'"
         condicao_dono = "uc.empresa_id = ?"
         params = (empresa_id_admin,)
     else:
+        # Cada lado fecha só pra si (ver fechar_conversa/reabrir_conversa)
+        # -- olha a coluna certa dependendo de qual dos dois é quem está
+        # pedindo a lista.
+        comparacao = "IS NOT NULL" if incluir_encerradas else "IS NULL"
+        condicao_status = (
+            f"((c.criado_por_id = ? AND c.fechada_para_criador_em {comparacao}) OR "
+            f"(c.participante_id = ? AND c.fechada_para_participante_em {comparacao}))"
+        )
         condicao_dono = "(c.criado_por_id = ? OR c.participante_id = ?)"
-        params = (usuario_id, usuario_id)
+        params = (usuario_id, usuario_id, usuario_id, usuario_id)
     # Filtro por etiqueta, opcional — vale junto com a aba escolhida.
     condicao_tag = ""
     if tag_id:
@@ -360,12 +375,55 @@ def recalcular_preview_apos_exclusao(conn, conversa_id: int):
     conn.execute("UPDATE chat_interno_conversas SET ultima_mensagem_preview = ? WHERE id = ?", (preview, conversa_id))
 
 
-def fechar_conversa(conn, conversa_id: int):
-    conn.execute("UPDATE chat_interno_conversas SET status = 'fechada', fechada_em = ? WHERE id = ?", (_now_iso(), conversa_id))
+def _atualizar_status_geral(conn, conversa_id: int):
+    """status/fechada_em (o par "geral", usado só pela supervisão do
+    admin) só marca fechada quando os DOIS lados já encerraram -- um
+    dos dois sozinho não conta pra esse status compartilhado."""
+    row = conn.execute(
+        "SELECT fechada_para_criador_em, fechada_para_participante_em FROM chat_interno_conversas WHERE id = ?",
+        (conversa_id,),
+    ).fetchone()
+    fechados = [row["fechada_para_criador_em"], row["fechada_para_participante_em"]]
+    if all(fechados):
+        conn.execute(
+            "UPDATE chat_interno_conversas SET status = 'fechada', fechada_em = ? WHERE id = ?",
+            (max(fechados), conversa_id),
+        )
+    else:
+        conn.execute("UPDATE chat_interno_conversas SET status = 'aberta', fechada_em = NULL WHERE id = ?", (conversa_id,))
 
 
-def reabrir_conversa(conn, conversa_id: int):
-    conn.execute("UPDATE chat_interno_conversas SET status = 'aberta', fechada_em = NULL WHERE id = ?", (conversa_id,))
+def fechar_conversa(conn, conversa_id: int, usuario_id: int):
+    """Encerra só pra QUEM pediu -- sai da lista dele, vai pra
+    Encerradas dele. O outro lado nem percebe: continua vendo a
+    conversa em Minhas normalmente, do jeito que já estava. Se
+    qualquer um dos dois mandar mensagem de novo, reabre pros dois (ver
+    enviar_mensagem)."""
+    conversa = conn.execute(
+        "SELECT criado_por_id, participante_id FROM chat_interno_conversas WHERE id = ?", (conversa_id,)
+    ).fetchone()
+    campo = "fechada_para_criador_em" if usuario_id == conversa["criado_por_id"] else "fechada_para_participante_em"
+    conn.execute(f"UPDATE chat_interno_conversas SET {campo} = ? WHERE id = ?", (_now_iso(), conversa_id))
+    _atualizar_status_geral(conn, conversa_id)
+
+
+def reabrir_conversa(conn, conversa_id: int, usuario_id: int = None):
+    """usuario_id=None reabre pros dois lados de uma vez (chamado
+    quando chega mensagem nova -- ver enviar_mensagem). Com um
+    usuario_id, reabre só pra ele (botão manual de reabrir)."""
+    if usuario_id is None:
+        conn.execute(
+            "UPDATE chat_interno_conversas SET fechada_para_criador_em = NULL, fechada_para_participante_em = NULL, "
+            "status = 'aberta', fechada_em = NULL WHERE id = ?",
+            (conversa_id,),
+        )
+        return
+    conversa = conn.execute(
+        "SELECT criado_por_id, participante_id FROM chat_interno_conversas WHERE id = ?", (conversa_id,)
+    ).fetchone()
+    campo = "fechada_para_criador_em" if usuario_id == conversa["criado_por_id"] else "fechada_para_participante_em"
+    conn.execute(f"UPDATE chat_interno_conversas SET {campo} = NULL WHERE id = ?", (conversa_id,))
+    _atualizar_status_geral(conn, conversa_id)
 
 
 def editar_mensagem(conn, mensagem_id: int, texto: str):

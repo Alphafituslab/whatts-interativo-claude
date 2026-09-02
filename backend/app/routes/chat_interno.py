@@ -85,7 +85,10 @@ def iniciar_conversa():
 
     conversa_id = chat_interno_service.buscar_conversa_existente(conn, usuario["id"], participante["id"])
     if conversa_id:
-        chat_interno_service.reabrir_conversa(conn, conversa_id)
+        # Reabre só pra quem clicou -- se mandar texto junto, enviar_mensagem
+        # já reabre pros dois lados (é o "o outro lado vê de novo quando
+        # chamam ele" que o Clayton pediu).
+        chat_interno_service.reabrir_conversa(conn, conversa_id, usuario["id"])
         if texto:
             chat_interno_service.enviar_mensagem(conn, conversa_id, usuario["id"], texto)
     else:
@@ -531,7 +534,7 @@ def fechar(conversa_id):
     conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
     if not _pode_ver(usuario, conversa):
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
-    chat_interno_service.fechar_conversa(conn, conversa_id)
+    chat_interno_service.fechar_conversa(conn, conversa_id, usuario["id"])
     return jsonify({"ok": True})
 
 
@@ -543,5 +546,5 @@ def reabrir(conversa_id):
     conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
     if not _pode_ver(usuario, conversa):
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
-    chat_interno_service.reabrir_conversa(conn, conversa_id)
+    chat_interno_service.reabrir_conversa(conn, conversa_id, usuario["id"])
     return jsonify({"ok": True})

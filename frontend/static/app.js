@@ -3792,7 +3792,9 @@
             // e mostrava a função trocada embaixo do nome.
             const eu = state.usuarioAtual.id;
             const doOutro = c.criado_por_id === eu ? c.participante_setores : c.criado_por_setores;
-            const fechada = c.status === "fechada";
+            // Por PESSOA: cada lado enxerga o próprio estado, não o
+            // status geral (só fechada quando os dois já fecharam).
+            const fechada = souAlheio ? c.status === "fechada" : !!(souCriador ? c.fechada_para_criador_em : c.fechada_para_participante_em);
             if (!doOutro && !fechada) return "";
             return `<div class="wpp-conversa-dono">${doOutro ? `🏷️ ${escapeHtml(doOutro)}` : ""}${fechada ? `${doOutro ? " · " : ""}<span class="selo inativo">Fechada</span>` : ""}</div>`;
           })()}
@@ -3860,7 +3862,9 @@
     const souCriador = conversa.criado_por_id === eu;
     const souAlheio = !souCriador && conversa.participante_id !== eu;
     const outroNome = souAlheio ? `${conversa.criado_por_nome} ↔ ${conversa.participante_nome || "—"}` : (souCriador ? (conversa.participante_nome || "—") : conversa.criado_por_nome);
-    const fechada = conversa.status === "fechada";
+    // Fechada é por PESSOA agora -- cada lado vê o próprio estado, não
+    // o status geral (que só marca fechada quando os dois já fecharam).
+    const fechada = souAlheio ? conversa.status === "fechada" : !!(souCriador ? conversa.fechada_para_criador_em : conversa.fechada_para_participante_em);
     return `
       <div class="wpp-chat-cabecalho">
         <button type="button" class="botao-icone wpp-botao-voltar" data-acao="voltar-lista-interno" title="Voltar">←</button>

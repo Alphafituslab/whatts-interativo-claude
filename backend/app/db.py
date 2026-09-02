@@ -73,6 +73,7 @@ SCHEMA_FILES = [
     "schema_058_usuario_sistema.sql",
     "schema_059_setores_aviso_fila.sql",
     "schema_060_mais_avisos_automaticos.sql",
+    "schema_061_fechar_chat_interno_por_pessoa.sql",
 ]
 
 
