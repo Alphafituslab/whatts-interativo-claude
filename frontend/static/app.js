@@ -1425,7 +1425,17 @@
     });
 
     // Enter envia, Esc descarta — mesma lógica do resto do sistema.
+    //
+    // BUG REAL corrigido (relatado pela Andreia, 2026-09-02): mandar
+    // pelo BOTÃO do mouse fechava o modal mas nunca tirava este
+    // listener do documento inteiro — ele ficava vivo escutando Enter.
+    // Qualquer Enter digitado DEPOIS (ex.: mandando uma mensagem de
+    // texto na sequência) reenviava o MESMO áudio de novo, sem ninguém
+    // pedir. Agora, se o modal já não está mais na tela (fechou por
+    // outro caminho), o próprio listener se desliga em vez de agir —
+    // mesmo padrão já usado em modalFotoAmpliada.
     const teclas = (e) => {
+      if (!wrap.isConnected) { document.removeEventListener("keydown", teclas); return; }
       if (e.key === "Enter") { e.preventDefault(); document.removeEventListener("keydown", teclas); enviar(); }
       if (e.key === "Escape") { document.removeEventListener("keydown", teclas); limpar(); }
     };
