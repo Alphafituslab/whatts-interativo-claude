@@ -209,6 +209,7 @@ def obter_configuracao(conn, empresa_id: int):
             "localizacao_lat": None, "localizacao_lng": None,
             "followup_dias_aviso_automatico": None,
             "usuario_sistema_id": None, "aviso_fila_sem_escolha_ativo": 0, "ultimo_aviso_fila_sem_escolha": None,
+            "aviso_fila_sem_escolha_setores": None,
         }
     return dict(row)
 
@@ -226,6 +227,7 @@ def config_publica(config):
     d["expediente_ativo"] = bool(d.get("expediente_ativo"))
     d["assinar_mensagens"] = bool(d.get("assinar_mensagens"))
     d["aviso_fila_sem_escolha_ativo"] = bool(d.get("aviso_fila_sem_escolha_ativo"))
+    d["aviso_fila_sem_escolha_setores"] = json.loads(d["aviso_fila_sem_escolha_setores"]) if d.get("aviso_fila_sem_escolha_setores") else []
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -336,6 +338,13 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         (1 if dados.get("aviso_fila_sem_escolha_ativo") else 0) if "aviso_fila_sem_escolha_ativo" in dados
         else (1 if anterior.get("aviso_fila_sem_escolha_ativo") else 0)
     )
+    # Setores que recebem o aviso de fila -- lista vazia/ausente mantém
+    # "avisa todo mundo online" (comportamento original). Pedido do
+    # Clayton: quer restringir pro Televendas, deixando configurável.
+    if "aviso_fila_sem_escolha_setores" in dados:
+        aviso_fila_sem_escolha_setores = json.dumps([s for s in (dados.get("aviso_fila_sem_escolha_setores") or []) if s])
+    else:
+        aviso_fila_sem_escolha_setores = anterior.get("aviso_fila_sem_escolha_setores")
 
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
@@ -359,8 +368,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
                                               limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
                                               localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
-                                              followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
+                                              aviso_fila_sem_escolha_setores)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -385,6 +395,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             followup_dias_aviso_automatico = excluded.followup_dias_aviso_automatico,
             usuario_sistema_id = excluded.usuario_sistema_id,
             aviso_fila_sem_escolha_ativo = excluded.aviso_fila_sem_escolha_ativo,
+            aviso_fila_sem_escolha_setores = excluded.aviso_fila_sem_escolha_setores,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -393,7 +404,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          minutos_sem_menu, empresa_id, _now_iso(), usuario_id,
          limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
          localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
-         followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo),
+         followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
+         aviso_fila_sem_escolha_setores),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -2959,7 +2971,7 @@ def avisar_fila_sem_escolha_se_preciso(conn):
     fila continuar parada, senão vira spam."""
     from . import chat_interno_service, followup_service
     empresas = conn.execute(
-        "SELECT empresa_id, ultimo_aviso_fila_sem_escolha FROM configuracoes_whatsapp "
+        "SELECT empresa_id, ultimo_aviso_fila_sem_escolha, aviso_fila_sem_escolha_setores FROM configuracoes_whatsapp "
         "WHERE aviso_fila_sem_escolha_ativo = 1"
     ).fetchall()
     if not empresas:
@@ -2989,11 +3001,25 @@ def avisar_fila_sem_escolha_se_preciso(conn):
         remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
         if remetente_id is None:
             continue
-        online = conn.execute(
-            "SELECT id FROM usuarios WHERE empresa_id = ? AND ativo = 1 AND id != ? "
-            "AND ultimo_acesso >= ? AND offline_forcado = 0 AND ausente = 0",
-            (empresa_id, remetente_id, limite_online),
-        ).fetchall()
+        # Setores configurados restringem quem recebe (ex.: só
+        # Televendas); sem nenhum setor escolhido, avisa todo mundo
+        # online, do jeito que era antes de dar pra configurar isso.
+        setores_alvo = json.loads(emp["aviso_fila_sem_escolha_setores"]) if emp["aviso_fila_sem_escolha_setores"] else []
+        if setores_alvo:
+            marcadores = ",".join("?" * len(setores_alvo))
+            online = conn.execute(
+                f"SELECT DISTINCT u.id FROM usuarios u JOIN usuario_setores us ON us.usuario_id = u.id "
+                f"WHERE u.empresa_id = ? AND u.ativo = 1 AND u.id != ? "
+                f"AND u.ultimo_acesso >= ? AND u.offline_forcado = 0 AND u.ausente = 0 "
+                f"AND us.setor IN ({marcadores})",
+                (empresa_id, remetente_id, limite_online, *setores_alvo),
+            ).fetchall()
+        else:
+            online = conn.execute(
+                "SELECT id FROM usuarios WHERE empresa_id = ? AND ativo = 1 AND id != ? "
+                "AND ultimo_acesso >= ? AND offline_forcado = 0 AND ausente = 0",
+                (empresa_id, remetente_id, limite_online),
+            ).fetchall()
         texto = "🔔 Clientes sem atendimento na fila."
         for u in online:
             conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, u["id"])

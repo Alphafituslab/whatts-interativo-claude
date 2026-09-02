@@ -4788,7 +4788,17 @@
            </div>
            <div class="campo campo-checkbox">
              <label><input type="checkbox" name="aviso_fila_sem_escolha_ativo" ${config.aviso_fila_sem_escolha_ativo ? "checked" : ""}>
-               Avisar todo mundo online quando tiver cliente esperando no "Sem escolha" há mais de 10 minutos</label>
+               Avisar quando tiver cliente esperando no "Sem escolha" há mais de 10 minutos</label>
+           </div>
+           <div class="campo">
+             <label>Avisar quem (deixe tudo desmarcado para avisar todo mundo online)</label>
+             <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:4px;">
+               ${setoresAtuais.map((nome) => `
+                 <label style="display:flex; align-items:center; gap:5px; font-weight:400;">
+                   <input type="checkbox" name="aviso_fila_sem_escolha_setores" value="${escapeHtml(nome)}" ${(config.aviso_fila_sem_escolha_setores || []).includes(nome) ? "checked" : ""}>
+                   ${escapeHtml(nome)}
+                 </label>`).join("")}
+             </div>
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
@@ -7618,6 +7628,7 @@
             usuario_sistema_id: valorUsuarioSistema === "" ? null : Number(valorUsuarioSistema),
             followup_dias_aviso_automatico: valorFollowup === "" ? null : Number(valorFollowup),
             aviso_fila_sem_escolha_ativo: !!dados.get("aviso_fila_sem_escolha_ativo"),
+            aviso_fila_sem_escolha_setores: dados.getAll("aviso_fila_sem_escolha_setores"),
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");
