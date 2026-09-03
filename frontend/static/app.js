@@ -279,6 +279,7 @@
           case "seguranca": return renderSeguranca();
           case "configuracao": return renderWhatsappConfiguracao();
           case "usuarios": return renderUsuarios();
+          case "ligacoes": return renderLigacoes();
           default: return renderWhatsapp(null);
         }
       })();
@@ -395,7 +396,12 @@
       + `<button type="button" class="link-nav link-nav-botao" data-acao="alternar-followup" title="Clientes que precisam de contato">
            <span>🔔</span> Follow-up
            <span class="wpp-badge-nao-lidas wpp-badge-nav" data-followup-contador hidden>0</span>
-         </button>`;
+         </button>`
+      // Ligações: pedido do Clayton (2026-09-03), logo abaixo do
+      // Follow-up no menu.
+      + (usuario && _podeVerConversas()
+          ? `<a class="link-nav ${paginaAtiva === "ligacoes" ? "ativo" : ""}" href="#/ligacoes"><span>📞</span> Ligações</a>`
+          : "");
 
     const flashHtml = state.flash
       ? `<div class="${state.flash.tipo === "erro" ? "mensagem-erro" : "mensagem-ok"} flash-aviso">
@@ -5518,6 +5524,86 @@
   // =======================================================================
   // USUÁRIOS (admin) — quem pode fazer login
   // =======================================================================
+  // Baixa um arquivo que exige o token do app (Bearer) -- um <a href>
+  // comum não manda esse cabeçalho, então busca via fetch, vira Blob e
+  // dispara o download por trás de um <a download> temporário. Pedido
+  // do Clayton (2026-09-03): exportar a planilha de Ligações em Excel
+  // ou PDF.
+  async function _baixarArquivoAutenticado(caminho, nomeArquivo) {
+    const resp = await fetch(API + caminho, { headers: { Authorization: "Bearer " + state.accessToken } });
+    if (!resp.ok) throw new Error("Não consegui gerar o arquivo agora.");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nomeArquivo;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const COLUNAS_LIGACOES = [
+    ["data_ligacao", "Data", "date", 130],
+    ["empresa_contatada", "Empresa", "text", 180],
+    ["contato_nome", "Com quem falei", "text", 160],
+    ["terceiriza_para", "Terceirizam para", "text", 180],
+    ["responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)", "text", 260],
+    ["observacoes", "Observações", "text", 260],
+  ];
+
+  async function renderLigacoes() {
+    _carregandoSeTrocouDeTela("ligacoes");
+    let linhas;
+    try {
+      linhas = await chamarApi("/ligacoes");
+    } catch (e) {
+      linhas = [];
+    }
+
+    const htmlLinha = (l) => `
+      <tr data-linha-ligacao="${l.id}">
+        ${COLUNAS_LIGACOES.map(([campo, , tipo]) => `
+          <td><input type="${tipo}" data-campo-ligacao="${campo}" value="${escapeHtml(l[campo] || "")}" style="min-width:${tipo === "date" ? "130" : "150"}px;"></td>
+        `).join("")}
+        <td><button type="button" class="botao-icone" data-acao="excluir-ligacao" data-id="${l.id}" title="Excluir esta linha">🗑️</button></td>
+      </tr>`;
+
+    renderShell(
+      `<h2>📞 Ligações</h2>
+       <div class="cartao">
+         <p class="dica">Controle das suas ligações de prospecção — dia, empresa, com quem falou, pra quem terceirizam, e quem é o responsável pela área de suplementos/novos produtos/contratação de fabricantes. Clique numa célula pra editar; salva sozinho ao sair do campo.</p>
+         <div class="barra-acoes" style="margin-bottom:12px;">
+           <button type="button" class="botao" data-acao="nova-ligacao">+ Nova linha</button>
+           <button type="button" class="botao secundario" data-acao="exportar-ligacoes-xlsx">⬇ Exportar Excel</button>
+           <button type="button" class="botao secundario" data-acao="exportar-ligacoes-pdf">⬇ Exportar PDF</button>
+         </div>
+         <div style="overflow-x:auto;">
+           <table class="wpp-tabela-ligacoes">
+             <thead><tr>${COLUNAS_LIGACOES.map(([, rotulo]) => `<th>${escapeHtml(rotulo)}</th>`).join("")}<th></th></tr></thead>
+             <tbody>${linhas.length ? linhas.map(htmlLinha).join("") : `<tr><td colspan="${COLUNAS_LIGACOES.length + 1}" class="texto-suave">Nenhuma ligação registrada ainda — clique em "+ Nova linha" pra começar.</td></tr>`}</tbody>
+           </table>
+         </div>
+       </div>`,
+      "ligacoes"
+    );
+
+    // Salva ao sair do campo (blur) -- não a cada tecla, senão vira uma
+    // chamada por letra digitada.
+    document.querySelectorAll("[data-campo-ligacao]").forEach((input) => {
+      input.addEventListener("blur", async () => {
+        const tr = input.closest("[data-linha-ligacao]");
+        const id = Number(tr.dataset.linhaLigacao);
+        const campo = input.dataset.campoLigacao;
+        try {
+          await chamarApi(`/ligacoes/${id}`, { method: "PUT", body: { [campo]: input.value } });
+        } catch (e) {
+          definirFlash("erro", "Não consegui salvar — tenta de novo.");
+        }
+      });
+    });
+  }
+
   async function renderUsuarios() {
     _carregandoSeTrocouDeTela("usuarios");
     const [usuarios, setores] = await Promise.all([chamarApi("/usuarios"), chamarApi("/usuarios/setores")]);
@@ -5674,6 +5760,42 @@
   // =======================================================================
   async function tratarAcao(acao, alvo) {
     switch (acao) {
+      case "nova-ligacao": {
+        try {
+          await chamarApi("/ligacoes", { method: "POST" });
+        } catch (e) {
+          definirFlash("erro", "Não consegui criar a linha.");
+          return;
+        }
+        return renderLigacoes();
+      }
+      case "excluir-ligacao": {
+        const id = Number(alvo.dataset.id);
+        if (!confirm("Excluir esta linha? Não tem como desfazer.")) return;
+        try {
+          await chamarApi(`/ligacoes/${id}`, { method: "DELETE" });
+        } catch (e) {
+          definirFlash("erro", "Não consegui excluir.");
+          return;
+        }
+        return renderLigacoes();
+      }
+      case "exportar-ligacoes-xlsx": {
+        try {
+          await _baixarArquivoAutenticado("/ligacoes/exportar.xlsx", "ligacoes.xlsx");
+        } catch (e) {
+          definirFlash("erro", e.message || "Não consegui exportar.");
+        }
+        return;
+      }
+      case "exportar-ligacoes-pdf": {
+        try {
+          await _baixarArquivoAutenticado("/ligacoes/exportar.pdf", "ligacoes.pdf");
+        } catch (e) {
+          definirFlash("erro", e.message || "Não consegui exportar.");
+        }
+        return;
+      }
       case "camera-enviar-whatsapp": {
         const campo = document.querySelector(".wpp-input-camera-oculto");
         if (!campo) return;
