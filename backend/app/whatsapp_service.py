@@ -2024,6 +2024,47 @@ def _aplicar_reacao(conn, empresa_id: int, id_alvo: str, emoji: str):
     return True
 
 
+def _extrair_edicao(dados: dict):
+    """Devolve (id_da_mensagem_original, texto_novo) quando o que
+    chegou é uma EDIÇÃO de mensagem, ou None.
+
+    O WhatsApp/Baileys manda edição como um evento novo (messages.upsert
+    de novo), com o conteúdo editado dentro de um "protocolMessage" ->
+    "editedMessage" -- não no lugar comum (message.conversation) onde
+    _extrair_texto olha. Sem tratar isso à parte, a edição virava uma
+    bolha vazia duplicada na conversa em vez de atualizar a mensagem
+    original (achado pelo Clayton via Adrian, 2026-09-03)."""
+    protocolo = ((dados.get("message") or {}).get("protocolMessage")) or {}
+    editada = protocolo.get("editedMessage")
+    if not isinstance(editada, dict) or not editada:
+        return None
+    alvo = (protocolo.get("key") or {}).get("id")
+    if not alvo:
+        return None
+    texto_novo = _extrair_texto({"message": editada})
+    return alvo, texto_novo
+
+
+def _aplicar_edicao(conn, empresa_id: int, id_alvo: str, texto_novo: str):
+    """Atualiza o texto da mensagem original com o conteúdo editado --
+    mesmo padrão de _aplicar_reacao: se a mensagem original não está
+    aqui, ignora (melhor que inventar uma mensagem nova)."""
+    linha = conn.execute(
+        "SELECT m.id FROM whatsapp_mensagens m "
+        "JOIN whatsapp_conversas c ON c.id = m.conversa_id "
+        "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+        "WHERE m.externo_id = ? AND ct.empresa_id = ?",
+        (id_alvo, empresa_id),
+    ).fetchone()
+    if linha is None:
+        return False
+    conn.execute(
+        "UPDATE whatsapp_mensagens SET texto = ?, editada_em = ? WHERE id = ?",
+        (texto_novo, _now_iso(), linha["id"]),
+    )
+    return True
+
+
 def _extrair_texto(mensagem: dict) -> str:
     conteudo = mensagem.get("message") or {}
     return (
@@ -2877,6 +2918,12 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         id_alvo, emoji = reacao
         aplicada = _aplicar_reacao(conn, empresa_id, id_alvo, emoji)
         return {"processado": True, "tipo": "reacao", "aplicada": aplicada}
+
+    edicao = _extrair_edicao(dados)
+    if edicao is not None:
+        id_alvo, texto_novo = edicao
+        aplicada = _aplicar_edicao(conn, empresa_id, id_alvo, texto_novo)
+        return {"processado": True, "tipo": "edicao", "aplicada": aplicada}
 
     # Em grupo o pushName é de quem falou; usar isso como nome do contato
     # renomearia o grupo a cada mensagem, com o nome do último que

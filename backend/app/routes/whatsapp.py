@@ -1707,9 +1707,18 @@ def encaminhar_mensagem(conversa_id, mensagem_id):
     if not resultados:
         raise ApiError("Escolha pelo menos um destino pra encaminhar.", status=400)
 
+    # Guarda o motivo de cada falha no log de atividade -- sem isso, um
+    # encaminhamento que falha silenciosamente (rate limit, permissão,
+    # erro da Evolution API) não deixa rastro nenhum pra investigar
+    # depois; só "1 destino(s)" sem dizer se deu certo. Achado
+    # investigando um caso real da Tabata (2026-09-03) onde um
+    # documento encaminhado nunca chegou e não sobrou pista nenhuma.
+    falhas_log = [r.get("motivo") or "falhou" for r in resultados if not r.get("ok")]
+    resumo = f"msg {mensagem_id} -> {len(resultados)} destino(s)"
+    if falhas_log:
+        resumo += f" ({len(falhas_log)} falhou: {'; '.join(falhas_log)})"
     whatsapp_service.registrar_atividade(
-        conn, usuario["id"], "mensagem_encaminhada",
-        f"msg {mensagem_id} -> {len(resultados)} destino(s)", conversa_id
+        conn, usuario["id"], "mensagem_encaminhada", resumo, conversa_id
     )
     enviados = sum(1 for r in resultados if r["ok"])
     return jsonify({"ok": enviados > 0, "enviados": enviados, "resultados": resultados})

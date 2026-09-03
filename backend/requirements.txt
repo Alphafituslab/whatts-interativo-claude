@@ -4,3 +4,5 @@ PyJWT>=2.8
 waitress>=3.0
 requests>=2.31
 pyotp>=2.9
+openpyxl>=3.1   # exportar planilha de Ligacoes em .xlsx
+fpdf2>=2.8      # exportar planilha de Ligacoes em .pdf
