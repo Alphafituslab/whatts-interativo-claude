@@ -423,6 +423,9 @@
                 <div class="usuario-atual-email" title="${escapeHtml(usuario ? usuario.email : "")}">${escapeHtml(usuario ? usuario.email : "")}</div>
               </div>
             </div>
+            ${usuario && _podeVerConversas() ? `
+              <button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="camera-enviar-whatsapp" title="Bater uma foto agora e mandar direto pra um cliente, de qualquer tela do sistema">📷 Câmera → cliente</button>
+              <input type="file" class="wpp-input-camera-oculto" accept="image/*" capture="environment" hidden>` : ""}
             ${usuario && usuario.admin ? `
               <button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
               <a class="botao secundario pequeno" href="/downloads/WhattsInbox-instalador.zip" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
@@ -3737,6 +3740,61 @@
     });
   }
 
+  function modalEscolherContatoParaFoto(arquivo) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">📷 Enviar foto para…</h3>
+      <div class="campo"><input data-busca-foto-contato placeholder="Procurar cliente por nome ou número…" autofocus></div>
+      <div class="wpp-encaminhar-lista" data-lista-foto-contato><p class="dica">Carregando…</p></div>`);
+
+    const lista = wrap.querySelector("[data-lista-foto-contato]");
+    const busca = wrap.querySelector("[data-busca-foto-contato]");
+
+    async function enviarPara(conversaId, nome) {
+      wrap.innerHTML = `<p class="dica">Enviando foto para ${escapeHtml(nome)}…</p>`;
+      try {
+        await _subirAnexo(`${API}/whatsapp/conversas/${conversaId}/anexo`, arquivo);
+        fecharModais();
+        definirFlash("ok", `Foto enviada para ${nome}.`);
+        if (state.rota && state.rota.startsWith("#/whatsapp/")) montarRota();
+      } catch (erro) {
+        fecharModais();
+        definirFlash("erro", erro.message || "Não consegui enviar a foto.");
+      }
+    }
+
+    function desenhar(itens) {
+      const comConversa = itens.filter((c) => c.conversa_id);
+      if (!comConversa.length) {
+        lista.innerHTML = `<p class="dica">Nenhum cliente com conversa já iniciada encontrado. Abra a conversa com essa pessoa uma vez antes de mandar foto direto por aqui.</p>`;
+        return;
+      }
+      lista.innerHTML = comConversa.map((c) => `
+        <button type="button" class="wpp-encaminhar-item" style="width:100%; text-align:left; cursor:pointer; background:none; border:none;" data-conversa="${c.conversa_id}" data-nome="${escapeHtml(c.nome || c.telefone)}">
+          <span class="wpp-encaminhar-nome">${escapeHtml(c.nome || c.telefone)}</span>
+          <span class="wpp-encaminhar-tel">${escapeHtml(c.telefone)}</span>
+        </button>`).join("");
+      lista.querySelectorAll("[data-conversa]").forEach((b) => {
+        b.addEventListener("click", () => enviarPara(Number(b.dataset.conversa), b.dataset.nome));
+      });
+    }
+
+    async function buscar(termo) {
+      try {
+        const r = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(termo || "")}`);
+        desenhar((r.contatos || r || []).slice(0, 60));
+      } catch (e) {
+        lista.innerHTML = `<p class="dica">Não consegui carregar a lista agora.</p>`;
+      }
+    }
+    buscar("");
+    let debounce = null;
+    busca.addEventListener("input", (e) => {
+      clearTimeout(debounce);
+      const termo = e.target.value.trim();
+      debounce = setTimeout(() => buscar(termo), 250);
+    });
+  }
+
   function modalEncaminhar(conversaId, usuarios) {
     const opcoes = usuarios.filter((u) => u.ativo).map((u) => `<option value="${u.id}">${u.online ? "🟢" : "🔴"} ${escapeHtml(u.nome)} (${escapeHtml(u.email)})</option>`).join("");
     abrirModal(`
@@ -5581,6 +5639,17 @@
   // =======================================================================
   async function tratarAcao(acao, alvo) {
     switch (acao) {
+      case "camera-enviar-whatsapp": {
+        const campo = document.querySelector(".wpp-input-camera-oculto");
+        if (!campo) return;
+        campo.onchange = () => {
+          const arquivo = campo.files && campo.files[0];
+          campo.value = "";
+          if (arquivo) modalEscolherContatoParaFoto(arquivo);
+        };
+        campo.click();
+        return;
+      }
       case "instalar-app": {
         // (async por causa do await _prepararDownloads() logo abaixo)
         // O navegador só deixa chamar prompt() a partir de um clique de
