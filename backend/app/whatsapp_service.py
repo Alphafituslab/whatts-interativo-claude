@@ -2572,6 +2572,14 @@ def resetar_dashboard(conn, empresa_id: int):
     )
 
 
+# Gap maximo entre duas mensagens pra ainda contarem como a MESMA
+# sessao de atendimento, no calculo de "duracao"/"pior atendimento" do
+# dashboard -- passou disso, o que vem depois e outro assunto (cliente
+# sumiu e voltou, pesquisa de satisfacao automatica, etc), nao conta
+# pra duracao do atendimento original.
+GAP_MAX_ATENDIMENTO_MIN = 6 * 60
+
+
 def calcular_dashboard(conn, empresa_id: int):
     config_dash = obter_configuracao(conn, empresa_id)
     reset_em = config_dash.get("dashboard_reset_em")
@@ -2611,9 +2619,6 @@ def calcular_dashboard(conn, empresa_id: int):
         tempos_resposta = []
 
         for c in conversas:
-            if c["status"] == "fechada" and c["fechada_em"]:
-                duracoes_atendimento.append(_diferenca_minutos(c["criado_em"], c["fechada_em"]))
-
             # usuario_id junto: sem isso, mensagem automática do MENU/BOT
             # (usuario_id NULL -- "Digite apenas o número correspondente",
             # pesquisa de satisfação, "você foi direcionado para...")
@@ -2622,9 +2627,38 @@ def calcular_dashboard(conn, empresa_id: int):
             # ter respondido de verdade. Achado junto com o pedido do
             # Clayton de conferir os números do Adrian (2026-09-02).
             msgs = conn.execute(
-                "SELECT direcao, criado_em, usuario_id FROM whatsapp_mensagens WHERE conversa_id = ? ORDER BY criado_em, id",
+                "SELECT direcao, criado_em, usuario_id, texto FROM whatsapp_mensagens WHERE conversa_id = ? ORDER BY criado_em, id",
                 (c["id"],),
             ).fetchall()
+
+            if c["status"] == "fechada" and c["fechada_em"] and msgs:
+                # Duração real do atendimento: só a "sessão" contínua de
+                # troca de mensagens, cortando no primeiro buraco maior
+                # que GAP_MAX_ATENDIMENTO_MIN. Usar fechada_em (ou até
+                # ultima_mensagem_em) inflava o número quando a conversa
+                # ficava dias parada antes de alguém fechar -- e piora
+                # ainda mais agora com o aviso automático de 48h e as
+                # prorrogações, que deixam a conversa aberta de propósito
+                # esperando o cliente. Também corta a pesquisa de
+                # satisfação automática e qualquer resposta tardia do
+                # cliente (às vezes um auto-responder do WhatsApp Business
+                # dele) que chega dias depois -- não é atendimento, é eco.
+                # Achado pelo Clayton, 2026-09-03 (caso de 167h que eram
+                # 17min reais -- e continuava "errado" mesmo só cortando
+                # em ultima_mensagem_em, por causa desse eco pós-pesquisa).
+                fim = msgs[0]["criado_em"]
+                for m in msgs:
+                    if _diferenca_minutos(fim, m["criado_em"]) > GAP_MAX_ATENDIMENTO_MIN:
+                        break
+                    # A pesquisa de satisfação É o fim do atendimento --
+                    # mesmo sem gap nenhum, o que vier depois dela (o
+                    # cliente reabrindo, um novo assunto) é outro
+                    # episódio, não continuação deste.
+                    if m["texto"] == TEXTO_PESQUISA_SATISFACAO:
+                        break
+                    fim = m["criado_em"]
+                duracoes_atendimento.append(_diferenca_minutos(c["criado_em"], fim))
+
             ja_registrou_primeira = False
             for i, m in enumerate(msgs):
                 if m["direcao"] != "entrada":
