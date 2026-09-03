@@ -400,7 +400,7 @@
       // Ligações: pedido do Clayton (2026-09-03), logo abaixo do
       // Follow-up no menu.
       + (usuario && _podeVerConversas()
-          ? `<a class="link-nav ${paginaAtiva === "ligacoes" ? "ativo" : ""}" href="#/ligacoes"><span>📞</span> Ligações</a>`
+          ? `<a class="link-nav ${paginaAtiva === "ligacoes" ? "ativo" : ""}" href="#/ligacoes"><span>📞</span> Leads do Consulta Anvisa</a>`
           : "");
 
     const flashHtml = state.flash
@@ -4988,6 +4988,14 @@
                <input type="number" name="aviso_conversa_parada_max_prorrogacoes" min="0" max="20" value="${config.aviso_conversa_parada_max_prorrogacoes ?? 3}">
              </div>
            </div>
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="aviso_ligacoes_ativo" ${config.aviso_ligacoes_ativo ? "checked" : ""}>
+               Lembrete de "Próximo contato" da planilha de Ligações — avisar no chat interno quando chegar o dia marcado pra ligar de novo</label>
+           </div>
+           <div class="campo" style="max-width:220px;">
+             <label>Ao prorrogar o lembrete, adiar quantos dias</label>
+             <input type="number" name="dias_prorrogar_ligacao" min="1" max="90" value="${config.dias_prorrogar_ligacao ?? 3}">
+           </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
@@ -5552,6 +5560,7 @@
     ["data_envio_email", "Data envio e-mail", "date", 140],
     ["terceiriza_para", "Terceirizam para", "text", 180],
     ["responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)", "text", 260],
+    ["proximo_contato_em", "Próximo contato", "date", 150],
     ["observacoes", "Observações", "text", 260],
   ];
 
@@ -5564,18 +5573,25 @@
       linhas = [];
     }
 
-    const htmlLinha = (l) => `
-      <tr data-linha-ligacao="${l.id}">
+    const hoje = new Date().toISOString().slice(0, 10);
+    const htmlLinha = (l) => {
+      const vencida = l.proximo_contato_em && l.proximo_contato_em <= hoje;
+      return `
+      <tr data-linha-ligacao="${l.id}" class="${vencida ? "wpp-linha-ligacao-vencida" : ""}">
         ${COLUNAS_LIGACOES.map(([campo, , tipo]) => `
-          <td><input type="${tipo}" data-campo-ligacao="${campo}" value="${escapeHtml(l[campo] || "")}" style="min-width:${tipo === "date" ? "130" : "150"}px;"></td>
+          <td>
+            <input type="${tipo}" data-campo-ligacao="${campo}" value="${escapeHtml(l[campo] || "")}" style="min-width:${tipo === "date" ? "130" : "150"}px;">
+            ${campo === "proximo_contato_em" && vencida ? `<button type="button" class="botao secundario pequeno" data-acao="prorrogar-ligacao" data-id="${l.id}" style="margin-top:4px; white-space:nowrap;" title="Adia o próximo contato">🔁 Prorrogar${l.vezes_prorrogado ? ` (${l.vezes_prorrogado}x)` : ""}</button>` : ""}
+          </td>
         `).join("")}
         <td><button type="button" class="botao-icone" data-acao="excluir-ligacao" data-id="${l.id}" title="Excluir esta linha">🗑️</button></td>
       </tr>`;
+    };
 
     renderShell(
-      `<h2>📞 Ligações</h2>
+      `<h2>📞 Leads do Consulta Anvisa</h2>
        <div class="cartao">
-         <p class="dica">Controle das suas ligações de prospecção — dia, empresa, com quem falou, pra quem terceirizam, e quem é o responsável pela área de suplementos/novos produtos/contratação de fabricantes. Clique numa célula pra editar; salva sozinho ao sair do campo.</p>
+         <p class="dica">Controle das suas ligações de prospecção — dia, empresa, com quem falou, pra quem terceirizam, e quem é o responsável pela área de suplementos/novos produtos/contratação de fabricantes. Clique numa célula pra editar; salva sozinho ao sair do campo. Marque "Próximo contato" pra o Assistente Seja Alpha te lembrar no chat interno quando chegar o dia (ative em Configuração).</p>
          <div class="barra-acoes" style="margin-bottom:12px;">
            <button type="button" class="botao" data-acao="nova-ligacao">+ Nova linha</button>
            <button type="button" class="botao secundario" data-acao="exportar-ligacoes-xlsx">⬇ Exportar Excel</button>
@@ -5770,6 +5786,17 @@
           definirFlash("erro", "Não consegui criar a linha.");
           return;
         }
+        return renderLigacoes();
+      }
+      case "prorrogar-ligacao": {
+        const id = Number(alvo.dataset.id);
+        try {
+          await chamarApi(`/ligacoes/${id}/prorrogar`, { method: "POST" });
+        } catch (e) {
+          definirFlash("erro", "Não consegui prorrogar.");
+          return;
+        }
+        definirFlash("ok", "Próximo contato adiado.");
         return renderLigacoes();
       }
       case "excluir-ligacao": {
@@ -7968,6 +7995,8 @@
             aviso_conversa_parada_horas: Number(dados.get("aviso_conversa_parada_horas")) || 24,
             aviso_conversa_parada_minutos_fechar: Number(dados.get("aviso_conversa_parada_minutos_fechar")) || 10,
             aviso_conversa_parada_max_prorrogacoes: Number(dados.get("aviso_conversa_parada_max_prorrogacoes") ?? 3),
+            aviso_ligacoes_ativo: !!dados.get("aviso_ligacoes_ativo"),
+            dias_prorrogar_ligacao: Number(dados.get("dias_prorrogar_ligacao")) || 3,
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");

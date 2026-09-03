@@ -79,6 +79,7 @@ SCHEMA_FILES = [
     "schema_064_prorrogar_conversa.sql",
     "schema_065_ligacoes.sql",
     "schema_066_ligacoes_contato.sql",
+    "schema_067_lembrete_ligacoes.sql",
 ]
 
 

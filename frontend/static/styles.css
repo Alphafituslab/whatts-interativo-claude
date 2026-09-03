@@ -222,6 +222,8 @@ h1, h2, h3 { letter-spacing: -0.02em; font-weight: 800; }
 .wpp-tabela-ligacoes input:focus {
   outline: none; border-color: var(--primaria); background: var(--superficie-2);
 }
+.wpp-linha-ligacao-vencida td { background: color-mix(in srgb, var(--amarelo) 14%, transparent); }
+.wpp-linha-ligacao-vencida input { background: transparent; }
 .dica { font-size: 12.5px; color: var(--texto-suave); line-height: 1.5; }
 .texto-suave { color: var(--texto-suave); }
 .barra-acoes { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }

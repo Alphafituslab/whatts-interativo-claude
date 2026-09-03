@@ -7,6 +7,12 @@ histórico completo e exportação em Excel/PDF.
 
 Compartilhada pela empresa toda (mesmo padrão de respostas prontas e
 etiquetas) -- qualquer um com acesso às conversas pode ver e editar.
+
+Lembrete de "entrar em contato novamente" (2026-09-03): cada linha pode
+ter uma data de próximo contato; quando chega o dia, o Assistente Seja
+Alpha avisa quem criou a linha no chat interno, com opção de prorrogar
+o aviso (ver avisar_ligacoes_pendentes_se_preciso, chamada pelo
+agendador em scheduler.py -- mesmo padrão do aviso de conversa parada).
 """
 import datetime
 import io
@@ -19,7 +25,8 @@ bp = Blueprint("ligacoes", __name__, url_prefix="/api/v1/ligacoes")
 
 CAMPOS_EDITAVEIS = (
     "data_ligacao", "empresa_contatada", "contato_nome", "telefone",
-    "email", "data_envio_email", "terceiriza_para", "responsavel_area", "observacoes",
+    "email", "data_envio_email", "terceiriza_para", "responsavel_area",
+    "observacoes", "proximo_contato_em",
 )
 
 COLUNAS = (
@@ -31,6 +38,7 @@ COLUNAS = (
     ("data_envio_email", "Data envio e-mail"),
     ("terceiriza_para", "Terceirizam para"),
     ("responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)"),
+    ("proximo_contato_em", "Próximo contato"),
     ("observacoes", "Observações"),
 )
 
@@ -90,6 +98,11 @@ def atualizar(ligacao_id):
             valor = dados[campo]
             campos.append(f"{campo} = ?")
             valores.append((valor or "").strip() or None if isinstance(valor, str) else valor)
+    # Mudou a data do próximo contato: libera pra avisar de novo (senão
+    # marcar uma data nova nunca dispararia, porque aviso_enviado_em
+    # ficaria de uma rodada anterior).
+    if "proximo_contato_em" in dados:
+        campos.append("aviso_enviado_em = NULL")
     if not campos:
         return jsonify({"ok": True})
     campos.append("atualizado_em = ?")
@@ -102,6 +115,28 @@ def atualizar(ligacao_id):
     return jsonify(dict(_carregar(conn, g.empresa_id, ligacao_id)))
 
 
+@bp.post("/<int:ligacao_id>/prorrogar")
+@requires_auth
+def prorrogar(ligacao_id):
+    """Adia o próximo contato pelos dias configurados em
+    dias_prorrogar_ligacao (Configuração), contados de HOJE -- pra
+    quando a pessoa vê o aviso e quer empurrar de novo."""
+    from .. import whatsapp_service
+
+    conn = get_db()
+    _carregar(conn, g.empresa_id, ligacao_id)
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    dias = config.get("dias_prorrogar_ligacao") or 3
+    nova_data = (datetime.date.today() + datetime.timedelta(days=dias)).isoformat()
+    conn.execute(
+        "UPDATE crm_ligacoes SET proximo_contato_em = ?, aviso_enviado_em = NULL, "
+        "vezes_prorrogado = vezes_prorrogado + 1, atualizado_em = ?, atualizado_por = ? WHERE id = ?",
+        (nova_data, _now_iso(), g.usuario_atual["id"], ligacao_id),
+    )
+    conn.commit()
+    return jsonify(dict(_carregar(conn, g.empresa_id, ligacao_id)))
+
+
 @bp.delete("/<int:ligacao_id>")
 @requires_auth
 def excluir(ligacao_id):
@@ -110,6 +145,57 @@ def excluir(ligacao_id):
     conn.execute("DELETE FROM crm_ligacoes WHERE id = ? AND empresa_id = ?", (ligacao_id, g.empresa_id))
     conn.commit()
     return jsonify({"ok": True})
+
+
+def avisar_ligacoes_pendentes_se_preciso(conn):
+    """Chamado periodicamente pelo agendador (ver scheduler.py). Avisa
+    quem criou a linha, no chat interno, quando chega (ou já passou) o
+    dia marcado pra entrar em contato de novo -- uma vez por dia,
+    enquanto ninguém prorrogar ou trocar a data."""
+    from .. import chat_interno_service, followup_service
+
+    empresas = conn.execute(
+        "SELECT empresa_id FROM configuracoes_whatsapp WHERE aviso_ligacoes_ativo = 1"
+    ).fetchall()
+    if not empresas:
+        return 0
+    hoje = datetime.date.today().isoformat()
+    total = 0
+    for emp in empresas:
+        empresa_id = emp["empresa_id"]
+        remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
+        if remetente_id is None:
+            continue
+        pendentes = conn.execute(
+            "SELECT id, empresa_contatada, contato_nome, criado_por, proximo_contato_em "
+            "FROM crm_ligacoes WHERE empresa_id = ? AND proximo_contato_em IS NOT NULL "
+            "AND proximo_contato_em <= ? "
+            "AND (aviso_enviado_em IS NULL OR substr(aviso_enviado_em, 1, 10) != ?)",
+            (empresa_id, hoje, hoje),
+        ).fetchall()
+        for lig in pendentes:
+            if not lig["criado_por"] or lig["criado_por"] == remetente_id:
+                continue
+            destino = conn.execute(
+                "SELECT id, setor FROM usuarios WHERE id = ? AND ativo = 1", (lig["criado_por"],)
+            ).fetchone()
+            if destino is None:
+                continue
+            nome_empresa = lig["empresa_contatada"] or lig["contato_nome"] or "um cliente"
+            texto = (
+                "🔔 Lembrete: hoje é o dia marcado pra entrar em contato de novo com *" + str(nome_empresa) + "*"
+                + (f" ({lig['contato_nome']})" if lig["contato_nome"] and lig["empresa_contatada"] else "")
+                + ". Não esqueça de ligar! Se quiser adiar, abra Ligações e clique em \"Prorrogar\" nessa linha."
+            )
+            conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, destino["id"])
+            if conversa_interna_id:
+                chat_interno_service.reabrir_conversa(conn, conversa_interna_id)
+                chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
+            else:
+                chat_interno_service.iniciar_conversa(conn, remetente_id, destino["id"], destino["setor"], texto)
+            conn.execute("UPDATE crm_ligacoes SET aviso_enviado_em = ? WHERE id = ?", (_now_iso(), lig["id"]))
+            total += 1
+    return total
 
 
 def _linhas_ordenadas(conn):
@@ -137,7 +223,7 @@ def exportar_xlsx():
         cel.fill = PatternFill("solid", fgColor="0A7D67")
     for linha in linhas:
         ws.append([linha[campo] or "" for campo, _ in COLUNAS])
-    larguras = [12, 26, 20, 16, 22, 16, 22, 34, 34]
+    larguras = [12, 26, 20, 16, 22, 16, 22, 34, 14, 34]
     for i, largura in enumerate(larguras, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = largura
     ws.freeze_panes = "A2"
@@ -170,7 +256,7 @@ def exportar_pdf():
     # tentar quebrar linha em várias alturas por célula com fpdf2 dá bug
     # de alinhamento fácil; pra uma exportação de apoio, previsível e
     # sem quebrar é melhor que bonito.
-    larguras = [20, 32, 26, 24, 32, 22, 28, 44, 44]
+    larguras = [18, 28, 22, 20, 28, 18, 24, 38, 16, 38]
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_fill_color(10, 125, 103)
     pdf.set_text_color(255, 255, 255)

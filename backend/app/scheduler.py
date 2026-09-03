@@ -20,6 +20,7 @@ import traceback
 from . import db as db_module
 from . import followup_service
 from . import whatsapp_service
+from .routes import ligacoes as ligacoes_routes
 
 INTERVALO_SEGUNDOS = 30
 # Encerrar conversa parada é bem mais raro/caro que checar agendadas —
@@ -49,6 +50,7 @@ def _loop():
                     whatsapp_service.avisar_sla_estourado_se_preciso(conn)
                     whatsapp_service.enviar_resumo_diario_se_preciso(conn)
                     whatsapp_service.avisar_conversa_parada_se_preciso(conn)
+                    ligacoes_routes.avisar_ligacoes_pendentes_se_preciso(conn)
                 if voltas >= VOLTAS_ATE_ENCERRAR_PARADAS:
                     voltas = 0
                     whatsapp_service.encerrar_conversas_paradas(conn)
