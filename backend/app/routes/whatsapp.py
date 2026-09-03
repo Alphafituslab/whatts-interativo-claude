@@ -96,6 +96,29 @@ EXTENSOES_TIPO = {
 EXTENSOES_AUDIO_CONVERSIVEL = {"mp3", "ogg", "oga", "opus", "wav", "m4a", "aac", "amr", "webm", "mp4"}
 
 
+def _webm_e_so_audio(caminho_arquivo: str) -> bool:
+    """.webm serve tanto pra vídeo quanto pra áudio (é o que o
+    MediaRecorder do navegador grava ao pedir só áudio) -- o NOME
+    sozinho não distingue os dois. Quando alguém anexa um .webm pelo
+    seletor de arquivo comum (não pelo botão de gravar), ele caía
+    sempre classificado como "video" e o WhatsApp não conseguia abrir
+    (não tem trilha de vídeo nenhuma pra tocar) -- achado via relato de
+    cliente que não conseguia abrir áudio, repassado pelo Adrian
+    (2026-09-03). Confere de verdade com ffprobe: sem trilha de vídeo,
+    é áudio. Se o ffprobe falhar por qualquer motivo, assume vídeo
+    (comportamento de antes) -- não trava o envio por causa disso."""
+    import subprocess
+    try:
+        resultado = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=codec_type",
+             "-of", "csv=p=0", caminho_arquivo],
+            capture_output=True, text=True, timeout=15,
+        )
+        return resultado.returncode == 0 and not resultado.stdout.strip()
+    except Exception:
+        return False
+
+
 def _classificar_tipo(nome_arquivo: str) -> str:
     ext = nome_arquivo.rsplit(".", 1)[-1].lower() if "." in nome_arquivo else ""
     for tipo, extensoes in EXTENSOES_TIPO.items():
@@ -3246,8 +3269,11 @@ def agendar_mensagem(conversa_id):
         tipo = tipo_forcado if tipo_forcado in EXTENSOES_TIPO else _classificar_tipo(arquivo.filename)
         os.makedirs(PASTA_UPLOADS, exist_ok=True)
         nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
-        with open(os.path.join(PASTA_UPLOADS, nome_seguro), "wb") as f:
+        caminho_salvo = os.path.join(PASTA_UPLOADS, nome_seguro)
+        with open(caminho_salvo, "wb") as f:
             f.write(dados_bytes)
+        if tipo == "video" and not tipo_forcado and nome_seguro.lower().endswith(".webm") and _webm_e_so_audio(caminho_salvo):
+            tipo = "audio"
         midia_url = f"/api/v1/whatsapp/uploads/{nome_seguro}"
         nome_arquivo = arquivo.filename
 
@@ -3450,8 +3476,14 @@ def enviar_anexo(conversa_id):
 
     os.makedirs(PASTA_UPLOADS, exist_ok=True)
     nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
-    with open(os.path.join(PASTA_UPLOADS, nome_seguro), "wb") as f:
+    caminho_salvo = os.path.join(PASTA_UPLOADS, nome_seguro)
+    with open(caminho_salvo, "wb") as f:
         f.write(dados_bytes)
+    # .webm classificado como "video" pelo nome, mas sem tipo forçado
+    # (não veio do botão de gravar) -- confere o conteúdo de verdade
+    # antes de mandar pro WhatsApp como vídeo sem trilha nenhuma.
+    if tipo == "video" and not tipo_forcado and nome_seguro.lower().endswith(".webm") and _webm_e_so_audio(caminho_salvo):
+        tipo = "audio"
     midia_url = f"/api/v1/whatsapp/uploads/{nome_seguro}"
 
     # Num grupo ninguém vira dono: quem responde só entra na lista de quem

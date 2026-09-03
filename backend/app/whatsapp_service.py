@@ -1406,9 +1406,24 @@ def enviar_midia(config, telefone: str, tipo: str, midia_url: str, nome_arquivo:
     if tipo == "audio":
         from urllib.parse import urlsplit
         caminho = urlsplit(midia_url).path or midia_url
+        ja_era_ogg = caminho.lower().endswith(".ogg")
         convertido = _converter_audio_para_ogg(caminho)
         if convertido and convertido != caminho:
             midia_url = midia_url.replace(caminho, convertido, 1)
+        elif not ja_era_ogg and not convertido:
+            # A conversão falhou de verdade (não é só "já tava em OGG,
+            # não precisou converter"). Antes isso caía pro envio do
+            # arquivo ORIGINAL mesmo assim, sem erro nenhum -- o
+            # WhatsApp aceitava o envio (por isso "enviada"/"entregue"
+            # no nosso status), só que o cliente não conseguia abrir o
+            # áudio do outro lado, porque o formato não é o que uma
+            # mensagem de voz do WhatsApp espera. Achado via relato do
+            # Adrian (2026-09-03). Melhor falhar alto aqui do que mandar
+            # um áudio quebrado sem ninguém saber.
+            raise ApiError(
+                "Não consegui converter esse áudio pro formato que o WhatsApp aceita. Tenta gravar de novo.",
+                status=500, codigo="falha_conversao_audio",
+            )
         return enviar_audio(config, telefone, midia_url)
 
     requests = _requests()
