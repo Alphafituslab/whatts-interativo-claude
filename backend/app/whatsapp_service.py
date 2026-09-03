@@ -213,6 +213,7 @@ def obter_configuracao(conn, empresa_id: int):
             "aviso_sla_ativo": 0, "aviso_resumo_diario_ativo": 0, "ultimo_resumo_diario_em": None,
             "aviso_boasvindas_ativo": 0,
             "aviso_conversa_parada_ativo": 0, "aviso_conversa_parada_horas": 24, "aviso_conversa_parada_minutos_fechar": 10,
+            "aviso_conversa_parada_max_prorrogacoes": 3,
         }
     return dict(row)
 
@@ -374,6 +375,14 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         aviso_conversa_parada_minutos_fechar = max(1, int(dados["aviso_conversa_parada_minutos_fechar"]))
     else:
         aviso_conversa_parada_minutos_fechar = anterior.get("aviso_conversa_parada_minutos_fechar") or 10
+    # Quantas vezes o operador pode prorrogar antes do sistema desistir
+    # e fechar de vez. 0 = nunca deixa prorrogar (fecha direto no
+    # primeiro prazo, sem perguntar).
+    if dados.get("aviso_conversa_parada_max_prorrogacoes") not in (None, ""):
+        aviso_conversa_parada_max_prorrogacoes = max(0, int(dados["aviso_conversa_parada_max_prorrogacoes"]))
+    else:
+        atual_max = anterior.get("aviso_conversa_parada_max_prorrogacoes")
+        aviso_conversa_parada_max_prorrogacoes = 3 if atual_max is None else atual_max
 
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
@@ -399,8 +408,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
                                               followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
                                               aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
-                                              aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
+                                              aviso_conversa_parada_max_prorrogacoes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -432,6 +442,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             aviso_conversa_parada_ativo = excluded.aviso_conversa_parada_ativo,
             aviso_conversa_parada_horas = excluded.aviso_conversa_parada_horas,
             aviso_conversa_parada_minutos_fechar = excluded.aviso_conversa_parada_minutos_fechar,
+            aviso_conversa_parada_max_prorrogacoes = excluded.aviso_conversa_parada_max_prorrogacoes,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -442,7 +453,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
          followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
          aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
-         aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar),
+         aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
+         aviso_conversa_parada_max_prorrogacoes),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -3210,7 +3222,8 @@ def avisar_conversa_parada_se_preciso(conn):
     """
     from . import chat_interno_service, followup_service
     empresas = conn.execute(
-        "SELECT empresa_id, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar "
+        "SELECT empresa_id, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar, "
+        "aviso_conversa_parada_max_prorrogacoes "
         "FROM configuracoes_whatsapp WHERE aviso_conversa_parada_ativo = 1"
     ).fetchall()
     if not empresas:
@@ -3221,6 +3234,9 @@ def avisar_conversa_parada_se_preciso(conn):
         empresa_id = emp["empresa_id"]
         horas = emp["aviso_conversa_parada_horas"] or 24
         minutos_fechar = emp["aviso_conversa_parada_minutos_fechar"] or 10
+        max_prorrogacoes = emp["aviso_conversa_parada_max_prorrogacoes"]
+        if max_prorrogacoes is None:
+            max_prorrogacoes = 3
 
         # --- fase 0: se cliente ou agente mexeu DEPOIS do aviso, cancela
         # o fechamento e libera pra avisar de novo se ficar parada outra
@@ -3255,16 +3271,18 @@ def avisar_conversa_parada_se_preciso(conn):
             continue
         limite_aviso = (agora - datetime.timedelta(hours=horas)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         paradas = conn.execute(
-            "SELECT c.id, c.atribuida_usuario_id, ct.nome AS contato_nome, ct.telefone FROM whatsapp_conversas c "
+            "SELECT c.id, c.atribuida_usuario_id, c.vezes_prorrogada, ct.nome AS contato_nome, ct.telefone FROM whatsapp_conversas c "
             "JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
             "WHERE ct.empresa_id = ? AND c.status = 'aberta' AND ct.eh_grupo = 0 "
             "AND c.excluida_em IS NULL AND c.arquivada = 0 "
             "AND c.atribuida_usuario_id IS NOT NULL "
             "AND c.aviso_fechamento_automatico_em IS NULL "
+            # prorrogada: não avisa de novo até o novo prazo vencer
+            "AND (c.prorrogada_ate IS NULL OR c.prorrogada_ate <= ?) "
             "AND c.ultima_msg_operador_em IS NOT NULL "
             "AND (c.ultima_msg_cliente_em IS NULL OR c.ultima_msg_operador_em > c.ultima_msg_cliente_em) "
             "AND c.ultima_msg_operador_em <= ?",
-            (empresa_id, limite_aviso),
+            (empresa_id, agora.strftime("%Y-%m-%dT%H:%M:%S.%fZ"), limite_aviso),
         ).fetchall()
         for c in paradas:
             if c["atribuida_usuario_id"] == remetente_id:
@@ -3274,10 +3292,17 @@ def avisar_conversa_parada_se_preciso(conn):
             ).fetchone()
             if participante is None:
                 continue
+            ainda_pode_prorrogar = max_prorrogacoes > 0 and c["vezes_prorrogada"] < max_prorrogacoes
             texto = (
                 "⚠️ A conversa com *" + str(c["contato_nome"] or c["telefone"]) + "* está parada há mais de " +
                 str(horas) + "h sem resposta do cliente. Se não houver interação nos próximos " +
                 str(minutos_fechar) + " minutos, ela será encerrada automaticamente."
+                + (
+                    " Se quiser continuar esperando, abra a conversa e clique em \u201cProrrogar\u201d (" +
+                    str(c["vezes_prorrogada"]) + " de " + str(max_prorrogacoes) + " já usadas)."
+                    if ainda_pode_prorrogar else
+                    " Essa conversa já usou o limite de prorrogações, então vai fechar mesmo se você não fizer nada."
+                )
             )
             conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, participante["id"])
             if conversa_interna_id:
@@ -3291,6 +3316,41 @@ def avisar_conversa_parada_se_preciso(conn):
             )
             total += 1
     return total
+
+
+def prorrogar_conversa(conn, conversa_id: int, empresa_id: int, usuario_id: int):
+    """Adia o fechamento automático de uma conversa parada por mais um
+    ciclo (mesmo prazo de aviso_conversa_parada_horas), até o limite de
+    aviso_conversa_parada_max_prorrogacoes -- pedido do Clayton
+    (2026-09-03): antes de fechar sozinha, dar a chance do operador
+    prorrogar em vez de só avisar e fechar."""
+    config = obter_configuracao(conn, empresa_id)
+    max_vezes = config.get("aviso_conversa_parada_max_prorrogacoes")
+    if max_vezes is None:
+        max_vezes = 3
+    conversa = conn.execute(
+        "SELECT c.status, c.vezes_prorrogada FROM whatsapp_conversas c "
+        "JOIN whatsapp_contatos ct ON ct.id = c.contato_id WHERE c.id = ? AND ct.empresa_id = ?",
+        (conversa_id, empresa_id),
+    ).fetchone()
+    if conversa is None:
+        raise ApiError("Conversa não encontrada.", status=404, codigo="nao_encontrado")
+    if conversa["status"] != "aberta":
+        raise ApiError("Só dá pra prorrogar uma conversa aberta.", status=400)
+    if conversa["vezes_prorrogada"] >= max_vezes:
+        raise ApiError(
+            f"Essa conversa já foi prorrogada o máximo de vezes permitido ({max_vezes}).",
+            status=400, codigo="limite_prorrogacoes",
+        )
+    horas = config.get("aviso_conversa_parada_horas") or 24
+    prorrogada_ate = (datetime.datetime.utcnow() + datetime.timedelta(hours=horas)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    conn.execute(
+        "UPDATE whatsapp_conversas SET prorrogada_ate = ?, aviso_fechamento_automatico_em = NULL, "
+        "vezes_prorrogada = vezes_prorrogada + 1 WHERE id = ?",
+        (prorrogada_ate, conversa_id),
+    )
+    # registrar_atividade fica por conta de quem chama (ver rota em
+    # routes/whatsapp.py) -- mesmo padrao de fechar_conversa.
 
 
 def enviar_resumo_diario_se_preciso(conn):

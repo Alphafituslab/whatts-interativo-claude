@@ -267,6 +267,14 @@ def _conversa_para_json(row, tags=None):
             "SELECT COUNT(*) AS n FROM whatsapp_grupo_membros WHERE contato_id = ?", (row["contato_id"],)
         ).fetchone()["n"]
     d["horas_sugerir_encerrar"] = HORAS_SUGERIR_ENCERRAR
+    # Pra tela oferecer o botão "Prorrogar" só quando faz sentido: tem
+    # um aviso de fechamento automático pendente, e ainda não bateu o
+    # limite de vezes configurado.
+    if d.get("aviso_fechamento_automatico_em"):
+        conn = get_db()
+        d["pode_prorrogar"] = (d.get("vezes_prorrogada") or 0) < _max_prorrogacoes(conn)
+    else:
+        d["pode_prorrogar"] = False
     # Nome que ESTE usuário deu pro contato ganha da versão compartilhada
     # (o nome de cadastro segue guardado, só não é o que ele vê).
     apelido = _apelidos_contatos().get(d.get("contato_id"))
@@ -304,6 +312,14 @@ def _sugerir_encerrar(conversa) -> bool:
         return False
     limite = (datetime.datetime.utcnow() - datetime.timedelta(hours=HORAS_SUGERIR_ENCERRAR))
     return quando <= limite.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _max_prorrogacoes(conn):
+    if not hasattr(g, "_max_prorrogacoes_cache"):
+        config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+        valor = config.get("aviso_conversa_parada_max_prorrogacoes")
+        g._max_prorrogacoes_cache = 3 if valor is None else valor
+    return g._max_prorrogacoes_cache
 
 
 def _conversas_com_tags(conn, rows):
@@ -2658,6 +2674,19 @@ def compartilhar_localizacao(conversa_id):
         (agora, texto_registro[:120], agora, conversa_id),
     )
     return jsonify({"ok": True, "status": status_msg, "erro": erro})
+
+
+@bp.post("/conversas/<int:conversa_id>/prorrogar")
+@requires_auth
+def prorrogar_conversa(conversa_id):
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError("Só o responsável por esta conversa (ou um administrador) pode prorrogá-la.", status=403, codigo="sem_permissao")
+    whatsapp_service.prorrogar_conversa(conn, conversa_id, g.empresa_id, usuario["id"])
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_prorrogada", conversa["telefone"], conversa_id)
+    return jsonify({"ok": True})
 
 
 @bp.post("/conversas/<int:conversa_id>/reabrir")

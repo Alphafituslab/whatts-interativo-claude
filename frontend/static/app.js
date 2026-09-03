@@ -357,8 +357,24 @@
     return `<div class="wpp-avatar" style="${estilo}background:${corAvatar(u ? u.email : "")};">${escapeHtml(iniciaisContato(u && u.nome))}</div>`;
   }
 
+  // Loga automaticamente na página de downloads usando o token que a
+  // pessoa já tem aqui dentro -- sem isso, clicar num link de "Baixar"
+  // caía numa segunda tela de email/senha (mesmo já estando logada no
+  // Seja Alpha). Memoizado: só tenta uma vez por sessão de fato.
+  let _ssoDownloadsPromise = null;
+  function _prepararDownloads() {
+    if (!_ssoDownloadsPromise && state.accessToken) {
+      _ssoDownloadsPromise = fetch("/downloads/sso", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + state.accessToken },
+      }).catch(() => {});
+    }
+    return _ssoDownloadsPromise;
+  }
+
   function renderShell(conteudoHtml, paginaAtiva) {
     const usuario = state.usuarioAtual;
+    if (usuario && usuario.admin) _prepararDownloads();
     const linksHtml = ITENS_MENU
       .filter((it) => !it.admin || (usuario && usuario.admin))
       .filter((it) => !it.exigeConversas || _podeVerConversas())
@@ -409,7 +425,7 @@
             </div>
             ${usuario && usuario.admin ? `
               <button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
-              <a class="botao secundario pequeno" href="/downloads/" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
+              <a class="botao secundario pequeno" href="/downloads/WhattsInbox-instalador.zip" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
             <button class="botao secundario pequeno ${usuario && usuario.ausente ? "botao-ausente-ligado" : ""}" style="width:100%; margin-top:10px;" data-acao="alternar-ausente"
               title="${usuario && usuario.ausente ? "Você está marcado como ausente — clique pra voltar" : "Avise que você saiu (almoço, reunião). Some das listas de quem pode atender."}">
               ${usuario && usuario.ausente ? `🟡 Ausente${usuario.ausente_motivo ? " — " + escapeHtml(usuario.ausente_motivo) : ""} · voltar` : "🟡 Marcar ausência"}
@@ -3185,8 +3201,18 @@
       auto_30_dias_parada: "🤖 O sistema encerrou sozinho porque a conversa ficou 30 dias sem nenhum movimento.",
     };
     const avisoFechamentoAuto = fechada && motivosAuto[conversa.motivo_finalizacao];
+    // Conversa ainda ABERTA, mas com fechamento automático já marcado
+    // pra acontecer em breve (ver aviso_conversa_parada_* em
+    // Configuração) -- dá pra prorrogar antes que feche sozinha.
+    const contandoParaFechar = !fechada && conversa.aviso_fechamento_automatico_em;
     return `
       ${avisoFechamentoAuto ? `<div class="wpp-aviso-fechamento-auto">${avisoFechamentoAuto} Se não for o caso, é só clicar em "Reabrir".</div>` : ""}
+      ${contandoParaFechar ? `<div class="wpp-aviso-fechamento-auto">
+          ⏳ O cliente não responde há um tempo e essa conversa vai ser encerrada automaticamente em breve${conversa.vezes_prorrogada ? ` (já prorrogada ${conversa.vezes_prorrogada}x)` : ""}.
+          ${conversa.pode_prorrogar
+            ? `<button type="button" class="botao secundario pequeno" data-acao="prorrogar-conversa" data-id="${conversa.id}" style="margin-left:8px;">🔁 Prorrogar</button>`
+            : ` Limite de prorrogações já usado — vai encerrar mesmo.`}
+        </div>` : ""}
       <div class="wpp-chat-cabecalho">
         <button type="button" class="botao-icone wpp-botao-voltar" data-acao="voltar-lista" title="Voltar">←</button>
         <span style="position:relative;">
@@ -4860,6 +4886,10 @@
                <label>Encerrar sozinha X minutos depois do aviso</label>
                <input type="number" name="aviso_conversa_parada_minutos_fechar" min="1" max="1440" value="${config.aviso_conversa_parada_minutos_fechar ?? 10}">
              </div>
+             <div class="campo" style="max-width:220px;">
+               <label>Quantas vezes pode prorrogar antes de encerrar de vez</label>
+               <input type="number" name="aviso_conversa_parada_max_prorrogacoes" min="0" max="20" value="${config.aviso_conversa_parada_max_prorrogacoes ?? 3}">
+             </div>
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
@@ -5552,6 +5582,7 @@
   async function tratarAcao(acao, alvo) {
     switch (acao) {
       case "instalar-app": {
+        // (async por causa do await _prepararDownloads() logo abaixo)
         // O navegador só deixa chamar prompt() a partir de um clique de
         // verdade — por isso o evento fica guardado desde o carregamento
         // e é usado aqui, não na hora em que ele chega.
@@ -5566,28 +5597,31 @@
           const ua = navigator.userAgent;
           const ehApple = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
           const jaInstalado = matchMedia("(display-mode: standalone)").matches;
-          const passoApple = `
+          await _prepararDownloads();
+          const cardAndroid = `
+            <div class="escolha-item" style="cursor:default; align-items:flex-start;">
+              <span class="escolha-texto"><strong>🤖 Android</strong>
+                <span class="escolha-ajuda">Pelo Chrome, sem precisar instalar arquivo nenhum:<br>
+                1. Toque em <strong>⋮</strong> no canto superior direito.<br>
+                2. Escolha <strong>Instalar app</strong> (ou "Adicionar à tela inicial").<br>
+                3. Confirme.</span>
+                <a class="botao secundario pequeno" href="/downloads/SejaAlpha.apk" style="display:inline-block; text-decoration:none; margin-top:8px;">⬇ Ou baixar o app (.apk)</a></span>
+            </div>`;
+          const cardApple = `
             <div class="escolha-item" style="cursor:default; align-items:flex-start;">
               <span class="escolha-texto"><strong>🍎 iPhone e iPad (Safari)</strong>
                 <span class="escolha-ajuda">1. Toque no botão <strong>Compartilhar</strong> (o quadrado com a seta pra cima, embaixo).<br>
                 2. Role a lista e escolha <strong>Adicionar à Tela de Início</strong>.<br>
                 3. Toque em <strong>Adicionar</strong>.<br>
-                <em>Só funciona pelo Safari — pelo Chrome do iPhone essa opção não existe.</em></span></span>
-            </div>`;
-          const passoAndroid = `
-            <div class="escolha-item" style="cursor:default; align-items:flex-start;">
-              <span class="escolha-texto"><strong>🤖 Android (Chrome)</strong>
-                <span class="escolha-ajuda">1. Toque em <strong>⋮</strong> no canto superior direito.<br>
-                2. Escolha <strong>Instalar app</strong> (ou "Adicionar à tela inicial").<br>
-                3. Confirme.</span></span>
+                <em>Só funciona pelo Safari — pelo Chrome do iPhone essa opção não existe. Não existe arquivo pra instalar no iPhone: a Apple só permite pela App Store.</em></span></span>
             </div>`;
           return abrirModal(`
             <h3 style="margin-top:0;">📲 Instalar no aparelho</h3>
             ${jaInstalado
               ? `<p class="dica">Você já está usando o app instalado — não precisa instalar de novo.</p>`
-              : `<p class="dica">Este navegador não ofereceu o atalho automático, então é pelo menu dele. Leva uns 10 segundos:</p>`}
+              : `<p class="dica">Escolha o aparelho:</p>`}
             <div class="escolha-lista">
-              ${ehApple ? passoApple + passoAndroid : passoAndroid + passoApple}
+              ${ehApple ? cardApple + cardAndroid : cardAndroid + cardApple}
             </div>
             <div class="rodape-modal"><button type="button" class="botao" data-acao="fechar-modal">Entendi</button></div>`);
         }
@@ -5685,6 +5719,17 @@
           ? "Conversa voltou a contar como pendente."
           : "Marcada como resolvida — sai do alerta de atraso. Se o cliente escrever de novo, volta a cobrar.");
         atualizarBadgeSla();
+        return renderWhatsapp(id);
+      }
+      case "prorrogar-conversa": {
+        const id = Number(alvo.dataset.id);
+        try {
+          await chamarApi(`/whatsapp/conversas/${id}/prorrogar`, { method: "POST" });
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não foi possível prorrogar.");
+          return;
+        }
+        definirFlash("ok", "Conversa prorrogada.");
         return renderWhatsapp(id);
       }
       case "alternar-ausente": {
@@ -7693,6 +7738,7 @@
             aviso_conversa_parada_ativo: !!dados.get("aviso_conversa_parada_ativo"),
             aviso_conversa_parada_horas: Number(dados.get("aviso_conversa_parada_horas")) || 24,
             aviso_conversa_parada_minutos_fechar: Number(dados.get("aviso_conversa_parada_minutos_fechar")) || 10,
+            aviso_conversa_parada_max_prorrogacoes: Number(dados.get("aviso_conversa_parada_max_prorrogacoes") ?? 3),
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");

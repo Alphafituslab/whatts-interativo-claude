@@ -21,7 +21,7 @@ import jwt
 from flask import Blueprint, make_response, redirect, request, send_file, send_from_directory
 
 from .. import VERSAO_SERVIDOR, security
-from ..context import get_db
+from ..context import get_db, requires_auth
 
 bp = Blueprint("downloads", __name__, url_prefix="/downloads")
 
@@ -186,6 +186,26 @@ def pagina():
         # pegar o instalador; nada disso precisa aparecer pra ele.
         html = re.sub(r"<!--ADMIN-->.*?<!--/ADMIN-->", "", html, flags=re.S)
     return html
+
+
+@bp.post("/sso")
+@requires_auth
+def sso():
+    """Login automático nesta página pra quem já está logado no app.
+
+    Sem isso, clicar em "Baixar" de dentro do próprio Seja Alpha (na
+    barra lateral, ou no modal de instalar no celular) caía na tela de
+    email/senha desta página -- confuso, já que a pessoa tinha acabado
+    de logar. O token normal do app (Bearer, no cabeçalho) já prova
+    quem é; aqui só troca isso pelo cookie de sessão que este módulo
+    usa, pra um <a href> comum já baixar o arquivo direto."""
+    from flask import g, jsonify
+    resposta = make_response(jsonify({"ok": True}))
+    resposta.set_cookie(
+        COOKIE, _emitir_cookie(g.usuario_atual["id"]),
+        max_age=SESSAO_SEGUNDOS, httponly=True, secure=True, samesite="Lax", path="/",
+    )
+    return resposta
 
 
 @bp.post("/entrar")
