@@ -2081,6 +2081,30 @@ def _aplicar_edicao(conn, empresa_id: int, id_alvo: str, texto_novo: str):
     return True
 
 
+def _extrair_stanza_citada(dados: dict):
+    """Id (no WhatsApp) da mensagem que o CLIENTE citou/respondeu, ou
+    None. Mesma régua defensiva de _autor_da_mensagem_de_grupo: o
+    contextInfo não vem sempre no mesmo lugar, muda com o tipo da
+    mensagem -- procura nos formatos conhecidos em vez de confiar só
+    num. Sem isso, quando o cliente cita uma mensagem antiga, o sistema
+    não mostrava qual foi (achado via Adrian, 2026-09-03)."""
+    conteudo = dados.get("message") or {}
+    candidatos = [
+        (conteudo.get("extendedTextMessage") or {}).get("contextInfo"),
+        (conteudo.get("imageMessage") or {}).get("contextInfo"),
+        (conteudo.get("videoMessage") or {}).get("contextInfo"),
+        (conteudo.get("documentMessage") or {}).get("contextInfo"),
+        (conteudo.get("audioMessage") or {}).get("contextInfo"),
+        (conteudo.get("stickerMessage") or {}).get("contextInfo"),
+        (conteudo.get("conversation") and dados.get("contextInfo")),
+        dados.get("contextInfo"),
+    ]
+    for ctx in candidatos:
+        if isinstance(ctx, dict) and ctx.get("stanzaId"):
+            return ctx["stanzaId"]
+    return None
+
+
 def _extrair_texto(mensagem: dict) -> str:
     conteudo = mensagem.get("message") or {}
     return (
@@ -2966,6 +2990,20 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     texto = _extrair_texto(dados)
     agora = _now_iso()
 
+    # Cliente citou/respondeu uma mensagem anterior: acha o ID LOCAL
+    # dela (o WhatsApp manda o dele, não o nosso) pra a bolha poder
+    # mostrar "respondendo a: ..." igual já mostra quando SOMOS nós que
+    # citamos (ver htmlCitacao no frontend).
+    responde_a = None
+    stanza_citada = _extrair_stanza_citada(dados)
+    if stanza_citada:
+        linha_citada = conn.execute(
+            "SELECT id FROM whatsapp_mensagens WHERE conversa_id = ? AND externo_id = ?",
+            (conversa["id"], stanza_citada),
+        ).fetchone()
+        if linha_citada:
+            responde_a = linha_citada["id"]
+
     # Imagem/vídeo/documento/áudio mandado pelo cliente — baixa e salva
     # de verdade (não só a legenda). Se der errado ao salvar, não perde a
     # mensagem inteira: cai pra texto simples (com a legenda, se tiver).
@@ -2987,10 +3025,10 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         conn.execute(
             """
             INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em,
-                                            autor_nome, autor_telefone)
-            VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?)
+                                            autor_nome, autor_telefone, responde_a)
+            VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?, ?)
             """,
-            (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone),
+            (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone, responde_a),
         )
         conn.execute(
             "UPDATE whatsapp_conversas SET nao_lidas = nao_lidas + 1, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
@@ -3045,10 +3083,10 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     conn.execute(
         """
         INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em,
-                                        autor_nome, autor_telefone)
-        VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?)
+                                        autor_nome, autor_telefone, responde_a)
+        VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?, ?)
         """,
-        (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone),
+        (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone, responde_a),
     )
     conn.execute(
         """
