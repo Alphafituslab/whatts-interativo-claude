@@ -18,14 +18,17 @@ from ..context import ApiError, get_db, requires_auth
 bp = Blueprint("ligacoes", __name__, url_prefix="/api/v1/ligacoes")
 
 CAMPOS_EDITAVEIS = (
-    "data_ligacao", "empresa_contatada", "contato_nome",
-    "terceiriza_para", "responsavel_area", "observacoes",
+    "data_ligacao", "empresa_contatada", "contato_nome", "telefone",
+    "email", "data_envio_email", "terceiriza_para", "responsavel_area", "observacoes",
 )
 
 COLUNAS = (
     ("data_ligacao", "Data"),
     ("empresa_contatada", "Empresa"),
     ("contato_nome", "Com quem falei"),
+    ("telefone", "Telefone"),
+    ("email", "E-mail"),
+    ("data_envio_email", "Data envio e-mail"),
     ("terceiriza_para", "Terceirizam para"),
     ("responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)"),
     ("observacoes", "Observações"),
@@ -134,7 +137,7 @@ def exportar_xlsx():
         cel.fill = PatternFill("solid", fgColor="0A7D67")
     for linha in linhas:
         ws.append([linha[campo] or "" for campo, _ in COLUNAS])
-    larguras = [12, 26, 22, 26, 34, 40]
+    larguras = [12, 26, 20, 16, 22, 16, 22, 34, 34]
     for i, largura in enumerate(larguras, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = largura
     ws.freeze_panes = "A2"
@@ -167,7 +170,7 @@ def exportar_pdf():
     # tentar quebrar linha em várias alturas por célula com fpdf2 dá bug
     # de alinhamento fácil; pra uma exportação de apoio, previsível e
     # sem quebrar é melhor que bonito.
-    larguras = [22, 45, 38, 45, 60, 67]
+    larguras = [20, 32, 26, 24, 32, 22, 28, 44, 44]
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_fill_color(10, 125, 103)
     pdf.set_text_color(255, 255, 255)
