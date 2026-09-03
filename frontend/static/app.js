@@ -2507,6 +2507,38 @@
   // apagar). O resultado era a tela inteira sumir e voltar a cada envio:
   // o "piscar" que incomodava. Voltando pra mesma tela, o conteúdo antigo
   // fica no lugar até o novo estar pronto.
+  // Acordeão da tela de Configuração -- pedido do Clayton (2026-09-03):
+  // "fazer com que todas as abas aqui dentro... ao clicar devem ficar
+  // ocultos e abrir tipo um abre e fecha por uma setinha... para não
+  // ficar uma poluição visual". Em vez de reescrever cada seção à mão
+  // (são umas 15, com formulários e HTML bem diferentes entre si),
+  // transforma qualquer ".cartao" com um <h3> no topo num acordeão,
+  // depois que o HTML já está no DOM.
+  function _aplicarAcordeaoCartoes(raiz) {
+    if (!state._configSecoesAbertas) state._configSecoesAbertas = new Set();
+    raiz.querySelectorAll(":scope > .cartao").forEach((cartao, i) => {
+      const h3 = cartao.querySelector(":scope > h3");
+      if (!h3) return;
+      const chave = [...h3.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim() || `secao-${i}`;
+      const corpo = document.createElement("div");
+      corpo.className = "cartao-corpo";
+      while (h3.nextSibling) corpo.appendChild(h3.nextSibling);
+      cartao.appendChild(corpo);
+      h3.classList.add("cartao-titulo-clicavel");
+      h3.insertAdjacentHTML("afterbegin", '<span class="cartao-seta">▸</span>');
+      const aberto = state._configSecoesAbertas.has(chave);
+      corpo.hidden = !aberto;
+      h3.classList.toggle("cartao-aberto", aberto);
+      h3.addEventListener("click", () => {
+        const vaiAbrir = corpo.hidden;
+        corpo.hidden = !vaiAbrir;
+        h3.classList.toggle("cartao-aberto", vaiAbrir);
+        if (vaiAbrir) state._configSecoesAbertas.add(chave);
+        else state._configSecoesAbertas.delete(chave);
+      });
+    });
+  }
+
   function _carregandoSeTrocouDeTela(tela) {
     if (state._telaAtual !== tela) {
       app.innerHTML = '<div class="carregando-inicial">Carregando…</div>';
@@ -4659,6 +4691,7 @@
     renderShell(
       `<h2>Configuração</h2>
        <div class="cartao">
+         <h3 style="margin-top:0;">Conexão — Evolution API</h3>
          <p class="dica">
            Conexão <strong>não-oficial</strong>, via <a href="https://github.com/EvolutionAPI/evolution-api" target="_blank" rel="noopener">Evolution API</a>
            (auto-hospedada, gratuita) — não é a API oficial da Meta. O número pode ser banido em caso de uso
@@ -4976,6 +5009,8 @@
        </div>`}`,
       "configuracao"
     );
+    if (config.status_conexao === "aguardando_qrcode") state._configSecoesAbertas = new Set([...(state._configSecoesAbertas || []), "Conexão"]);
+    _aplicarAcordeaoCartoes(document.querySelector(".pagina"));
 
     if (config.status_conexao === "aguardando_qrcode") iniciarPollingStatusWhatsapp();
     else pararPollingStatusWhatsapp();
