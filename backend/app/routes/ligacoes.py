@@ -26,8 +26,10 @@ bp = Blueprint("ligacoes", __name__, url_prefix="/api/v1/ligacoes")
 CAMPOS_EDITAVEIS = (
     "data_ligacao", "empresa_contatada", "contato_nome", "telefone",
     "email", "data_envio_email", "terceiriza_para", "responsavel_area",
-    "observacoes", "proximo_contato_em",
+    "observacoes", "proximo_contato_em", "aceitacao", "negociacao_fechada",
 )
+
+ACEITACAO_VALIDAS = ("quente", "morno", "frio")
 
 COLUNAS = (
     ("data_ligacao", "Data"),
@@ -39,6 +41,8 @@ COLUNAS = (
     ("terceiriza_para", "Terceirizam com"),
     ("responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)"),
     ("proximo_contato_em", "Próximo contato"),
+    ("aceitacao", "Aceitação"),
+    ("negociacao_fechada", "Negociação fechada"),
     ("observacoes", "Observações"),
 )
 
@@ -96,6 +100,8 @@ def atualizar(ligacao_id):
     for campo in CAMPOS_EDITAVEIS:
         if campo in dados:
             valor = dados[campo]
+            if campo == "aceitacao" and valor not in ACEITACAO_VALIDAS and valor not in (None, ""):
+                raise ApiError("Aceitação inválida — use quente, morno, frio ou deixe em branco.", status=400)
             campos.append(f"{campo} = ?")
             valores.append((valor or "").strip() or None if isinstance(valor, str) else valor)
     # Mudou a data do próximo contato: libera pra avisar de novo (senão
@@ -221,9 +227,18 @@ def exportar_xlsx():
     for cel in ws[1]:
         cel.font = Font(bold=True, color="FFFFFF")
         cel.fill = PatternFill("solid", fgColor="0A7D67")
+    rotulos_aceitacao = {"quente": "🔥 Quente", "morno": "🟡 Morno", "frio": "❄️ Frio"}
     for linha in linhas:
-        ws.append([linha[campo] or "" for campo, _ in COLUNAS])
-    larguras = [12, 26, 20, 16, 22, 16, 22, 34, 14, 34]
+        valores_linha = []
+        for campo, _ in COLUNAS:
+            if campo == "aceitacao":
+                valores_linha.append(rotulos_aceitacao.get(linha[campo], ""))
+            elif campo == "negociacao_fechada":
+                valores_linha.append("Sim" if linha[campo] else "")
+            else:
+                valores_linha.append(linha[campo] or "")
+        ws.append(valores_linha)
+    larguras = [12, 26, 20, 16, 22, 16, 22, 34, 14, 12, 16, 34]
     for i, largura in enumerate(larguras, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = largura
     ws.freeze_panes = "A2"
@@ -256,7 +271,7 @@ def exportar_pdf():
     # tentar quebrar linha em várias alturas por célula com fpdf2 dá bug
     # de alinhamento fácil; pra uma exportação de apoio, previsível e
     # sem quebrar é melhor que bonito.
-    larguras = [18, 28, 22, 20, 28, 18, 24, 38, 16, 38]
+    larguras = [18, 24, 22, 20, 24, 18, 24, 34, 16, 16, 20, 32]
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_fill_color(10, 125, 103)
     pdf.set_text_color(255, 255, 255)
@@ -275,9 +290,16 @@ def exportar_pdf():
         texto = texto.encode("latin-1", "replace").decode("latin-1")
         return texto if len(texto) <= max_chars else texto[: max_chars - 1] + "..."
 
+    rotulos_aceitacao_pdf = {"quente": "Quente", "morno": "Morno", "frio": "Frio"}
     for linha in linhas:
         for (campo, _), largura in zip(COLUNAS, larguras):
-            pdf.cell(largura, 7, _cortar(linha[campo], largura), border=1)
+            if campo == "aceitacao":
+                texto_celula = rotulos_aceitacao_pdf.get(linha[campo], "")
+            elif campo == "negociacao_fechada":
+                texto_celula = "Sim" if linha[campo] else ""
+            else:
+                texto_celula = linha[campo]
+            pdf.cell(largura, 7, _cortar(texto_celula, largura), border=1)
         pdf.ln()
 
     saida = bytes(pdf.output())

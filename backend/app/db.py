@@ -80,6 +80,7 @@ SCHEMA_FILES = [
     "schema_065_ligacoes.sql",
     "schema_066_ligacoes_contato.sql",
     "schema_067_lembrete_ligacoes.sql",
+    "schema_068_aceitacao_lead.sql",
 ]
 
 

@@ -5561,8 +5561,12 @@
     ["terceiriza_para", "Terceirizam com", "text", 180],
     ["responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)", "text", 260],
     ["proximo_contato_em", "Próximo contato", "date", 150],
+    ["aceitacao", "Aceitação", "select-aceitacao", 130],
+    ["negociacao_fechada", "Negociação fechada", "checkbox", 70],
     ["observacoes", "Observações", "text", 260],
   ];
+
+  const ROTULO_ACEITACAO = { quente: "🔥 Quente", morno: "🟡 Morno", frio: "❄️ Frio" };
 
   async function renderLigacoes() {
     _carregandoSeTrocouDeTela("ligacoes");
@@ -5573,14 +5577,45 @@
       linhas = [];
     }
 
+    // Filtro/ordenação por aceitação -- pedido do Clayton: "depois eu
+    // posso fazer uma consulta por filtro e elencar por ordem de
+    // aceitação e possível negociações fechadas". Fica na memória da
+    // tela (não salva no servidor) pra não sumir ao reabrir sem querer.
+    if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
+    const filtro = state._ligacoesFiltro;
+    const ORDEM_ACEITACAO = { quente: 0, morno: 1, frio: 2, "": 3 };
+
+    let linhasFiltradas = linhas.filter((l) => {
+      if (filtro.aceitacao === "vazio" && l.aceitacao) return false;
+      if (filtro.aceitacao && filtro.aceitacao !== "vazio" && l.aceitacao !== filtro.aceitacao) return false;
+      if (filtro.soFechadas && !l.negociacao_fechada) return false;
+      return true;
+    });
+    if (filtro.ordenar) {
+      linhasFiltradas = [...linhasFiltradas].sort((a, b) =>
+        (ORDEM_ACEITACAO[a.aceitacao || ""] ?? 3) - (ORDEM_ACEITACAO[b.aceitacao || ""] ?? 3));
+    }
+
     const hoje = new Date().toISOString().slice(0, 10);
+    const htmlCampo = (l, campo, tipo) => {
+      if (tipo === "select-aceitacao") {
+        return `<select data-campo-ligacao="${campo}" style="min-width:120px;">
+          <option value="">— em branco —</option>
+          ${["quente", "morno", "frio"].map((v) => `<option value="${v}" ${l.aceitacao === v ? "selected" : ""}>${ROTULO_ACEITACAO[v]}</option>`).join("")}
+        </select>`;
+      }
+      if (tipo === "checkbox") {
+        return `<input type="checkbox" data-campo-ligacao="${campo}" ${l[campo] ? "checked" : ""} style="width:18px; height:18px;">`;
+      }
+      return `<input type="${tipo}" data-campo-ligacao="${campo}" value="${escapeHtml(l[campo] || "")}" style="min-width:${tipo === "date" ? "130" : "150"}px;">`;
+    };
     const htmlLinha = (l) => {
       const vencida = l.proximo_contato_em && l.proximo_contato_em <= hoje;
       return `
       <tr data-linha-ligacao="${l.id}" class="${vencida ? "wpp-linha-ligacao-vencida" : ""}">
         ${COLUNAS_LIGACOES.map(([campo, , tipo]) => `
           <td>
-            <input type="${tipo}" data-campo-ligacao="${campo}" value="${escapeHtml(l[campo] || "")}" style="min-width:${tipo === "date" ? "130" : "150"}px;">
+            ${htmlCampo(l, campo, tipo)}
             ${campo === "proximo_contato_em" && vencida ? `<button type="button" class="botao secundario pequeno" data-acao="prorrogar-ligacao" data-id="${l.id}" style="margin-top:4px; white-space:nowrap;" title="Adia o próximo contato">🔁 Prorrogar${l.vezes_prorrogado ? ` (${l.vezes_prorrogado}x)` : ""}</button>` : ""}
           </td>
         `).join("")}
@@ -5591,31 +5626,50 @@
     renderShell(
       `<h2>📞 Leads do Consulta Anvisa</h2>
        <div class="cartao">
-         <p class="dica">Controle das suas ligações de prospecção — dia, empresa, com quem falou, pra quem terceirizam, e quem é o responsável pela área de suplementos/novos produtos/contratação de fabricantes. Clique numa célula pra editar; salva sozinho ao sair do campo. Marque "Próximo contato" pra o Assistente Seja Alpha te lembrar no chat interno quando chegar o dia (ative em Configuração).</p>
+         <p class="dica">Controle das suas ligações de prospecção — dia, empresa, com quem falou, pra quem terceirizam, e quem é o responsável pela área de suplementos/novos produtos/contratação de fabricantes. Clique numa célula pra editar; salva sozinho ao sair do campo. Marque "Próximo contato" pra o Assistente Seja Alpha te lembrar no chat interno quando chegar o dia (ative em Configuração). "Aceitação" mede o quanto o cliente demonstrou interesse ao conversar ou responder o e-mail.</p>
          <div class="barra-acoes" style="margin-bottom:12px;">
            <button type="button" class="botao" data-acao="nova-ligacao">+ Nova linha</button>
            <button type="button" class="botao secundario" data-acao="exportar-ligacoes-xlsx">⬇ Exportar Excel</button>
            <button type="button" class="botao secundario" data-acao="exportar-ligacoes-pdf">⬇ Exportar PDF</button>
          </div>
+         <div class="barra-acoes" style="margin-bottom:12px; align-items:center;">
+           <label class="texto-suave" style="display:flex; align-items:center; gap:6px;">Filtrar aceitação:
+             <select data-acao-change="filtrar-ligacoes-aceitacao">
+               <option value="" ${!filtro.aceitacao ? "selected" : ""}>Todas</option>
+               <option value="quente" ${filtro.aceitacao === "quente" ? "selected" : ""}>🔥 Quente</option>
+               <option value="morno" ${filtro.aceitacao === "morno" ? "selected" : ""}>🟡 Morno</option>
+               <option value="frio" ${filtro.aceitacao === "frio" ? "selected" : ""}>❄️ Frio</option>
+               <option value="vazio" ${filtro.aceitacao === "vazio" ? "selected" : ""}>— em branco —</option>
+             </select>
+           </label>
+           <label class="texto-suave" style="display:flex; align-items:center; gap:6px;">
+             <input type="checkbox" data-acao-change="filtrar-ligacoes-fechadas" ${filtro.soFechadas ? "checked" : ""}> Só negociações fechadas
+           </label>
+           <button type="button" class="botao secundario pequeno" data-acao="ordenar-ligacoes-aceitacao">${filtro.ordenar ? "✓ " : ""}Ordenar por aceitação</button>
+           <span class="texto-suave">${linhasFiltradas.length} de ${linhas.length}</span>
+         </div>
          <div style="overflow-x:auto;">
            <table class="wpp-tabela-ligacoes">
              <thead><tr>${COLUNAS_LIGACOES.map(([, rotulo]) => `<th>${escapeHtml(rotulo)}</th>`).join("")}<th></th></tr></thead>
-             <tbody>${linhas.length ? linhas.map(htmlLinha).join("") : `<tr><td colspan="${COLUNAS_LIGACOES.length + 1}" class="texto-suave">Nenhuma ligação registrada ainda — clique em "+ Nova linha" pra começar.</td></tr>`}</tbody>
+             <tbody>${linhasFiltradas.length ? linhasFiltradas.map(htmlLinha).join("") : `<tr><td colspan="${COLUNAS_LIGACOES.length + 1}" class="texto-suave">${linhas.length ? "Nenhuma linha bate com o filtro." : `Nenhuma ligação registrada ainda — clique em "+ Nova linha" pra começar.`}</td></tr>`}</tbody>
            </table>
          </div>
        </div>`,
       "ligacoes"
     );
 
-    // Salva ao sair do campo (blur) -- não a cada tecla, senão vira uma
-    // chamada por letra digitada.
-    document.querySelectorAll("[data-campo-ligacao]").forEach((input) => {
-      input.addEventListener("blur", async () => {
-        const tr = input.closest("[data-linha-ligacao]");
+    // Salva ao sair do campo (blur pros de texto/data, change pros de
+    // seleção/checkbox) -- não a cada tecla, senão vira uma chamada por
+    // letra digitada.
+    document.querySelectorAll("[data-campo-ligacao]").forEach((campo) => {
+      const evento = (campo.tagName === "SELECT" || campo.type === "checkbox") ? "change" : "blur";
+      campo.addEventListener(evento, async () => {
+        const tr = campo.closest("[data-linha-ligacao]");
         const id = Number(tr.dataset.linhaLigacao);
-        const campo = input.dataset.campoLigacao;
+        const nomeCampo = campo.dataset.campoLigacao;
+        const valor = campo.type === "checkbox" ? campo.checked : campo.value;
         try {
-          await chamarApi(`/ligacoes/${id}`, { method: "PUT", body: { [campo]: input.value } });
+          await chamarApi(`/ligacoes/${id}`, { method: "PUT", body: { [nomeCampo]: valor } });
         } catch (e) {
           definirFlash("erro", "Não consegui salvar — tenta de novo.");
         }
@@ -5786,6 +5840,21 @@
           definirFlash("erro", "Não consegui criar a linha.");
           return;
         }
+        return renderLigacoes();
+      }
+      case "filtrar-ligacoes-aceitacao": {
+        if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
+        state._ligacoesFiltro.aceitacao = alvo.value;
+        return renderLigacoes();
+      }
+      case "filtrar-ligacoes-fechadas": {
+        if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
+        state._ligacoesFiltro.soFechadas = alvo.checked;
+        return renderLigacoes();
+      }
+      case "ordenar-ligacoes-aceitacao": {
+        if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
+        state._ligacoesFiltro.ordenar = !state._ligacoesFiltro.ordenar;
         return renderLigacoes();
       }
       case "prorrogar-ligacao": {
