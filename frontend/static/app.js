@@ -5558,7 +5558,7 @@
     ["telefone", "Telefone", "text", 140],
     ["email", "E-mail", "email", 190],
     ["data_envio_email", "Data envio e-mail", "date", 140],
-    ["terceiriza_para", "Terceirizam para", "text", 180],
+    ["terceiriza_para", "Terceirizam com", "text", 180],
     ["responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)", "text", 260],
     ["proximo_contato_em", "Próximo contato", "date", 150],
     ["observacoes", "Observações", "text", 260],

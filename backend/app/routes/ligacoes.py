@@ -36,7 +36,7 @@ COLUNAS = (
     ("telefone", "Telefone"),
     ("email", "E-mail"),
     ("data_envio_email", "Data envio e-mail"),
-    ("terceiriza_para", "Terceirizam para"),
+    ("terceiriza_para", "Terceirizam com"),
     ("responsavel_area", "Responsável (suplementos/novos produtos/fabricantes)"),
     ("proximo_contato_em", "Próximo contato"),
     ("observacoes", "Observações"),
