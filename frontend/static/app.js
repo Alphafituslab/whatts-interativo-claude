@@ -3390,10 +3390,10 @@
             : escapeHtml(_telefoneBonito(conversa.telefone))}${conversa.menu_setor && !conversa.eh_grupo ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
         </div>
         <div class="wpp-chat-acoes">
+          <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Só a equipe vê, nunca vai pro cliente">🗒️ Notas internas${(notas || []).length ? ` (${notas.length})` : ""}</button>
-          <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
           ${fechada
@@ -4156,10 +4156,10 @@
         </div>
         <div class="wpp-chat-acoes">
           ${souAlheio ? "" : `
+          <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
           <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
           <button type="button" class="botao-icone" data-acao="abrir-agendar-interno" data-id="${conversa.id}" title="Agendar mensagem pro colega">🕒</button>
           <button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" data-nome="${escapeHtml(outroNome)}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>
-          <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar-interno" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-interno" data-id="${conversa.id}">Reabrir</button>`
