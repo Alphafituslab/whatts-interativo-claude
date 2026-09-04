@@ -2742,6 +2742,7 @@ def calcular_dashboard(conn, empresa_id: int):
         ).fetchone()["n"]
 
         duracoes_atendimento = []
+        detalhes_atendimento = []
         tempos_primeira_resposta = []
         tempos_resposta = []
 
@@ -2784,7 +2785,12 @@ def calcular_dashboard(conn, empresa_id: int):
                     if m["texto"] == TEXTO_PESQUISA_SATISFACAO:
                         break
                     fim = m["criado_em"]
-                duracoes_atendimento.append(_diferenca_minutos(c["criado_em"], fim))
+                duracao = _diferenca_minutos(c["criado_em"], fim)
+                duracoes_atendimento.append(duracao)
+                detalhes_atendimento.append({
+                    "conversa_id": c["id"], "contato_id": c["contato_id"],
+                    "duracao_min": duracao, "criado_em": c["criado_em"], "fim": fim,
+                })
 
             ja_registrou_primeira = False
             for i, m in enumerate(msgs):
@@ -2803,6 +2809,15 @@ def calcular_dashboard(conn, empresa_id: int):
             f"SELECT nota FROM whatsapp_avaliacoes WHERE usuario_id = ?{filtro_data}", (uid, *params_data)
         ).fetchall()
         notas = [a["nota"] for a in avaliacoes]
+
+        piores_atendimentos = sorted(detalhes_atendimento, key=lambda d: d["duracao_min"], reverse=True)[:5]
+        for d in piores_atendimentos:
+            contato = conn.execute(
+                "SELECT nome, telefone FROM whatsapp_contatos WHERE id = ?", (d["contato_id"],)
+            ).fetchone()
+            d["contato_nome"] = contato["nome"] if contato else None
+            d["telefone"] = contato["telefone"] if contato else None
+            del d["contato_id"]
 
         resultado_usuarios.append({
             "id": uid, "nome": u["nome"], "email": u["email"], "admin": bool(u["admin"]), "ativo": bool(u["ativo"]),
@@ -2826,6 +2841,7 @@ def calcular_dashboard(conn, empresa_id: int):
             # tabela ele quer ver o PIOR caso, não a média/mediana -- é o
             # que mostra o atendimento mais demorado de cada um.
             "pior_atendimento_min": max(duracoes_atendimento) if duracoes_atendimento else None,
+            "piores_atendimentos": piores_atendimentos,
         })
 
     # Ranking de negociações fechadas — o "controle total" que o admin

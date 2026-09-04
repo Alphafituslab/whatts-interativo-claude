@@ -5450,7 +5450,9 @@
         <td>${u.mensagens_enviadas}</td>
         <td>${fmtMinutos(u.tempo_medio_primeira_resposta_min)}</td>
         <td>${fmtMinutos(u.tempo_medio_resposta_min)}</td>
-        <td>${fmtMinutos(u.pior_atendimento_min)}</td>
+        <td>${u.piores_atendimentos && u.piores_atendimentos.length
+          ? `<button type="button" class="botao-link" data-acao="ver-piores-atendimentos" data-usuario='${escapeHtml(JSON.stringify(u.piores_atendimentos))}' data-nome="${escapeHtml(u.nome)}" style="text-decoration:underline; cursor:pointer; background:none; border:none; padding:0; color:inherit; font:inherit;" title="Ver quais atendimentos foram esses">${fmtMinutos(u.pior_atendimento_min)} 🔍</button>`
+          : fmtMinutos(u.pior_atendimento_min)}</td>
         <td>${u.paradas_agora > 0 ? `<span class="selo bloqueado piscando">${u.paradas_agora}</span>` : "—"}</td>
         <td>${htmlEstrelas(u.media_avaliacao)}${u.total_avaliacoes ? ` <span class="texto-suave">(${u.total_avaliacoes})</span>` : ""}</td>
       </tr>`).join("");
@@ -6025,6 +6027,30 @@
         if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
         state._ligacoesFiltro.soFechadas = alvo.checked;
         return renderLigacoes();
+      }
+      case "ver-piores-atendimentos": {
+        let itens = [];
+        try { itens = JSON.parse(alvo.dataset.usuario || "[]"); } catch (e) { itens = []; }
+        const nome = alvo.dataset.nome || "";
+        abrirModal(`
+          <h3 style="margin-top:0;">🔍 Piores atendimentos — ${escapeHtml(nome)}</h3>
+          <p class="dica">Os atendimentos fechados que mais demoraram, do pior pro melhor. Clica num cliente pra abrir a conversa.</p>
+          <div style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;">
+            ${itens.length ? itens.map((it) => `
+              <button type="button" data-acao="ir-para-atendimento" data-conversa-id="${it.conversa_id}" style="display:block; width:100%; text-align:left; text-decoration:none; color:inherit; background:none; border:1px solid var(--borda); border-radius:10px; padding:10px 12px; cursor:pointer; font:inherit;">
+                <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+                  <strong>${escapeHtml(it.contato_nome || it.telefone || "—")}</strong>
+                  <span class="selo bloqueado">${fmtMinutos(it.duracao_min)}</span>
+                </div>
+                <div class="texto-suave" style="font-size:12px; margin-top:2px;">${escapeHtml(it.telefone || "")} · começou em ${fmtData(it.criado_em)}</div>
+              </button>`).join("") : `<p class="dica">Nenhum atendimento fechado ainda.</p>`}
+          </div>
+          <div class="rodape-modal"><button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button></div>`, "modal-largo");
+        return;
+      }
+      case "ir-para-atendimento": {
+        fecharModais();
+        return navegarPara(`#/whatsapp/${alvo.dataset.conversaId}`);
       }
       case "ordenar-ligacoes-aceitacao": {
         if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
