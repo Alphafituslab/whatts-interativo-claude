@@ -216,6 +216,7 @@ def obter_configuracao(conn, empresa_id: int):
             "aviso_conversa_parada_max_prorrogacoes": 3,
             "aviso_ligacoes_ativo": 0, "dias_prorrogar_ligacao": 3,
             "envio_massa_ativo": 0, "envio_massa_intervalo_segundos": 8,
+            "ia_ativa": 0, "ia_api_key": None, "ia_modo": "sugestao",
         }
     return dict(row)
 
@@ -240,6 +241,9 @@ def config_publica(config):
     d["aviso_conversa_parada_ativo"] = bool(d.get("aviso_conversa_parada_ativo"))
     d["aviso_ligacoes_ativo"] = bool(d.get("aviso_ligacoes_ativo"))
     d["envio_massa_ativo"] = bool(d.get("envio_massa_ativo"))
+    d["ia_ativa"] = bool(d.get("ia_ativa"))
+    d["ia_api_key_configurada"] = bool(d.get("ia_api_key"))
+    d.pop("ia_api_key", None)
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -411,6 +415,16 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         atual_dias = anterior.get("dias_prorrogar_ligacao")
         dias_prorrogar_ligacao = 3 if atual_dias is None else atual_dias
 
+    # Assistente de IA -- Fase 1 (infraestrutura, desligada por padrao).
+    # A key nunca some ao salvar sem mandar uma nova (mesmo padrao da
+    # evolution_apikey): so troca se vier uma de verdade nesta chamada.
+    nova_ia_key = dados.get("ia_api_key")
+    ia_api_key = anterior.get("ia_api_key") if not nova_ia_key else nova_ia_key.strip()
+    ia_ativa = (1 if dados.get("ia_ativa") else 0) if "ia_ativa" in dados else (1 if anterior.get("ia_ativa") else 0)
+    if ia_ativa and not ia_api_key:
+        raise ApiError("Para ativar o assistente de IA, informe a chave da API primeiro.", status=400)
+    ia_modo = (dados.get("ia_modo") or "").strip() or anterior.get("ia_modo") or "sugestao"
+
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
         localizacao_nome = (dados.get("localizacao_nome") or "").strip() or None
@@ -437,8 +451,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
                                               aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
-                                              envio_massa_ativo, envio_massa_intervalo_segundos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -475,6 +489,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             dias_prorrogar_ligacao = excluded.dias_prorrogar_ligacao,
             envio_massa_ativo = excluded.envio_massa_ativo,
             envio_massa_intervalo_segundos = excluded.envio_massa_intervalo_segundos,
+            ia_ativa = excluded.ia_ativa,
+            ia_api_key = excluded.ia_api_key,
+            ia_modo = excluded.ia_modo,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -487,7 +504,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
          aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
-         envio_massa_ativo, envio_massa_intervalo_segundos),
+         envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo),
     )
     return obter_configuracao(conn, empresa_id)
 

@@ -82,6 +82,7 @@ SCHEMA_FILES = [
     "schema_067_lembrete_ligacoes.sql",
     "schema_068_aceitacao_lead.sql",
     "schema_069_envio_massa.sql",
+    "schema_070_assistente_ia.sql",
 ]
 
 

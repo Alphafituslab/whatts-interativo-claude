@@ -5151,6 +5151,21 @@
 
        ${!ehSuperAdmin ? "" : `
        <div class="cartao">
+         <h3 style="margin-top:0;">🤖 Assistente de IA</h3>
+         <p class="dica">Fase 1: só a infraestrutura, ainda sem custo nenhum. Enquanto não tiver uma chave de API cadastrada aqui, nada é chamado — fica desligado de verdade. Quando você tiver a chave da Anthropic, cola aqui e habilita; começa no modo <strong>sugestão</strong> (ele sugere, o atendente decide) e você pode desligar quando quiser.</p>
+         <form data-form="salvar-ia">
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="ia_ativa" ${config.ia_ativa ? "checked" : ""}> Habilitar assistente de IA</label>
+           </div>
+           <div class="campo">
+             <label>Chave da API (Anthropic)</label>
+             <input type="password" name="ia_api_key" placeholder="${config.ia_api_key_configurada ? "•••••••••••• (já configurada — deixe em branco pra manter)" : "sk-ant-..."}" autocomplete="off">
+           </div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
          <h3 style="margin-top:0;">Backup</h3>
          <p class="dica">Backup automático todo dia, guardando os últimos 14 dias. Baixe uma cópia de vez em quando pra guardar fora deste computador — se algo acontecer, é só importar de volta.</p>
          <div class="barra-acoes" style="margin-bottom:14px;">
@@ -8322,6 +8337,22 @@
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-ia": {
+        try {
+          await chamarApi("/whatsapp/configuracao", {
+            method: "PUT",
+            body: {
+              ia_ativa: !!dados.get("ia_ativa"),
+              ia_api_key: dados.get("ia_api_key") || undefined,
+            },
+          });
+        } catch (erro) {
+          definirFlash("erro", erro.mensagem || "Não deu pra salvar.");
+          return renderWhatsappConfiguracao();
+        }
+        definirFlash("ok", "Configuração do assistente de IA salva.");
         return renderWhatsappConfiguracao();
       }
       case "salvar-envio-massa": {
