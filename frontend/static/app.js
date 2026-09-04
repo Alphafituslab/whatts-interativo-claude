@@ -5570,9 +5570,18 @@
 
   async function renderLigacoes() {
     _carregandoSeTrocouDeTela("ligacoes");
-    let linhas;
+    const souAdmin = !!state.usuarioAtual.admin;
+    if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false, usuarioId: "" };
+    const filtro = state._ligacoesFiltro;
+
+    let linhas, usuarios = [];
     try {
-      linhas = await chamarApi("/ligacoes");
+      const [linhasResp, usuariosResp] = await Promise.all([
+        chamarApi(`/ligacoes${souAdmin && filtro.usuarioId ? `?usuario_id=${filtro.usuarioId}` : ""}`),
+        souAdmin ? chamarApi("/usuarios").catch(() => []) : Promise.resolve([]),
+      ]);
+      linhas = linhasResp;
+      usuarios = usuariosResp;
     } catch (e) {
       linhas = [];
     }
@@ -5581,8 +5590,6 @@
     // posso fazer uma consulta por filtro e elencar por ordem de
     // aceitação e possível negociações fechadas". Fica na memória da
     // tela (não salva no servidor) pra não sumir ao reabrir sem querer.
-    if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
-    const filtro = state._ligacoesFiltro;
     const ORDEM_ACEITACAO = { quente: 0, morno: 1, frio: 2, "": 3 };
 
     let linhasFiltradas = linhas.filter((l) => {
@@ -5613,6 +5620,7 @@
       const vencida = l.proximo_contato_em && l.proximo_contato_em <= hoje;
       return `
       <tr data-linha-ligacao="${l.id}" class="${vencida ? "wpp-linha-ligacao-vencida" : ""}">
+        ${souAdmin ? `<td class="texto-suave">${escapeHtml(l.criado_por_nome || "—")}</td>` : ""}
         ${COLUNAS_LIGACOES.map(([campo, , tipo]) => `
           <td>
             ${htmlCampo(l, campo, tipo)}
@@ -5633,6 +5641,13 @@
            <button type="button" class="botao secundario" data-acao="exportar-ligacoes-pdf">⬇ Exportar PDF</button>
          </div>
          <div class="barra-acoes" style="margin-bottom:12px; align-items:center;">
+           ${souAdmin ? `
+           <label class="texto-suave" style="display:flex; align-items:center; gap:6px;">Colaborador:
+             <select data-acao-change="filtrar-ligacoes-usuario">
+               <option value="" ${!filtro.usuarioId ? "selected" : ""}>Todos</option>
+               ${usuarios.filter((u) => u.ativo).map((u) => `<option value="${u.id}" ${String(filtro.usuarioId) === String(u.id) ? "selected" : ""}>${escapeHtml(u.nome)}</option>`).join("")}
+             </select>
+           </label>` : ""}
            <label class="texto-suave" style="display:flex; align-items:center; gap:6px;">Filtrar aceitação:
              <select data-acao-change="filtrar-ligacoes-aceitacao">
                <option value="" ${!filtro.aceitacao ? "selected" : ""}>Todas</option>
@@ -5650,8 +5665,8 @@
          </div>
          <div style="overflow-x:auto;">
            <table class="wpp-tabela-ligacoes">
-             <thead><tr>${COLUNAS_LIGACOES.map(([, rotulo]) => `<th>${escapeHtml(rotulo)}</th>`).join("")}<th></th></tr></thead>
-             <tbody>${linhasFiltradas.length ? linhasFiltradas.map(htmlLinha).join("") : `<tr><td colspan="${COLUNAS_LIGACOES.length + 1}" class="texto-suave">${linhas.length ? "Nenhuma linha bate com o filtro." : `Nenhuma ligação registrada ainda — clique em "+ Nova linha" pra começar.`}</td></tr>`}</tbody>
+             <thead><tr>${souAdmin ? "<th>Colaborador</th>" : ""}${COLUNAS_LIGACOES.map(([, rotulo]) => `<th>${escapeHtml(rotulo)}</th>`).join("")}<th></th></tr></thead>
+             <tbody>${linhasFiltradas.length ? linhasFiltradas.map(htmlLinha).join("") : `<tr><td colspan="${COLUNAS_LIGACOES.length + 1 + (souAdmin ? 1 : 0)}" class="texto-suave">${linhas.length ? "Nenhuma linha bate com o filtro." : `Nenhuma ligação registrada ainda — clique em "+ Nova linha" pra começar.`}</td></tr>`}</tbody>
            </table>
          </div>
        </div>`,
@@ -5840,6 +5855,11 @@
           definirFlash("erro", "Não consegui criar a linha.");
           return;
         }
+        return renderLigacoes();
+      }
+      case "filtrar-ligacoes-usuario": {
+        if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false, usuarioId: "" };
+        state._ligacoesFiltro.usuarioId = alvo.value;
         return renderLigacoes();
       }
       case "filtrar-ligacoes-aceitacao": {

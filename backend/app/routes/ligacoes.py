@@ -5,8 +5,9 @@ quem terceirizam, quem é o responsável pela área de suplementos/novos
 produtos/contratação de fabricantes), editável direto no sistema, com
 histórico completo e exportação em Excel/PDF.
 
-Compartilhada pela empresa toda (mesmo padrão de respostas prontas e
-etiquetas) -- qualquer um com acesso às conversas pode ver e editar.
+Cada usuário só vê e edita as PRÓPRIAS linhas (as que ele criou) --
+admin vê e filtra por todo mundo (pedido do Clayton, 2026-09-03:
+"cada usuario pode ver o seu e o admin pode ver o de todos").
 
 Lembrete de "entrar em contato novamente" (2026-09-03): cada linha pode
 ter uma data de próximo contato; quando chega o dia, o Assistente Seja
@@ -51,10 +52,28 @@ def _now_iso():
     return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def _carregar(conn, empresa_id, ligacao_id):
-    row = conn.execute(
-        "SELECT * FROM crm_ligacoes WHERE id = ? AND empresa_id = ?", (ligacao_id, empresa_id)
-    ).fetchone()
+def _condicao_dono(usuario):
+    """Cada um vê e mexe só no que criou; admin vê tudo, ou filtra por
+    um colaborador específico com ?usuario_id=N (mesmo padrão do
+    Follow-up)."""
+    if usuario["admin"]:
+        alvo = request.args.get("usuario_id")
+        if alvo:
+            try:
+                return "criado_por = ?", (int(alvo),)
+            except (TypeError, ValueError):
+                raise ApiError("usuario_id inválido.", status=400)
+        return "1 = 1", ()
+    return "criado_por = ?", (usuario["id"],)
+
+
+def _carregar(conn, empresa_id, ligacao_id, usuario=None):
+    condicoes = ["id = ?", "empresa_id = ?"]
+    params = [ligacao_id, empresa_id]
+    if usuario is not None and not usuario["admin"]:
+        condicoes.append("criado_por = ?")
+        params.append(usuario["id"])
+    row = conn.execute(f"SELECT * FROM crm_ligacoes WHERE {' AND '.join(condicoes)}", params).fetchone()
     if row is None:
         raise ApiError("Ligação não encontrada.", status=404, codigo="nao_encontrado")
     return row
@@ -64,11 +83,12 @@ def _carregar(conn, empresa_id, ligacao_id):
 @requires_auth
 def listar():
     conn = get_db()
+    condicao, params_extra = _condicao_dono(g.usuario_atual)
     rows = conn.execute(
-        "SELECT l.*, u.nome AS criado_por_nome FROM crm_ligacoes l "
-        "LEFT JOIN usuarios u ON u.id = l.criado_por "
-        "WHERE l.empresa_id = ? ORDER BY l.ordem, l.id",
-        (g.empresa_id,),
+        f"SELECT l.*, u.nome AS criado_por_nome FROM crm_ligacoes l "
+        f"LEFT JOIN usuarios u ON u.id = l.criado_por "
+        f"WHERE l.empresa_id = ? AND {condicao} ORDER BY l.ordem, l.id",
+        (g.empresa_id, *params_extra),
     ).fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -94,7 +114,7 @@ def criar():
 @requires_auth
 def atualizar(ligacao_id):
     conn = get_db()
-    _carregar(conn, g.empresa_id, ligacao_id)  # 404 se não for desta empresa
+    _carregar(conn, g.empresa_id, ligacao_id, g.usuario_atual)  # 404 se não for desta empresa/dono
     dados = request.get_json(silent=True) or {}
     campos, valores = [], []
     for campo in CAMPOS_EDITAVEIS:
@@ -130,7 +150,7 @@ def prorrogar(ligacao_id):
     from .. import whatsapp_service
 
     conn = get_db()
-    _carregar(conn, g.empresa_id, ligacao_id)
+    _carregar(conn, g.empresa_id, ligacao_id, g.usuario_atual)
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
     dias = config.get("dias_prorrogar_ligacao") or 3
     nova_data = (datetime.date.today() + datetime.timedelta(days=dias)).isoformat()
@@ -147,7 +167,7 @@ def prorrogar(ligacao_id):
 @requires_auth
 def excluir(ligacao_id):
     conn = get_db()
-    _carregar(conn, g.empresa_id, ligacao_id)
+    _carregar(conn, g.empresa_id, ligacao_id, g.usuario_atual)
     conn.execute("DELETE FROM crm_ligacoes WHERE id = ? AND empresa_id = ?", (ligacao_id, g.empresa_id))
     conn.commit()
     return jsonify({"ok": True})
@@ -205,8 +225,10 @@ def avisar_ligacoes_pendentes_se_preciso(conn):
 
 
 def _linhas_ordenadas(conn):
+    condicao, params_extra = _condicao_dono(g.usuario_atual)
     return conn.execute(
-        "SELECT * FROM crm_ligacoes WHERE empresa_id = ? ORDER BY ordem, id", (g.empresa_id,)
+        f"SELECT * FROM crm_ligacoes WHERE empresa_id = ? AND {condicao} ORDER BY ordem, id",
+        (g.empresa_id, *params_extra),
     ).fetchall()
 
 
