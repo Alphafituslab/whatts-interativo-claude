@@ -585,6 +585,28 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
   animation: none; box-shadow: 0 4px 18px rgba(0,0,0,0.18);
 }
 
+/* Banner de "alguém está te ligando" -- reaproveita .wpp-aviso-atencao
+   (mesmo pulso, mesma posição fixa no topo), só com os botões de
+   atender/recusar no lugar do link "Ver conversa". */
+.wpp-chamada-recebendo { gap: 10px; }
+
+@keyframes wpp-barra-chamada-pulso {
+  0%, 100% { box-shadow: 0 4px 18px rgba(0,0,0,0.22), 0 0 0 0 rgba(31,168,85,0.5); }
+  50% { box-shadow: 0 4px 18px rgba(0,0,0,0.22), 0 0 0 7px rgba(31,168,85,0); }
+}
+.wpp-barra-chamada {
+  position: fixed; bottom: 18px; right: 18px; z-index: 9999;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--superficie); color: var(--texto); border: 1px solid var(--borda); border-radius: var(--raio-pilula);
+  padding: 8px 10px 8px 8px; font-size: 13px;
+  animation: wpp-barra-chamada-pulso 2s ease-in-out infinite;
+}
+.wpp-barra-chamada-info { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.wpp-barra-chamada-info strong { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.wpp-barra-chamada-info span { font-size: 11px; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.wpp-barra-chamada .wpp-botao-desligar { background: #e5484d; color: #fff; }
+.wpp-barra-chamada .wpp-botao-desligar:hover { background: #c93a3f; }
+
 .wpp-abas { display: flex; gap: 4px; padding: 2px; background: var(--superficie-2); border-radius: var(--raio-peq); flex-shrink: 0; }
 .wpp-aba {
   flex: 1; padding: 7px 0; border: none; background: none; border-radius: 7px; font: inherit; font-weight: 700;

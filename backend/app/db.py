@@ -84,6 +84,7 @@ SCHEMA_FILES = [
     "schema_069_envio_massa.sql",
     "schema_070_assistente_ia.sql",
     "schema_071_ia_openai.sql",
+    "schema_072_chamadas_internas.sql",
 ]
 
 

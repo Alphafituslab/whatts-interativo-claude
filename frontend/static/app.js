@@ -1749,6 +1749,11 @@
     // evita consulta pesada a cada 4s.
     atualizarContadorFollowup();
     setInterval(atualizarContadorFollowup, 60000);
+    // Chamada de voz "tocando" -- 2,5s dá uma latência baixa o
+    // suficiente pra parecer telefone de verdade sem martelar o
+    // servidor. Roda em QUALQUER tela, igual o resto dos avisos.
+    _verificarChamadaPendente();
+    setInterval(_verificarChamadaPendente, 2500);
   }
 
   // Avisa (com bolinha piscando no menu lateral) que chegou mensagem nova
@@ -2225,6 +2230,338 @@
     banner.querySelector("a").addEventListener("click", () => banner.remove());
     document.body.appendChild(banner);
     setTimeout(() => { if (banner.isConnected) banner.remove(); }, 9000);
+  }
+
+  // ============================================================
+  // Chamada de voz no chat interno (WebRTC) -- pedido do Clayton
+  // (2026-09-04): "e possivel implantar fazer chamadas de voz no chat
+  // interno? como se eu estivesse fazendo uma ligação porem somente no
+  // chat interno".
+  //
+  // O áudio vai DIRETO de um navegador pro outro (WebRTC) -- o
+  // servidor só entrega o "bilhete" (quem está ligando pra quem) e
+  // troca as poucas mensagens técnicas de conexão (oferta/resposta e
+  // candidatos ICE) através da tabela chat_interno_chamadas_sinais,
+  // consultada por polling (mesmo padrão do resto do sistema, sem
+  // WebSocket). Uma vez conectada, a chamada não depende mais do
+  // servidor pra nada além de saber quando desligar.
+  //
+  // Só STUN público (Google) por enquanto, sem TURN -- funciona bem
+  // dentro da rede da empresa e na maioria das redes domésticas; uma
+  // rede corporativa muito restritiva do outro lado pode não conseguir
+  // conectar (aí precisaria de um servidor TURN, que é peça de
+  // infraestrutura à parte, não só código).
+  const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+
+  function _limparEstadoChamada() {
+    const c = state._chamada;
+    if (!c) return;
+    if (c.pollSinais) clearInterval(c.pollSinais);
+    if (c.pollStatus) clearInterval(c.pollStatus);
+    if (c.timerDuracao) clearInterval(c.timerDuracao);
+    if (c.pc) { try { c.pc.close(); } catch (e) {} }
+    if (c.streamLocal) c.streamLocal.getTracks().forEach((t) => t.stop());
+    if (c.audioEl) { c.audioEl.pause(); c.audioEl.remove(); }
+    if (c.barra) c.barra.remove();
+    state._chamada = null;
+  }
+
+  function _tocarToqueChamada() {
+    _pararToqueChamada();
+    const tocar = () => _tocarNotas([
+      { hz: 880, inicio: 0,    duracao: 0.35, volume: 0.20 },
+      { hz: 740, inicio: 0.40, duracao: 0.35, volume: 0.20 },
+      { hz: 880, inicio: 1.10, duracao: 0.35, volume: 0.20 },
+      { hz: 740, inicio: 1.50, duracao: 0.35, volume: 0.20 },
+    ]);
+    tocar();
+    state._chamadaToqueInterval = setInterval(tocar, 2600);
+  }
+  function _pararToqueChamada() {
+    if (state._chamadaToqueInterval) { clearInterval(state._chamadaToqueInterval); state._chamadaToqueInterval = null; }
+  }
+
+  function _mmss(segundos) {
+    const m = Math.floor(segundos / 60), s2 = Math.floor(segundos % 60);
+    return `${String(m).padStart(2, "0")}:${String(s2).padStart(2, "0")}`;
+  }
+
+  // Barra "em chamada" -- fica visível em QUALQUER tela (fixa no body,
+  // fora do #app), porque a pessoa pode continuar navegando o sistema
+  // enquanto conversa, do mesmo jeito que um telefone de verdade.
+  function _mostrarBarraChamada(nome, foto) {
+    const existente = document.querySelector("[data-wpp-barra-chamada]");
+    if (existente) existente.remove();
+    const barra = document.createElement("div");
+    barra.className = "wpp-barra-chamada";
+    barra.setAttribute("data-wpp-barra-chamada", "");
+    barra.innerHTML = `
+      ${htmlAvatarContato(foto, nome, nome, 30)}
+      <div class="wpp-barra-chamada-info">
+        <strong>${escapeHtml(nome || "Colega")}</strong>
+        <span data-wpp-chamada-cronometro>Conectando…</span>
+      </div>
+      <button type="button" class="botao-icone" data-wpp-chamada-mudo title="Mutar meu microfone">🎙️</button>
+      <button type="button" class="botao-icone wpp-botao-desligar" data-wpp-chamada-desligar title="Encerrar chamada">📵</button>`;
+    barra.querySelector("[data-wpp-chamada-mudo]").addEventListener("click", () => {
+      const c = state._chamada;
+      if (!c || !c.streamLocal) return;
+      c.mudo = !c.mudo;
+      c.streamLocal.getAudioTracks().forEach((t) => { t.enabled = !c.mudo; });
+      barra.querySelector("[data-wpp-chamada-mudo]").textContent = c.mudo ? "🔇" : "🎙️";
+      barra.querySelector("[data-wpp-chamada-mudo]").title = c.mudo ? "Reativar meu microfone" : "Mutar meu microfone";
+    });
+    barra.querySelector("[data-wpp-chamada-desligar]").addEventListener("click", () => _desligarChamada());
+    document.body.appendChild(barra);
+    if (state._chamada) state._chamada.barra = barra;
+    return barra;
+  }
+
+  function _iniciarCronometro() {
+    const c = state._chamada;
+    if (!c) return;
+    c.inicioEm = Date.now();
+    const el = () => document.querySelector("[data-wpp-chamada-cronometro]");
+    const atualiza = () => { const span = el(); if (span) span.textContent = _mmss((Date.now() - c.inicioEm) / 1000); };
+    atualiza();
+    c.timerDuracao = setInterval(atualiza, 1000);
+  }
+
+  async function _desligarChamada(motivoRemoto) {
+    const c = state._chamada;
+    if (!c) return;
+    try { await chamarApi(`/chat-interno/chamadas/${c.id}/encerrar`, { method: "POST" }); } catch (e) { /* já foi, sem problema */ }
+    if (!motivoRemoto) {
+      // Avisa o outro lado na hora, sem esperar ele reparar sozinho no
+      // status -- o poll de sinais dele já está rodando durante a
+      // chamada e pega isto no próximo ciclo (até 1s de atraso).
+      try { await chamarApi(`/chat-interno/chamadas/${c.id}/sinal`, { method: "POST", body: { tipo: "encerrar", dados: null } }); } catch (e) {}
+    }
+    definirFlash("ok", motivoRemoto || "Chamada encerrada.");
+    _limparEstadoChamada();
+  }
+
+  // Poll genérico dos sinais do OUTRO lado -- roda tanto em quem ligou
+  // quanto em quem atendeu, depois que os dois já têm RTCPeerConnection
+  // criada. Cuida de candidato ICE chegando aos poucos (trickle) e do
+  // aviso de "encerrar" vindo do outro lado.
+  function _iniciarPollSinais(chamadaId, aoReceber) {
+    let ultimoId = state._chamada && state._chamada.ultimoSinalId || 0;
+    const tick = async () => {
+      if (!state._chamada || state._chamada.id !== chamadaId) return;
+      try {
+        const sinais = await chamarApi(`/chat-interno/chamadas/${chamadaId}/sinais?apos=${ultimoId}`);
+        for (const sinal of sinais) {
+          ultimoId = sinal.id;
+          await aoReceber(sinal);
+        }
+      } catch (e) { /* próximo ciclo tenta de novo */ }
+    };
+    const id = setInterval(tick, 1000);
+    if (state._chamada) { state._chamada.pollSinais = id; state._chamada.ultimoSinalId = ultimoId; }
+    return id;
+  }
+
+  function _configurarPeerConnection(chamadaId) {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    pc.onicecandidate = (ev) => {
+      if (!ev.candidate) return;
+      chamarApi(`/chat-interno/chamadas/${chamadaId}/sinal`, {
+        method: "POST", body: { tipo: "candidato", dados: ev.candidate.toJSON() },
+      }).catch(() => {});
+    };
+    pc.ontrack = (ev) => {
+      const c = state._chamada;
+      if (!c) return;
+      if (!c.audioEl) {
+        c.audioEl = document.createElement("audio");
+        c.audioEl.autoplay = true;
+        document.body.appendChild(c.audioEl);
+      }
+      c.audioEl.srcObject = ev.streams[0];
+    };
+    pc.onconnectionstatechange = () => {
+      if (["failed", "closed"].includes(pc.connectionState) && state._chamada && state._chamada.id === chamadaId) {
+        _desligarChamada("A ligação caiu.");
+      }
+    };
+    return pc;
+  }
+
+  async function _tratarSinalDurantaChamada(sinal) {
+    const c = state._chamada;
+    if (!c || !c.pc) return;
+    if (sinal.tipo === "candidato") {
+      try { await c.pc.addIceCandidate(sinal.dados); } catch (e) {}
+    } else if (sinal.tipo === "resposta" && c.papel === "chamador") {
+      await c.pc.setRemoteDescription(sinal.dados);
+    } else if (sinal.tipo === "encerrar") {
+      _desligarChamada(`${c.outroNome || "O colega"} encerrou a chamada.`);
+    }
+  }
+
+  // ---- Quem LIGA --------------------------------------------------
+  async function _ligarChamada(conversaId, nome) {
+    if (state._chamada) { definirFlash("erro", "Você já está em uma chamada."); return; }
+    let streamLocal;
+    try {
+      streamLocal = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      definirFlash("erro", "Não consegui acessar seu microfone. Verifique a permissão do navegador.");
+      return;
+    }
+    let resp;
+    try {
+      resp = await chamarApi(`/chat-interno/conversas/${conversaId}/chamadas`, { method: "POST" });
+    } catch (e) {
+      streamLocal.getTracks().forEach((t) => t.stop());
+      definirFlash("erro", e.mensagem || "Não deu pra iniciar a chamada.");
+      return;
+    }
+    state._chamada = {
+      id: resp.id, papel: "chamador", conversaId, outroNome: nome, streamLocal, mudo: false, ultimoSinalId: 0,
+    };
+    const pc = _configurarPeerConnection(resp.id);
+    state._chamada.pc = pc;
+    streamLocal.getTracks().forEach((t) => pc.addTrack(t, streamLocal));
+
+    const oferta = await pc.createOffer();
+    await pc.setLocalDescription(oferta);
+    await chamarApi(`/chat-interno/chamadas/${resp.id}/sinal`, { method: "POST", body: { tipo: "oferta", dados: oferta } });
+
+    const barra = _mostrarBarraChamada(nome, null);
+    barra.querySelector("[data-wpp-chamada-cronometro]").textContent = "Chamando…";
+    barra.querySelector("[data-wpp-chamada-mudo]").hidden = true;
+
+    _iniciarPollSinais(resp.id, _tratarSinalDurantaChamada);
+
+    // Enquanto ninguém atende, fica de olho no status (recusou? perdeu
+    // o prazo de 60s sem resposta?) -- os sinais só chegam DEPOIS de
+    // atendida, então isto aqui é o único jeito de saber antes disso.
+    const pollStatus = setInterval(async () => {
+      if (!state._chamada || state._chamada.id !== resp.id) { clearInterval(pollStatus); return; }
+      try {
+        const atual = await chamarApi(`/chat-interno/chamadas/${resp.id}`);
+        if (atual.status === "atendida" && state._chamada.inicioEm === undefined) {
+          clearInterval(pollStatus);
+          const span = document.querySelector("[data-wpp-chamada-cronometro]");
+          if (span) span.textContent = "Conectando…";
+          const botaoMudo = document.querySelector("[data-wpp-chamada-mudo]");
+          if (botaoMudo) botaoMudo.hidden = false;
+          _iniciarCronometro();
+        } else if (atual.status === "recusada") {
+          clearInterval(pollStatus);
+          _limparEstadoChamada();
+          definirFlash("erro", `${nome || "O colega"} recusou a chamada.`);
+        } else if (atual.status === "perdida") {
+          clearInterval(pollStatus);
+          _limparEstadoChamada();
+          definirFlash("erro", `${nome || "O colega"} não atendeu.`);
+        }
+      } catch (e) {}
+    }, 1500);
+    state._chamada.pollStatus = pollStatus;
+  }
+
+  // ---- Quem RECEBE --------------------------------------------------
+  function _mostrarChamadaRecebendo(chamada) {
+    const existente = document.querySelector("[data-wpp-chamada-recebendo]");
+    if (existente) existente.remove();
+    const banner = document.createElement("div");
+    banner.className = "wpp-aviso-atencao wpp-chamada-recebendo";
+    banner.setAttribute("data-wpp-chamada-recebendo", "");
+    banner.innerHTML = `
+      ${htmlAvatarContato(chamada.de_foto, chamada.de_nome, chamada.de_nome, 34)}
+      <span>📞 <strong>${escapeHtml(chamada.de_nome || "Alguém")}</strong> está te ligando…</span>
+      <button type="button" class="botao pequeno" data-wpp-chamada-atender style="background:var(--verde-whatsapp, #1fa855);">Atender</button>
+      <button type="button" class="botao secundario pequeno" data-wpp-chamada-recusar>Recusar</button>`;
+    banner.querySelector("[data-wpp-chamada-atender]").addEventListener("click", () => _atenderChamada(chamada));
+    banner.querySelector("[data-wpp-chamada-recusar]").addEventListener("click", () => _recusarChamada(chamada));
+    document.body.appendChild(banner);
+    _tocarToqueChamada();
+    return banner;
+  }
+
+  async function _recusarChamada(chamada) {
+    _pararToqueChamada();
+    const banner = document.querySelector("[data-wpp-chamada-recebendo]");
+    if (banner) banner.remove();
+    state._chamadaRecebendoId = null;
+    try { await chamarApi(`/chat-interno/chamadas/${chamada.id}/recusar`, { method: "POST" }); } catch (e) {}
+  }
+
+  async function _atenderChamada(chamada) {
+    _pararToqueChamada();
+    const banner = document.querySelector("[data-wpp-chamada-recebendo]");
+    if (banner) banner.remove();
+    state._chamadaRecebendoId = null;
+
+    let streamLocal;
+    try {
+      streamLocal = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      definirFlash("erro", "Não consegui acessar seu microfone. Verifique a permissão do navegador.");
+      try { await chamarApi(`/chat-interno/chamadas/${chamada.id}/recusar`, { method: "POST" }); } catch (e2) {}
+      return;
+    }
+
+    state._chamada = {
+      id: chamada.id, papel: "atendente", outroNome: chamada.de_nome, streamLocal, mudo: false, ultimoSinalId: 0,
+    };
+    const pc = _configurarPeerConnection(chamada.id);
+    state._chamada.pc = pc;
+    streamLocal.getTracks().forEach((t) => pc.addTrack(t, streamLocal));
+
+    // A oferta pode já ter chegado (quem liga manda assim que disca) ou
+    // chegar nos próximos instantes -- busca o que tiver e continua
+    // ouvindo pelo poll normal depois.
+    let oferta = chamada._ofertaPreCarregada || null;
+    for (let tentativa = 0; !oferta && tentativa < 10; tentativa++) {
+      const sinais = await chamarApi(`/chat-interno/chamadas/${chamada.id}/sinais?apos=0`).catch(() => []);
+      const doOferta = sinais.find((s) => s.tipo === "oferta");
+      if (doOferta) { oferta = doOferta.dados; state._chamada.ultimoSinalId = doOferta.id; break; }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    if (!oferta) {
+      definirFlash("erro", "Não deu pra conectar a chamada (sinal não chegou a tempo).");
+      _limparEstadoChamada();
+      return;
+    }
+
+    await pc.setRemoteDescription(oferta);
+    const resposta = await pc.createAnswer();
+    await pc.setLocalDescription(resposta);
+
+    await chamarApi(`/chat-interno/chamadas/${chamada.id}/atender`, { method: "POST" });
+    await chamarApi(`/chat-interno/chamadas/${chamada.id}/sinal`, { method: "POST", body: { tipo: "resposta", dados: resposta } });
+
+    _mostrarBarraChamada(chamada.de_nome, chamada.de_foto);
+    _iniciarCronometro();
+    _iniciarPollSinais(chamada.id, _tratarSinalDurantaChamada);
+  }
+
+  // Consultado a cada poucos segundos, em QUALQUER tela (ver
+  // iniciarPollingStatusGlobal) -- é assim que o telefone "toca" mesmo
+  // se a pessoa estiver, por exemplo, olhando o Dashboard.
+  async function _verificarChamadaPendente() {
+    if (state._chamada) return; // já atendendo/ligando outra -- não interrompe
+    try {
+      const pendente = await chamarApi("/chat-interno/chamadas/pendente");
+      if (!pendente) {
+        if (state._chamadaRecebendoId) {
+          // Sumiu sozinha: quem ligou desistiu, ou os 60s sem resposta
+          // estouraram no servidor.
+          _pararToqueChamada();
+          const banner = document.querySelector("[data-wpp-chamada-recebendo]");
+          if (banner) banner.remove();
+          state._chamadaRecebendoId = null;
+        }
+        return;
+      }
+      if (state._chamadaRecebendoId === pendente.id) return; // já mostrando esta
+      state._chamadaRecebendoId = pendente.id;
+      _mostrarChamadaRecebendo(pendente);
+    } catch (e) { /* próximo ciclo tenta de novo */ }
   }
 
   function _mostrarConfirmacaoAtencaoEnviada(nome) {
@@ -4157,6 +4494,7 @@
         <div class="wpp-chat-acoes">
           ${souAlheio ? "" : `
           <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
+          <button type="button" class="botao-icone wpp-botao-ligar" data-acao="ligar-interno" data-id="${conversa.id}" data-nome="${escapeHtml(outroNome)}" title="Chamada de voz com ${escapeHtml(outroNome)}">📞</button>
           <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
           <button type="button" class="botao-icone" data-acao="abrir-agendar-interno" data-id="${conversa.id}" title="Agendar mensagem pro colega">🕒</button>
           <button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" data-nome="${escapeHtml(outroNome)}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>
@@ -7326,6 +7664,7 @@
       }
       case "busca-mensagens-proxima": _irParaResultadoBusca(1); return;
       case "busca-mensagens-anterior": _irParaResultadoBusca(-1); return;
+      case "ligar-interno": return _ligarChamada(Number(alvo.dataset.id), alvo.dataset.nome);
       case "inserir-emoji": {
         const textarea = document.querySelector(".wpp-textarea");
         const inicio = textarea.selectionStart || textarea.value.length;
