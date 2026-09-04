@@ -94,12 +94,33 @@ def iniciar(conversa_id):
 
     # Pedido do Clayton (2026-09-04): avisar na hora se o colega está
     # offline, em vez de deixar tocar pro vácuo até estourar os 60s.
+    #
+    # NÃO reaproveita usuario_esta_online() (o "online" que aparece na
+    # lista de usuários e decide fila de atendimento) -- aquele janela é
+    # de 30 minutos de propósito (tolerante, pra fila de cliente não
+    # ficar reagindo demais a uma queda de rede de alguns minutos).
+    # Ligação de voz é diferente: precisa saber se a pessoa está com a
+    # tela aberta AGORA. Relato real do Clayton: a Anne tinha fechado o
+    # sistema fazia tempo e mesmo assim aparecia "online" pra ligar --
+    # ela só ia sair da janela de 30min bem mais tarde. O app manda
+    # request pro servidor a cada poucos segundos enquanto está aberto
+    # (ultimo_acesso atualiza no máximo 60s atrasado -- ver
+    # _marcar_online em context.py), então 2 minutos sem nenhum acesso
+    # já é sinal forte de aba fechada / sem internet, sem gerar falso
+    # positivo por causa do próprio intervalo normal de polling.
     destino = conn.execute(
         "SELECT ultimo_acesso, offline_forcado, ausente, nome FROM usuarios WHERE id = ?", (outro,)
     ).fetchone()
-    if destino is None or not whatsapp_service.usuario_esta_online(
-        destino["ultimo_acesso"], destino["offline_forcado"], destino["ausente"]
-    ):
+    online_de_verdade = (
+        destino is not None
+        and not destino["offline_forcado"]
+        and not destino["ausente"]
+        and destino["ultimo_acesso"] is not None
+        and conn.execute(
+            "SELECT datetime(?) > datetime('now', '-2 minutes')", (destino["ultimo_acesso"],)
+        ).fetchone()[0]
+    )
+    if not online_de_verdade:
         raise ApiError(f"{destino['nome'] if destino else 'Colega'} está offline agora — não é possível ligar.",
                         status=409, codigo="operador_offline")
 

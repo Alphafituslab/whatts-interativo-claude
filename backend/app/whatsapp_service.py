@@ -3841,13 +3841,19 @@ def _texto_menu_setores(config=None, setores=None, setores_online=None):
     return f"{SAUDACAO_PADRAO}\n\n{linhas}{rodape}"
 
 
-def usuario_esta_online(ultimo_acesso, offline_forcado=0, ausente=0) -> bool:
+def usuario_esta_online(ultimo_acesso, offline_forcado=0, ausente=0, minutos=None) -> bool:
     """Disponível de verdade pra atender.
 
     Três coisas diferentes tiram alguém daqui: estar sem acessar há
     tempo (offline), ter sido marcado como afastado pelo admin
     (offline_forcado) e ter avisado que saiu (ausente). Só a primeira é
-    deduzida; as outras duas alguém declarou."""
+    deduzida; as outras duas alguém declarou.
+
+    minutos: janela de tolerância. Por padrão usa MINUTOS_ONLINE (30min,
+    de propósito tolerante -- é o que decide fila de atendimento de
+    cliente, não convém reagir demais a uma queda de rede curta). Quem
+    precisar de presença mais em tempo real (chat interno, ligação de
+    voz) passa uma janela menor explicitamente."""
     if offline_forcado or ausente:
         return False
     if not ultimo_acesso:
@@ -3856,7 +3862,7 @@ def usuario_esta_online(ultimo_acesso, offline_forcado=0, ausente=0) -> bool:
         instante = datetime.datetime.strptime(ultimo_acesso, "%Y-%m-%dT%H:%M:%S.%fZ")
     except (ValueError, TypeError):
         return False
-    return (datetime.datetime.utcnow() - instante) < datetime.timedelta(minutes=MINUTOS_ONLINE)
+    return (datetime.datetime.utcnow() - instante) < datetime.timedelta(minutes=minutos if minutos is not None else MINUTOS_ONLINE)
 
 
 def usuarios_online_do_setor(conn, empresa_id: int, setor: str):

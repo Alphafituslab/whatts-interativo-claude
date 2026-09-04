@@ -139,9 +139,9 @@ def _marcar_online(conversas):
     from . import whatsapp_service
     for c in conversas:
         c["criado_por_online"] = whatsapp_service.usuario_esta_online(
-            c.pop("_uc_acesso", None), c.pop("_uc_off", 0), c.get("_uc_ausente", 0))
+            c.pop("_uc_acesso", None), c.pop("_uc_off", 0), c.get("_uc_ausente", 0), minutos=2)
         c["participante_online"] = whatsapp_service.usuario_esta_online(
-            c.pop("_up_acesso", None), c.pop("_up_off", 0), c.get("_up_ausente", 0))
+            c.pop("_up_acesso", None), c.pop("_up_off", 0), c.get("_up_ausente", 0), minutos=2)
         # O motivo vai junto ("almoço"), pra a ausência não virar um
         # "offline" mudo que ninguém sabe explicar.
         c["criado_por_ausente"] = bool(c.pop("_uc_ausente", 0))
