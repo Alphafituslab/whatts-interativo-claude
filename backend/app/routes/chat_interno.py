@@ -314,6 +314,57 @@ def agendar_mensagem(conversa_id):
     return jsonify({"ok": True, "id": cur.lastrowid}), 201
 
 
+@bp.post("/agendar-em-massa")
+@requires_auth
+def agendar_em_massa():
+    """Agenda a MESMA mensagem, pro MESMO horário, pra vários colegas de
+    uma vez -- uma linha em whatsapp_mensagens_agendadas por destino
+    (cada um recebe na própria conversa 1-a-1, entregue por quem já
+    processa agendamento hoje). Pedido do Clayton (2026-09-04): "poder
+    enviar para mais de um usuario no chat interno. posso selecionar
+    todos ou apenas alguns"."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    dados = request.get_json(silent=True) or {}
+    texto = (dados.get("texto") or "").strip()
+    agendado_para = (dados.get("agendado_para") or "").strip()
+    if not texto:
+        raise ApiError("Escreva a mensagem que será enviada.", status=400)
+    if not agendado_para:
+        raise ApiError("Informe quando enviar.", status=400)
+
+    alvos = dados.get("usuarios")
+    if alvos:
+        marcadores = ",".join("?" * len(alvos))
+        destinos = conn.execute(
+            f"SELECT id FROM usuarios WHERE empresa_id = ? AND ativo = 1 AND id != ? AND id IN ({marcadores})",
+            (usuario["empresa_id"], usuario["id"], *alvos),
+        ).fetchall()
+    else:
+        # Sem lista = todo mundo (a tela manda "todos" explicitamente,
+        # mas aceita vazio/ausente também pela mesma régua).
+        destinos = conn.execute(
+            "SELECT id FROM usuarios WHERE empresa_id = ? AND ativo = 1 AND id != ?",
+            (usuario["empresa_id"], usuario["id"]),
+        ).fetchall()
+    if not destinos:
+        raise ApiError("Escolha pelo menos um destinatário.", status=400)
+
+    agora = whatsapp_service._now_iso()
+    agendados = 0
+    for destino in destinos:
+        conversa_id = chat_interno_service.buscar_conversa_existente(conn, usuario["id"], destino["id"])
+        if not conversa_id:
+            conversa_id = chat_interno_service.iniciar_conversa(conn, usuario["id"], destino["id"], None)
+        conn.execute(
+            """INSERT INTO whatsapp_mensagens_agendadas (chat_interno_conversa_id, texto, agendado_para, criado_por, criado_em)
+               VALUES (?, ?, ?, ?, ?)""",
+            (conversa_id, texto, agendado_para, usuario["id"], agora),
+        )
+        agendados += 1
+    return jsonify({"ok": True, "agendados": agendados}), 201
+
+
 @bp.delete("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>")
 @requires_auth
 def excluir_mensagem(conversa_id, mensagem_id):

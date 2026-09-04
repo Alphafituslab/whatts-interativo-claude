@@ -1286,6 +1286,48 @@
       </form>`);
   }
 
+  async function modalAgendarEmMassa() {
+    const eu = state.usuarioAtual.id;
+    let colegas;
+    try {
+      colegas = (await chamarApi("/usuarios")).filter((u) => u.ativo && u.id !== eu);
+    } catch (e) {
+      definirFlash("erro", "Não consegui carregar a lista de colegas.");
+      return;
+    }
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🕒 Agendar mensagem para vários</h3>
+      <p class="dica">Escreve agora, escolhe quem recebe e quando — cada um recebe na própria conversa, todos no mesmo horário.</p>
+      <div class="campo">
+        <label><input type="checkbox" data-agendar-massa-todos checked> Selecionar todos (${colegas.length})</label>
+      </div>
+      <div class="wpp-encaminhar-lista" style="margin-bottom:12px; max-height:32vh; overflow-y:auto;">
+        ${colegas.map((c) => `
+          <label class="wpp-encaminhar-item">
+            <input type="checkbox" data-agendar-massa-usuario value="${c.id}" checked>
+            <span class="wpp-encaminhar-nome">${c.online ? "🟢" : "🔴"} ${escapeHtml(c.nome)}</span>
+            <span class="wpp-encaminhar-tel">${escapeHtml(_setoresDoColega(c).join(", ") || "")}</span>
+          </label>`).join("")}
+      </div>
+      <div class="campo"><label>Mensagem</label><textarea data-agendar-massa-texto rows="4" placeholder="Escreva a mensagem..." required></textarea></div>
+      <div class="campo"><label>Enviar em</label><input type="datetime-local" data-agendar-massa-quando value="${_valorDataHoraPadrao(24)}" required></div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-acao="confirmar-agendar-em-massa">Agendar</button>
+      </div>`, "modal-largo");
+
+    const checkTodos = wrap.querySelector("[data-agendar-massa-todos]");
+    const checksIndividuais = () => [...wrap.querySelectorAll("[data-agendar-massa-usuario]")];
+    checkTodos.addEventListener("change", () => {
+      checksIndividuais().forEach((cx) => { cx.checked = checkTodos.checked; });
+    });
+    checksIndividuais().forEach((cx) => {
+      cx.addEventListener("change", () => {
+        checkTodos.checked = checksIndividuais().every((c) => c.checked);
+      });
+    });
+  }
+
   function modalAgendarContato(conversaId) {
     // Sugere amanhã às 10h: é o caso mais comum e evita digitação.
     const amanha = new Date(Date.now() + 24 * 3600 * 1000);
@@ -4144,6 +4186,7 @@
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Chat interno</h2>
+         <button type="button" class="botao secundario pequeno" data-acao="abrir-agendar-em-massa">🕒 Agendar p/ vários</button>
          <button type="button" class="botao pequeno" data-acao="abrir-nova-conversa-interna">+ Nova conversa</button>
        </div>
        <p class="dica" style="margin-top:-8px;">🔒 Privado — só quem participa da conversa pode ver.</p>
@@ -6146,6 +6189,30 @@
       case "voltar-lista": navegarPara("#/whatsapp"); return;
       case "voltar-lista-interno": navegarPara("#/chat-interno"); return;
       case "chat-interno-trocar-escopo": state.chatInternoEscopo = alvo.dataset.escopo; return renderChatInterno(null);
+      case "abrir-agendar-em-massa": {
+        return modalAgendarEmMassa();
+      }
+      case "confirmar-agendar-em-massa": {
+        const modal = alvo.closest(".modal");
+        const texto = modal.querySelector("[data-agendar-massa-texto]").value.trim();
+        const quando = modal.querySelector("[data-agendar-massa-quando]").value;
+        const marcados = [...modal.querySelectorAll("[data-agendar-massa-usuario]:checked")].map((cx) => Number(cx.value));
+        const todosMarcados = modal.querySelector("[data-agendar-massa-todos]").checked;
+        if (!texto) { definirFlash("erro", "Escreva a mensagem."); return; }
+        if (!quando) { definirFlash("erro", "Informe quando enviar."); return; }
+        if (!marcados.length) { definirFlash("erro", "Escolha pelo menos um destinatário."); return; }
+        try {
+          const r = await chamarApi("/chat-interno/agendar-em-massa", {
+            method: "POST",
+            body: { texto, agendado_para: new Date(quando).toISOString(), usuarios: todosMarcados ? null : marcados },
+          });
+          fecharModais();
+          definirFlash("ok", `Agendado para ${r.agendados} pessoa(s).`);
+        } catch (e) {
+          definirFlash("erro", e.message || "Não consegui agendar.");
+        }
+        return;
+      }
       case "abrir-nova-conversa-interna": {
         const [usuarios, setores] = await Promise.all([chamarApi("/usuarios"), chamarApi("/usuarios/setores")]);
         modalNovaConversaInterna(usuarios, setores);
