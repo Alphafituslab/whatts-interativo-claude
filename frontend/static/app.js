@@ -2411,21 +2411,38 @@
   }
 
   // ---- Quem LIGA --------------------------------------------------
+  function _tocarSinalOcupado() {
+    _pararToqueChamada();
+    _tocarNotas([
+      { hz: 480, inicio: 0,    duracao: 0.35, volume: 0.16 },
+      { hz: 480, inicio: 0.55, duracao: 0.35, volume: 0.16 },
+      { hz: 480, inicio: 1.10, duracao: 0.35, volume: 0.16 },
+    ]);
+  }
+
   async function _ligarChamada(conversaId, nome) {
     if (state._chamada) { definirFlash("erro", "Você já está em uma chamada."); return; }
+    // Primeiro confirma que dá pra ligar (o colega pode estar em outra
+    // chamada agora) -- só pede o microfone DEPOIS, pra não interromper
+    // a pessoa com a permissão do navegador à toa quando vai dar ocupado.
+    let resp;
+    try {
+      resp = await chamarApi(`/chat-interno/conversas/${conversaId}/chamadas`, { method: "POST" });
+    } catch (e) {
+      if (e.codigo === "usuario_ocupado") {
+        _tocarSinalOcupado();
+        definirFlash("erro", e.mensagem || `${nome || "O colega"} está em outra chamada agora.`);
+      } else {
+        definirFlash("erro", e.mensagem || "Não deu pra iniciar a chamada.");
+      }
+      return;
+    }
     let streamLocal;
     try {
       streamLocal = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
       definirFlash("erro", "Não consegui acessar seu microfone. Verifique a permissão do navegador.");
-      return;
-    }
-    let resp;
-    try {
-      resp = await chamarApi(`/chat-interno/conversas/${conversaId}/chamadas`, { method: "POST" });
-    } catch (e) {
-      streamLocal.getTracks().forEach((t) => t.stop());
-      definirFlash("erro", e.mensagem || "Não deu pra iniciar a chamada.");
+      chamarApi(`/chat-interno/chamadas/${resp.id}/encerrar`, { method: "POST" }).catch(() => {});
       return;
     }
     state._chamada = {

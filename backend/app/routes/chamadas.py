@@ -80,6 +80,19 @@ def iniciar(conversa_id):
     if ativa is not None:
         raise ApiError("Já tem uma chamada em andamento nesta conversa.", status=409, codigo="chamada_em_andamento")
 
+    # Sinal de ocupado -- pedido do Clayton (2026-09-04): quem está
+    # ligando precisa saber na hora que o outro colega já está numa
+    # chamada (com QUALQUER pessoa, não só nesta conversa), em vez de
+    # ficar tocando pro vácuo ou criar uma segunda chamada por cima.
+    ocupado = conn.execute(
+        "SELECT id FROM chat_interno_chamadas WHERE status IN ('chamando','atendida') "
+        "AND (de_usuario_id = ? OR para_usuario_id = ?)",
+        (outro, outro),
+    ).fetchone()
+    if ocupado is not None:
+        raise ApiError(f"{conversa['participante_nome'] if outro == conversa['participante_id'] else conversa['criado_por_nome']} está em outra chamada agora.",
+                        status=409, codigo="usuario_ocupado")
+
     agora = _now_iso()
     cur = conn.execute(
         "INSERT INTO chat_interno_chamadas (conversa_id, de_usuario_id, para_usuario_id, status, criado_em) "
