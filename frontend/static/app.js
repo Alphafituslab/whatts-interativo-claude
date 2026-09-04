@@ -3395,7 +3395,7 @@
     ];
     // Só admin -- revertido em 2026-09-01 (tinha ficado geral desde
     // 31/08, Clayton pediu pra voltar a ser exclusivo do admin).
-    if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
+    if (usuario.super_admin) abas.push({ chave: "todas", label: "Todas" });
     abas.push({ chave: "arquivadas", label: "Arquivadas" });
     // O número em cada aba evita ter que clicar pra descobrir se caiu
     // alguém. Fila e "Sem escolha" piscam quando têm gente esperando:
@@ -4181,7 +4181,7 @@
     }
 
     const abas = [{ chave: "minhas", label: "Minhas" }, { chave: "encerradas", label: "Encerradas" }];
-    if (usuario.admin) abas.push({ chave: "todas", label: "Todas" });
+    if (usuario.super_admin) abas.push({ chave: "todas", label: "Todas" });
 
     if (_minhaGeracaoInterno !== _geracaoRenderChatInterno) return; // uma chamada mais nova já assumiu — essa aqui desiste
     renderShell(
@@ -5879,7 +5879,7 @@
                       </button>`;
             })()}
           </div>` : ""}</td>
-        <td>${u.admin ? '<span class="selo ativo">Admin</span>' : '<span class="selo inativo">Padrão</span>'}</td>
+        <td>${u.admin ? '<span class="selo ativo">Admin</span>' : '<span class="selo inativo">Padrão</span>'}${u.super_admin ? ' <span class="selo ativo" style="background:color-mix(in srgb, var(--acento) 18%, transparent); color:var(--acento);" title="Vê e acompanha todas as conversas de todo mundo">Master</span>' : ""}</td>
         <td>${u.ativo ? '<span class="selo ativo">Ativo</span>' : '<span class="selo bloqueado">Inativo</span>'}</td>
         <td class="texto-suave">${u.admin ? "sem restrição" : (u.horario_permitido && u.horario_permitido.length ? u.horario_permitido.map((j) => `${j.inicio}–${j.fim}`).join(", ") : "sem restrição")}</td>
         <td style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -5921,6 +5921,8 @@
             <button type="button" class="botao-mostrar-senha" data-acao="alternar-mostrar-senha" title="Mostrar/ocultar" tabindex="-1">👁️</button>
           </div></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="admin" data-acao-change="alternar-campo-setor"> Administrador (pode configurar a conexão e gerenciar usuários)</label></div>
+        ${state.usuarioAtual.super_admin ? `
+        <div class="campo campo-checkbox"><label><input type="checkbox" name="super_admin"> Admin <strong>Master</strong> (além de administrador, também vê e acompanha TODAS as conversas — WhatsApp e chat interno — de todo mundo)</label></div>` : ""}
         ${htmlEscolhaAcesso(true)}
         <div class="campo" data-campo-setor>
           ${htmlEscolhaSetores(setores, [])}
@@ -5951,6 +5953,9 @@
         <div class="campo"><label>Email</label><input name="email" type="email" required value="${escapeHtml(u.email)}"></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="admin" data-acao-change="alternar-campo-setor" ${u.admin ? "checked" : ""} ${souEu ? "disabled" : ""}> Administrador (pode configurar a conexão e gerenciar usuários)</label></div>
         ${souEu ? `<input type="hidden" name="admin" value="${u.admin ? "1" : ""}">` : ""}
+        ${state.usuarioAtual.super_admin ? `
+        <div class="campo campo-checkbox"><label><input type="checkbox" name="super_admin" ${u.super_admin ? "checked" : ""} ${souEu ? "disabled" : ""}> Admin <strong>Master</strong> (além de administrador, também vê e acompanha TODAS as conversas — WhatsApp e chat interno — de todo mundo)</label></div>
+        ${souEu ? `<input type="hidden" name="super_admin" value="${u.super_admin ? "1" : ""}">` : ""}` : ""}
         ${htmlEscolhaAcesso(u.acesso_conversas !== false, u.admin)}
         <div class="campo" data-campo-setor style="${u.admin ? "display:none;" : ""}">
           ${htmlEscolhaSetores(setores, u.setores || (u.setor ? [u.setor] : []))}
@@ -8335,6 +8340,7 @@
           method: "POST",
           body: {
             nome: dados.get("nome"), email: dados.get("email"), senha: dados.get("senha"), admin: !!dados.get("admin"),
+            super_admin: !!dados.get("super_admin"),
             setores: dados.getAll("setores"),
             acesso_conversas: !!dados.get("acesso_conversas"),
             horario_permitido: _janelasDoFormulario(dados),
@@ -8350,6 +8356,7 @@
           method: "PUT",
           body: {
             nome: dados.get("nome"), email: dados.get("email"), admin: !!dados.get("admin"),
+            super_admin: !!dados.get("super_admin"),
             setores: dados.getAll("setores"),
             offline_forcado: !!dados.get("offline_forcado"),
             acesso_conversas: !!dados.get("acesso_conversas"),

@@ -45,6 +45,7 @@ def _publico(u, setores=None):
         "online": _online(u),
         "ausente": bool(u["ausente"]) if "ausente" in u.keys() else False,
         "ausente_motivo": u["ausente_motivo"] if "ausente_motivo" in u.keys() else None,
+        "super_admin": bool(u["super_admin"]) if "super_admin" in u.keys() else False,
     }
 
 
@@ -186,6 +187,14 @@ def criar():
     email = (dados.get("email") or "").strip().lower()
     senha = dados.get("senha") or ""
     admin = 1 if dados.get("admin") else 0
+    # Admin MASTER: enxerga "Todas" as conversas (WhatsApp e chat
+    # interno), inclusive dos outros. Só quem já É master pode criar
+    # outro master -- senão um admin comum se promoveria sozinho
+    # mandando o campo direto pela API. Master sempre também é admin
+    # (não existe master "por baixo" de um admin comum).
+    super_admin = 1 if (dados.get("super_admin") and g.usuario_atual.get("super_admin")) else 0
+    if super_admin:
+        admin = 1
 
     if not nome or not email or not senha:
         raise ApiError("Informe nome, email e senha.", status=400)
@@ -201,9 +210,9 @@ def criar():
         raise ApiError("Já existe um usuário com este email.", status=409, codigo="email_duplicado")
 
     cur = conn.execute(
-        "INSERT INTO usuarios (nome, email, senha_hash, admin, ativo, horario_permitido, setor, criado_em, empresa_id, acesso_conversas) "
-        "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
-        (nome, email, security.hash_password(senha), admin, horario_permitido, setores[0] if setores else None,
+        "INSERT INTO usuarios (nome, email, senha_hash, admin, super_admin, ativo, horario_permitido, setor, criado_em, empresa_id, acesso_conversas) "
+        "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+        (nome, email, security.hash_password(senha), admin, super_admin, horario_permitido, setores[0] if setores else None,
          _now_iso(), g.empresa_id, 1 if (admin or dados.get("acesso_conversas", True)) else 0),
     )
     whatsapp_service.definir_setores_do_usuario(conn, cur.lastrowid, setores)
@@ -229,6 +238,20 @@ def editar(usuario_id):
     if usuario_id == usuario_atual["id"] and not admin:
         raise ApiError("Você não pode remover seu próprio acesso de administrador.", status=400)
 
+    # Admin MASTER: só quem já é master pode conceder ou tirar de
+    # outro -- e ninguém mexe no próprio, nem pra tirar nem pra dar
+    # (evita um master ficar sem nenhum master na empresa por engano,
+    # e evita um admin comum se promover chamando a rota direto). Quem
+    # não é master e não mandou o campo mantém como já estava.
+    alvo_atual_row = conn.execute("SELECT super_admin FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+    super_admin_atual = bool(alvo_atual_row["super_admin"]) if alvo_atual_row else False
+    if "super_admin" in dados and usuario_atual.get("super_admin") and usuario_id != usuario_atual["id"]:
+        super_admin = 1 if dados.get("super_admin") else 0
+    else:
+        super_admin = 1 if super_admin_atual else 0
+    if super_admin:
+        admin = 1
+
     alvo = conn.execute("SELECT 1 FROM usuarios WHERE id = ? AND empresa_id = ?", (usuario_id, g.empresa_id)).fetchone()
     if alvo is None:
         raise ApiError("Usuário não encontrado.", status=404, codigo="nao_encontrado")
@@ -240,8 +263,8 @@ def editar(usuario_id):
     # criaria um estado contraditório (menu escondido, API liberada).
     acesso_conversas = 1 if (admin or dados.get("acesso_conversas")) else 0
     conn.execute(
-        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, offline_forcado = ?, acesso_conversas = ? WHERE id = ?",
-        (nome, email, admin, offline_forcado, acesso_conversas, usuario_id),
+        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, super_admin = ?, offline_forcado = ?, acesso_conversas = ? WHERE id = ?",
+        (nome, email, admin, super_admin, offline_forcado, acesso_conversas, usuario_id),
     )
     # Regrava a lista e acerta o setor principal (usuarios.setor) junto.
     whatsapp_service.definir_setores_do_usuario(conn, usuario_id, setores)

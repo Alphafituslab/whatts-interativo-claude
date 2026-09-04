@@ -45,10 +45,11 @@ def _pode_ver(usuario, conversa):
 
 def _pode_visualizar(usuario, conversa):
     """LER as mensagens (sem poder interagir) — os dois participantes,
-    OU o admin espiando pela aba "Todas". Usado só pela rota que lista
-    as mensagens (GET); toda ação que muda alguma coisa continua exigindo
-    _pode_ver (participante de verdade)."""
-    if usuario["admin"] and conversa["empresa_id"] == usuario["empresa_id"]:
+    OU o admin MASTER espiando pela aba "Todas". Usado só pela rota que
+    lista as mensagens (GET); toda ação que muda alguma coisa continua
+    exigindo _pode_ver (participante de verdade). Restrito a Master (não
+    todo admin) desde 2026-09-04 -- pedido do Clayton."""
+    if usuario.get("super_admin") and conversa["empresa_id"] == usuario["empresa_id"]:
         return True
     return _pode_ver(usuario, conversa)
 
@@ -68,7 +69,7 @@ def listar_conversas():
     # "Todas" é a visão de supervisão do administrador — só ele pode
     # pedir. Se alguém sem ser admin tentar (mexendo na URL/API direto),
     # cai pro comportamento normal: só as próprias conversas.
-    todas = request.args.get("todas") == "1" and bool(usuario["admin"])
+    todas = request.args.get("todas") == "1" and bool(usuario.get("super_admin"))
     conn = get_db()
     return jsonify(chat_interno_service.listar_conversas(
         conn, usuario["id"], incluir_encerradas,

@@ -622,11 +622,12 @@ def listar_conversas():
         condicoes.append("c.atribuida_usuario_id IS NULL")
         condicoes.append("ct.eh_grupo = 0")
     elif escopo == "todas":
-        # Só admin -- revertido em 2026-09-01 (Clayton: "não quero que os
-        # usuários vejam o Todos"). Tinha ficado geral por um tempo
-        # (31/08), voltou a ser exclusivo do admin.
-        if not usuario["admin"]:
-            raise ApiError("Só um administrador pode ver todas as conversas.", status=403, codigo="sem_permissao")
+        # Só Admin MASTER -- revertido pra admin comum em 2026-09-01
+        # (Clayton: "não quero que os usuários vejam o Todos"), e depois
+        # (2026-09-04) restrito ainda mais: nem todo admin, só quem tem
+        # a marcação de Master (ver usuarios.super_admin).
+        if not usuario.get("super_admin"):
+            raise ApiError("Só um administrador master pode ver todas as conversas.", status=403, codigo="sem_permissao")
         condicoes, params = [], []
     else:
         # "Minhas" = tudo o que está comigo, tenha falado quem tiver
