@@ -2496,6 +2496,20 @@ def atribuir_conversa(conn, conversa_id: int, usuario_id, atribuido_por: int):
         "INSERT INTO whatsapp_atribuicoes (conversa_id, usuario_id, atribuido_por, criado_em) VALUES (?, ?, ?, ?)",
         (conversa_id, usuario_id, atribuido_por, _now_iso()),
     )
+    # Atribuir a alguém reabre sozinho se estava fechada -- pedido do
+    # Clayton (2026-09-04): "ao eu atribuir a alguem mesmo fechada essa
+    # deve aparecer a quem eu atribuir, pois assim caso for encerrada
+    # posso encaminhar direto para o usuario que sera o responsavel".
+    # "Minhas" só mostra conversa aberta (ver listar_conversas) -- sem
+    # isso, encaminhar uma conversa encerrada pra alguém a deixava
+    # atribuída mas invisível pra essa pessoa. Só quando atribui de
+    # verdade (não ao devolver pra fila com usuario_id=None).
+    if usuario_id is not None:
+        estava_fechada = conn.execute(
+            "SELECT 1 FROM whatsapp_conversas WHERE id = ? AND status = 'fechada'", (conversa_id,)
+        ).fetchone()
+        if estava_fechada:
+            reabrir_conversa(conn, conversa_id)
     # Encaminhar pra alguém de OUTRO setor sem atualizar o rótulo deixava
     # a etiqueta da conversa (e a assinatura nas mensagens) mostrando o
     # setor antigo, mesmo já estando com outra pessoa/departamento --
