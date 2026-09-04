@@ -280,6 +280,7 @@
           case "configuracao": return renderWhatsappConfiguracao();
           case "usuarios": return renderUsuarios();
           case "ligacoes": return renderLigacoes();
+          case "catalogo": return renderCatalogo();
           default: return renderWhatsapp(null);
         }
       })();
@@ -301,6 +302,7 @@
     { rota: "#/seguranca", chave: "seguranca", label: "Segurança", icone: "🔒" },
     { rota: "#/configuracao", chave: "configuracao", label: "Configuração", icone: "⚙️", admin: true },
     { rota: "#/usuarios", chave: "usuarios", label: "Usuários", icone: "👥", admin: true },
+    { rota: "#/catalogo", chave: "catalogo", label: "Catálogo/Proposta", icone: "🗂️", admin: true },
   ];
 
   // Colaborador que só usa o chat interno. Esconder o menu é conforto;
@@ -5750,6 +5752,17 @@
        </div>
 
        <div class="cartao">
+         <h3 style="margin-top:0;">🗂️ Catálogo / Proposta</h3>
+         <p class="dica">Fase 1: só o cadastro dos itens (em <a href="#/catalogo">Catálogo/Proposta</a> no menu), ainda sem tela pro cliente. Este botão vai controlar se a FUTURA tela do cliente fica acessível — por enquanto, deixe desligado.</p>
+         <form data-form="salvar-catalogo-config">
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="catalogo_proposta_ativo" ${config.catalogo_proposta_ativo ? "checked" : ""}> Liberar catálogo pro cliente</label>
+           </div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
          <h3 style="margin-top:0;">Backup</h3>
          <p class="dica">Backup automático todo dia, guardando os últimos 14 dias. Baixe uma cópia de vez em quando pra guardar fora deste computador — se algo acontecer, é só importar de volta.</p>
          <div class="barra-acoes" style="margin-bottom:14px;">
@@ -6439,6 +6452,116 @@
           definirFlash("erro", "Não consegui salvar — tenta de novo.");
         }
       });
+    });
+  }
+
+  // ============================================================
+  // Catálogo / montador de proposta -- Fase 1 (só cadastro do admin).
+  // Pedido do Clayton (2026-09-04): pegar o portifólio de terceirização
+  // e no futuro deixar o cliente escolher item + quantidade já vendo o
+  // preço. Por enquanto é só aqui que os itens/faixas são cadastrados;
+  // a tela do cliente (fase 2) só liga de verdade com o toggle em
+  // Configuração, que fica desligado até o Clayton terminar de testar.
+  function fmtMoeda(v) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
+    return Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+
+  function _resumoFaixas(item) {
+    if (!item.faixas || !item.faixas.length) return "sem faixas";
+    const precos = item.faixas.map((f) => f.preco);
+    const min = Math.min(...precos), max = Math.max(...precos);
+    return min === max ? fmtMoeda(min) : `${fmtMoeda(min)} – ${fmtMoeda(max)}`;
+  }
+
+  async function renderCatalogo() {
+    _carregandoSeTrocouDeTela("catalogo");
+    const itens = await chamarApi("/whatsapp/catalogo?todos=1");
+    renderShell(`
+      <div class="wpp-cabecalho-tela">
+        <h2 style="margin:0;">🗂️ Catálogo / Proposta</h2>
+        <button type="button" class="botao pequeno" data-acao="abrir-catalogo-item">+ Novo item</button>
+      </div>
+      <p class="dica">Cadastro dos itens e faixas de preço do portfólio de terceirização. A tela do cliente ainda não existe — isso aqui é só a base pra montar ela depois. Liberar/travar pro cliente é em <strong>Configuração → Catálogo/Proposta</strong>.</p>
+      <div class="cartao">
+        ${itens.length ? `
+        <table class="tabela-simples">
+          <thead><tr><th></th><th>Nome</th><th>Forma / Linha</th><th>Faixa de preço</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${itens.map((it) => `
+              <tr>
+                <td>${it.imagem_url ? `<img src="${urlImagemSegura(it.imagem_url)}" alt="" style="width:40px; height:40px; object-fit:cover; border-radius:8px;">` : `<div style="width:40px; height:40px; border-radius:8px; background:var(--superficie-2); display:flex; align-items:center; justify-content:center; font-size:16px;">📦</div>`}</td>
+                <td>${escapeHtml(it.nome)}</td>
+                <td class="texto-suave">${escapeHtml([it.forma, it.linha].filter(Boolean).join(" · ") || "—")}</td>
+                <td>${escapeHtml(_resumoFaixas(it))}<div class="texto-suave" style="font-size:11px;">${it.faixas.length} faixa(s)</div></td>
+                <td>${it.ativo ? '<span class="selo ativo">Ativo</span>' : '<span class="selo inativo">Inativo</span>'}</td>
+                <td style="white-space:nowrap;">
+                  <button type="button" class="botao-icone" data-acao="abrir-catalogo-item" data-id="${it.id}" title="Editar">✏️</button>
+                  ${it.ativo ? `<button type="button" class="botao-icone" data-acao="excluir-catalogo-item" data-id="${it.id}" data-nome="${escapeHtml(it.nome)}" title="Desativar">🗑️</button>` : ""}
+                </td>
+              </tr>`).join("")}
+          </tbody>
+        </table>` : `<p class="dica">Nenhum item cadastrado ainda. Clique em "+ Novo item" pra começar.</p>`}
+      </div>`,
+      "catalogo"
+    );
+  }
+
+  function _htmlLinhaFaixa(f) {
+    const id = f ? f.id : `novo-${Math.random().toString(36).slice(2, 8)}`;
+    return `
+      <div class="wpp-faixa-linha" data-faixa-linha data-id="${id}" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+        <input type="number" min="1" placeholder="De" value="${f ? f.quantidade_min : ""}" data-faixa-min style="width:90px;">
+        <span class="texto-suave">até</span>
+        <input type="number" min="1" placeholder="(vazio = sem teto)" value="${f && f.quantidade_max != null ? f.quantidade_max : ""}" data-faixa-max style="width:150px;">
+        <span class="texto-suave">un. →</span>
+        <input type="number" min="0" step="0.01" placeholder="R$" value="${f ? f.preco : ""}" data-faixa-preco style="width:110px;">
+        <button type="button" class="botao-icone" data-acao="remover-linha-faixa" title="Remover esta faixa">✕</button>
+      </div>`;
+  }
+
+  async function modalCatalogoItem(itemId) {
+    const item = itemId ? await chamarApi(`/whatsapp/catalogo/${itemId}`) : null;
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🗂️ ${item ? "Editar item" : "Novo item"} do catálogo</h3>
+      <form data-form="salvar-catalogo-item" data-id="${item ? item.id : ""}">
+        <div class="campo"><label>Nome do produto</label><input type="text" name="nome" required value="${escapeHtml(item ? item.nome : "")}"></div>
+        <div style="display:flex; gap:10px;">
+          <div class="campo" style="flex:1;"><label>Forma</label><input type="text" name="forma" placeholder="Sachê, Stick, Pó, Cápsula…" value="${escapeHtml(item && item.forma || "")}"></div>
+          <div class="campo" style="flex:1;"><label>Linha</label><input type="text" name="linha" placeholder="Imunidade, Fitness…" value="${escapeHtml(item && item.linha || "")}"></div>
+        </div>
+        <div class="campo">
+          <label>Imagem</label>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <img data-preview-imagem src="${item && item.imagem_url ? urlImagemSegura(item.imagem_url) : ""}" style="width:56px; height:56px; object-fit:cover; border-radius:8px; background:var(--superficie-2); ${item && item.imagem_url ? "" : "display:none;"}">
+            <input type="file" name="imagem" accept="image/*" data-input-imagem>
+          </div>
+          <input type="hidden" name="imagem_url" value="${escapeHtml(item && item.imagem_url || "")}">
+        </div>
+        <label class="rotulo-forte">Faixas de quantidade → preço</label>
+        <p class="dica" style="margin-top:0;">Ex.: 1 a 300 un. = R$ 32,50 · 301 a 500 = R$ 29,90…</p>
+        <div data-lista-faixas>${(item && item.faixas.length ? item.faixas : [null, null]).map((f) => _htmlLinhaFaixa(f)).join("")}</div>
+        <button type="button" class="botao secundario pequeno" data-acao="adicionar-linha-faixa" style="margin-bottom:14px;">+ faixa</button>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Salvar</button>
+        </div>
+      </form>`, "modal-largo");
+
+    wrap.querySelector("[data-input-imagem]").addEventListener("change", async (ev) => {
+      const arquivo = ev.target.files[0];
+      if (!arquivo) return;
+      const forma = new FormData();
+      forma.append("arquivo", arquivo, arquivo.name || "imagem");
+      const resp = await fetch(`${API}/whatsapp/upload-avulso`, {
+        method: "POST", headers: { Authorization: "Bearer " + state.accessToken }, body: forma,
+      });
+      if (!resp.ok) { definirFlash("erro", "Não deu pra enviar a imagem."); return; }
+      const { url } = await resp.json();
+      wrap.querySelector('input[name="imagem_url"]').value = url;
+      const preview = wrap.querySelector("[data-preview-imagem]");
+      preview.src = urlImagemSegura(url);
+      preview.style.display = "";
     });
   }
 
@@ -7813,6 +7936,25 @@
       case "busca-mensagens-proxima": _irParaResultadoBusca(1); return;
       case "busca-mensagens-anterior": _irParaResultadoBusca(-1); return;
       case "ligar-interno": return _ligarChamada(Number(alvo.dataset.id), alvo.dataset.nome);
+      case "abrir-catalogo-item": return modalCatalogoItem(alvo.dataset.id ? Number(alvo.dataset.id) : null);
+      case "adicionar-linha-faixa": {
+        const lista = alvo.closest("form").querySelector("[data-lista-faixas]");
+        lista.insertAdjacentHTML("beforeend", _htmlLinhaFaixa(null));
+        return;
+      }
+      case "remover-linha-faixa": {
+        const linha = alvo.closest("[data-faixa-linha]");
+        const lista = alvo.closest("[data-lista-faixas]");
+        if (lista.querySelectorAll("[data-faixa-linha]").length > 1) linha.remove();
+        else definirFlash("erro", "Precisa de pelo menos uma faixa.");
+        return;
+      }
+      case "excluir-catalogo-item": {
+        if (!confirm(`Desativar "${alvo.dataset.nome}"? Ele some da lista mas não quebra propostas antigas.`)) return;
+        await chamarApi(`/whatsapp/catalogo/${alvo.dataset.id}`, { method: "DELETE" });
+        definirFlash("ok", "Item desativado.");
+        return renderCatalogo();
+      }
       case "inserir-emoji": {
         const textarea = document.querySelector(".wpp-textarea");
         const inicio = textarea.selectionStart || textarea.value.length;
@@ -8959,6 +9101,42 @@
         }
         definirFlash("ok", "Configuração do assistente de IA salva.");
         return renderWhatsappConfiguracao();
+      }
+      case "salvar-catalogo-config": {
+        try {
+          await chamarApi("/whatsapp/configuracao", {
+            method: "PUT", body: { catalogo_proposta_ativo: !!dados.get("catalogo_proposta_ativo") },
+          });
+        } catch (erro) {
+          definirFlash("erro", erro.mensagem || "Não deu pra salvar.");
+          return renderWhatsappConfiguracao();
+        }
+        definirFlash("ok", "Configuração do catálogo salva.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-catalogo-item": {
+        const linhas = [...form.querySelectorAll("[data-faixa-linha]")];
+        const faixas = linhas.map((linha) => ({
+          quantidade_min: linha.querySelector("[data-faixa-min]").value,
+          quantidade_max: linha.querySelector("[data-faixa-max]").value || null,
+          preco: linha.querySelector("[data-faixa-preco]").value,
+        })).filter((f) => f.quantidade_min !== "" && f.preco !== "");
+        const itemId = form.dataset.id;
+        const corpo = {
+          nome: dados.get("nome"), forma: dados.get("forma") || undefined, linha: dados.get("linha") || undefined,
+          imagem_url: dados.get("imagem_url") || null, faixas,
+        };
+        try {
+          await chamarApi(itemId ? `/whatsapp/catalogo/${itemId}` : "/whatsapp/catalogo", {
+            method: itemId ? "PUT" : "POST", body: corpo,
+          });
+        } catch (erro) {
+          definirFlash("erro", erro.mensagem || "Não deu pra salvar o item.");
+          return;
+        }
+        fecharModais();
+        definirFlash("ok", itemId ? "Item atualizado." : "Item cadastrado.");
+        return renderCatalogo();
       }
       case "salvar-envio-massa": {
         await chamarApi("/whatsapp/configuracao", {

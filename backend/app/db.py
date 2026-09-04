@@ -86,6 +86,7 @@ SCHEMA_FILES = [
     "schema_071_ia_openai.sql",
     "schema_072_chamadas_internas.sql",
     "schema_073_chamadas_ping.sql",
+    "schema_074_catalogo_proposta.sql",
 ]
 
 

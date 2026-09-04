@@ -217,6 +217,7 @@ def obter_configuracao(conn, empresa_id: int):
             "aviso_ligacoes_ativo": 0, "dias_prorrogar_ligacao": 3,
             "envio_massa_ativo": 0, "envio_massa_intervalo_segundos": 8,
             "ia_ativa": 0, "ia_api_key": None, "ia_modo": "sugestao", "ia_openai_api_key": None,
+            "catalogo_proposta_ativo": 0,
         }
     return dict(row)
 
@@ -246,6 +247,7 @@ def config_publica(config):
     d["ia_openai_api_key_configurada"] = bool(d.get("ia_openai_api_key"))
     d.pop("ia_api_key", None)
     d.pop("ia_openai_api_key", None)
+    d["catalogo_proposta_ativo"] = bool(d.get("catalogo_proposta_ativo"))
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -429,6 +431,14 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     nova_openai_key = dados.get("ia_openai_api_key")
     ia_openai_api_key = anterior.get("ia_openai_api_key") if not nova_openai_key else nova_openai_key.strip()
 
+    # Catalogo/proposta -- mesma regra dos outros checkboxes independentes:
+    # so mexe se vier explicito nesta chamada. Desligado por padrao ate o
+    # Clayton terminar de testar ("nao deixar aparecer ainda para os usuarios").
+    catalogo_proposta_ativo = (
+        (1 if dados.get("catalogo_proposta_ativo") else 0) if "catalogo_proposta_ativo" in dados
+        else (1 if anterior.get("catalogo_proposta_ativo") else 0)
+    )
+
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
         localizacao_nome = (dados.get("localizacao_nome") or "").strip() or None
@@ -455,8 +465,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
                                               aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
-                                              envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
+                                              catalogo_proposta_ativo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -497,6 +508,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             ia_api_key = excluded.ia_api_key,
             ia_modo = excluded.ia_modo,
             ia_openai_api_key = excluded.ia_openai_api_key,
+            catalogo_proposta_ativo = excluded.catalogo_proposta_ativo,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -509,7 +521,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
          aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
-         envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key),
+         envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
+         catalogo_proposta_ativo),
     )
     return obter_configuracao(conn, empresa_id)
 
