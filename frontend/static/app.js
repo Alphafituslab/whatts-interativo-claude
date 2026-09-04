@@ -1796,6 +1796,48 @@
     });
   }
 
+  // Igual _tocarNotas, mas GUARDA o oscilador rodando -- os toques de
+  // chamada (que duram até 4,5s) precisam poder ser cortados na hora
+  // quando alguém desliga, e não só "parar de agendar o próximo".
+  let _osciladoresDeChamada = [];
+  function _tocarNotasCortaveis(notas) {
+    const ctx = _contextoAudio();
+    if (!ctx) return;
+    notas.forEach(({ hz, inicio, duracao, volume = 0.16 }) => {
+      const osc = ctx.createOscillator();
+      const ganho = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = hz;
+      const t0 = ctx.currentTime + inicio;
+      ganho.gain.setValueAtTime(0.0001, t0);
+      ganho.gain.exponentialRampToValueAtTime(volume, t0 + 0.02);
+      ganho.gain.exponentialRampToValueAtTime(0.0001, t0 + duracao);
+      osc.connect(ganho).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + duracao + 0.02);
+      _osciladoresDeChamada.push({ osc, ganho });
+      osc.onended = () => { _osciladoresDeChamada = _osciladoresDeChamada.filter((o) => o.osc !== osc); };
+    });
+  }
+  function _cortarSomDeChamadaNaHora() {
+    const ctx = _audioCtx;
+    _osciladoresDeChamada.forEach(({ osc, ganho }) => {
+      try {
+        if (ctx) {
+          // Corta o volume rapidinho antes de parar o oscilador -- sem
+          // isso dá um "pop" audível ao interromper no meio do som.
+          ganho.gain.cancelScheduledValues(ctx.currentTime);
+          ganho.gain.setValueAtTime(ganho.gain.value, ctx.currentTime);
+          ganho.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.03);
+          osc.stop(ctx.currentTime + 0.04);
+        } else {
+          osc.stop();
+        }
+      } catch (e) {}
+    });
+    _osciladoresDeChamada = [];
+  }
+
   // Cliente no WhatsApp: dois toques subindo, mais agudo e "chamativo".
   // Cliente no WhatsApp: ~1,6s, subindo. Era um "ding" de 0,35s que se
   // perdia em sala com movimento — quem estava de costas pro
@@ -2251,7 +2293,26 @@
   // rede corporativa muito restritiva do outro lado pode não conseguir
   // conectar (aí precisaria de um servidor TURN, que é peça de
   // infraestrutura à parte, não só código).
-  const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+  const ICE_SERVERS_STUN = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+
+  // Servidor TURN próprio (montado 2026-09-04) -- sem ele, o áudio só
+  // passa quando os dois lados acham um caminho direto (depende da
+  // rede/NAT de cada um NAQUELE momento -- por isso as chamadas
+  // pareciam "aleatórias": às vezes conectava, às vezes não). Credencial
+  // de curta duração, então busca de novo se a guardada já vai vencer.
+  let _turnCache = null;
+  async function _obterIceServers() {
+    const agora = Date.now();
+    if (_turnCache && _turnCache.expiraEm > agora + 5 * 60 * 1000) return _turnCache.servidores;
+    try {
+      const r = await chamarApi("/chat-interno/chamadas/turn-credenciais");
+      const servidores = [...ICE_SERVERS_STUN, ...(r.iceServers || [])];
+      _turnCache = { servidores, expiraEm: agora + 6 * 60 * 60 * 1000 };
+      return servidores;
+    } catch (e) {
+      return ICE_SERVERS_STUN; // sem TURN, a ligação ainda tenta -- só sem a rede de segurança
+    }
+  }
 
   function _limparEstadoChamada() {
     _pararToqueChamada();
@@ -2270,7 +2331,7 @@
 
   function _tocarToqueChamada() {
     _pararToqueChamada();
-    const tocar = () => _tocarNotas([
+    const tocar = () => _tocarNotasCortaveis([
       { hz: 880, inicio: 0,    duracao: 0.35, volume: 0.20 },
       { hz: 740, inicio: 0.40, duracao: 0.35, volume: 0.20 },
       { hz: 880, inicio: 1.10, duracao: 0.35, volume: 0.20 },
@@ -2284,7 +2345,7 @@
     // Tom de chamada de telefone de verdade: um "tummmm" comprido e
     // sustentado (não um bipe curto), dois por ciclo, com uma pausa --
     // pedido do Clayton depois de achar a primeira versão curta demais.
-    const tocar = () => _tocarNotas([
+    const tocar = () => _tocarNotasCortaveis([
       { hz: 400, inicio: 0,   duracao: 4.5, volume: 0.13 },
       { hz: 400, inicio: 5.3, duracao: 4.5, volume: 0.13 },
     ]);
@@ -2293,6 +2354,10 @@
   }
   function _pararToqueChamada() {
     if (state._chamadaToqueInterval) { clearInterval(state._chamadaToqueInterval); state._chamadaToqueInterval = null; }
+    // Corta o tom NA HORA -- antes só parava de agendar o próximo, e um
+    // "tummmm" de 4,5s já em andamento continuava tocando sozinho até o
+    // fim, dando a falsa impressão de que a ligação ainda estava de pé.
+    _cortarSomDeChamadaNaHora();
   }
 
   window.addEventListener("pagehide", () => {
@@ -2387,8 +2452,9 @@
     return id;
   }
 
-  function _configurarPeerConnection(chamadaId) {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  async function _configurarPeerConnection(chamadaId) {
+    const iceServers = await _obterIceServers();
+    const pc = new RTCPeerConnection({ iceServers });
     pc.onicecandidate = (ev) => {
       if (!ev.candidate) return;
       chamarApi(`/chat-interno/chamadas/${chamadaId}/sinal`, {
@@ -2456,7 +2522,7 @@
   // ---- Quem LIGA --------------------------------------------------
   function _tocarSinalOcupado() {
     _pararToqueChamada();
-    _tocarNotas([
+    _tocarNotasCortaveis([
       { hz: 480, inicio: 0,    duracao: 0.35, volume: 0.16 },
       { hz: 480, inicio: 0.55, duracao: 0.35, volume: 0.16 },
       { hz: 480, inicio: 1.10, duracao: 0.35, volume: 0.16 },
@@ -2497,7 +2563,7 @@
     state._chamada = {
       id: resp.id, papel: "chamador", conversaId, outroNome: nome, streamLocal, mudo: false, ultimoSinalId: 0,
     };
-    const pc = _configurarPeerConnection(resp.id);
+    const pc = await _configurarPeerConnection(resp.id);
     state._chamada.pc = pc;
     streamLocal.getTracks().forEach((t) => pc.addTrack(t, streamLocal));
 
@@ -2590,7 +2656,7 @@
     state._chamada = {
       id: chamada.id, papel: "atendente", outroNome: chamada.de_nome, streamLocal, mudo: false, ultimoSinalId: 0,
     };
-    const pc = _configurarPeerConnection(chamada.id);
+    const pc = await _configurarPeerConnection(chamada.id);
     state._chamada.pc = pc;
     streamLocal.getTracks().forEach((t) => pc.addTrack(t, streamLocal));
 

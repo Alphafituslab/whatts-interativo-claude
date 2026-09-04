@@ -13,7 +13,12 @@ vez que a chamada conecta, o servidor não vê nem ouve nada do áudio.
 Só 1 pra 1, porque o chat interno já é sempre entre duas pessoas
 (nunca grupo).
 """
+import base64
+import hashlib
+import hmac
 import json
+import os
+import time
 
 from flask import Blueprint, g, jsonify, request
 
@@ -22,6 +27,36 @@ from ..context import ApiError, get_db, requires_auth
 from .chat_interno import _carregar
 
 bp = Blueprint("chamadas", __name__, url_prefix="/api/v1/chat-interno")
+
+TURN_URLS = ["turn:46.202.151.252:3478?transport=udp", "turn:46.202.151.252:3478?transport=tcp"]
+
+
+@bp.get("/chamadas/turn-credenciais")
+@requires_auth
+def turn_credenciais():
+    """Credenciais de curta duração pro servidor TURN (coturn) -- pedido
+    do Clayton (2026-09-04) depois de ver que a chamada às vezes
+    conectava e às vezes não: sem TURN, o áudio só passa quando os dois
+    lados conseguem achar um caminho direto (depende da rede/NAT de
+    cada um NAQUELE momento -- por isso "às vezes dá, às vezes não").
+    Com TURN, quando o caminho direto falha, o áudio passa retransmitido
+    por aqui, sempre.
+
+    Padrão "REST API" do próprio coturn (RFC do IETF pra isso): o
+    usuário é um timestamp de expiração, e a senha é HMAC-SHA1 desse
+    usuário com o segredo compartilhado -- o coturn confere a mesma
+    conta na hora, sem precisar de nenhuma tabela de usuários TURN."""
+    segredo = os.environ.get("WPP_TURN_SECRET")
+    if not segredo:
+        return jsonify({"iceServers": []})  # TURN não configurado neste ambiente -- só STUN mesmo
+    expira_em = int(time.time()) + 6 * 3600  # 6h -- mais que qualquer ligação de trabalho de verdade
+    usuario_turn = f"{expira_em}:seja-alpha"
+    credencial = base64.b64encode(
+        hmac.new(segredo.encode(), usuario_turn.encode(), hashlib.sha1).digest()
+    ).decode()
+    return jsonify({
+        "iceServers": [{"urls": TURN_URLS, "username": usuario_turn, "credential": credencial}]
+    })
 
 
 def _now_iso():
