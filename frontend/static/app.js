@@ -429,12 +429,18 @@
                 <div class="usuario-atual-email" title="${escapeHtml(usuario ? usuario.email : "")}">${escapeHtml(usuario ? usuario.email : "")}</div>
               </div>
             </div>
-            ${usuario && _podeVerConversas() ? `
-              <button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="camera-enviar-whatsapp" title="Bater uma foto agora e mandar direto pra um cliente, de qualquer tela do sistema">📷 Câmera → cliente</button>
-              <input type="file" class="wpp-input-camera-oculto" accept="image/*" capture="environment" hidden>` : ""}
-            ${usuario && usuario.admin ? `
-              <button class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
-              <a class="botao secundario pequeno" href="/downloads/WhattsInbox-instalador.zip" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
+            ${(usuario && (_podeVerConversas() || usuario.admin)) ? `
+              <button type="button" class="botao secundario pequeno" style="width:100%; margin-top:10px; display:flex; align-items:center; justify-content:space-between;" data-acao="alternar-mais-opcoes">
+                <span>⋯ Mais opções</span> <span class="wpp-seta-mais-opcoes">▸</span>
+              </button>
+              <div class="wpp-mais-opcoes" ${state._maisOpcoesAberta ? "" : "hidden"}>
+                ${_podeVerConversas() ? `
+                  <button class="botao secundario pequeno" style="width:100%; margin-top:8px;" data-acao="camera-enviar-whatsapp" title="Bater uma foto agora e mandar direto pra um cliente, de qualquer tela do sistema">📷 Câmera → cliente</button>
+                  <input type="file" class="wpp-input-camera-oculto" accept="image/*" capture="environment" hidden>` : ""}
+                ${usuario.admin ? `
+                  <button class="botao secundario pequeno" style="width:100%; margin-top:8px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
+                  <a class="botao secundario pequeno" href="/downloads/WhattsInbox-instalador.zip" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>` : ""}
+              </div>` : ""}
             <button class="botao secundario pequeno ${usuario && usuario.ausente ? "botao-ausente-ligado" : ""}" style="width:100%; margin-top:10px;" data-acao="alternar-ausente"
               title="${usuario && usuario.ausente ? "Você está marcado como ausente — clique pra voltar" : "Avise que você saiu (almoço, reunião). Some das listas de quem pode atender."}">
               ${usuario && usuario.ausente ? `🟡 Ausente${usuario.ausente_motivo ? " — " + escapeHtml(usuario.ausente_motivo) : ""} · voltar` : "🟡 Marcar ausência"}
@@ -5924,6 +5930,14 @@
           if (arquivo) modalEscolherContatoParaFoto(arquivo);
         };
         campo.click();
+        return;
+      }
+      case "alternar-mais-opcoes": {
+        state._maisOpcoesAberta = !state._maisOpcoesAberta;
+        const painel = document.querySelector(".wpp-mais-opcoes");
+        const seta = document.querySelector(".wpp-seta-mais-opcoes");
+        if (painel) painel.hidden = !state._maisOpcoesAberta;
+        if (seta) seta.classList.toggle("wpp-seta-mais-opcoes-aberta", state._maisOpcoesAberta);
         return;
       }
       case "instalar-app": {

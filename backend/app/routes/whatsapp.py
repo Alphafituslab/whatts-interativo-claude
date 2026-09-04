@@ -367,7 +367,17 @@ def _recusa_atribuida(conversa, complemento=""):
 
     Antes dizia só "está atribuída a outro usuário", e quem esbarrava
     nisso não tinha como descobrir com quem falar — tinha que perguntar
-    de mesa em mesa."""
+    de mesa em mesa.
+
+    GRUPO é um caso à parte: quem manda lá dentro é a lista de
+    participantes (whatsapp_conversa_usuarios), não o campo
+    "atribuida_usuario_id" -- que pra grupo só existe pra rotular quem
+    criou, sem controlar acesso nenhum. Usar a mensagem de "está com
+    fulano" nesse caso confundia (dizia que a conversa era de alguém
+    quando o problema de verdade era só "você não está no grupo").
+    Achado pelo Clayton, 2026-09-04."""
+    if "eh_grupo" in conversa.keys() and conversa["eh_grupo"]:
+        return f"Você não faz parte deste grupo — peça pra alguém já no grupo te adicionar.{complemento}"
     nome = None
     if "atribuida_usuario_nome" in conversa.keys():
         nome = conversa["atribuida_usuario_nome"]
@@ -1159,6 +1169,14 @@ def criar_grupo():
     # Quem criou já fica responsável — senão o grupo nasceria numa fila
     # sem setor, esperando alguém assumir algo que já tem dono.
     whatsapp_service.atribuir_conversa(conn, conversa["id"], usuario["id"], usuario["id"])
+    # BUG achado pelo Clayton (2026-09-04): atribuir_conversa só marca o
+    # campo "atribuida_usuario_id" (que a tela usa só pra EXIBIR "com
+    # quem está"), mas quem realmente controla se a pessoa consegue ver
+    # e responder um GRUPO é a lista de participantes
+    # (whatsapp_conversa_usuarios, ver _pode_visualizar). Sem esta
+    # linha, quem cria o grupo aparecia como "responsável" mas não
+    # conseguia nem abrir a própria conversa que acabou de criar.
+    _entrar_no_grupo(conn, conversa["id"], usuario["id"])
     whatsapp_service.registrar_atividade(conn, usuario["id"], "grupo_criado", nome, conversa["id"])
     return jsonify({"conversa_id": conversa["id"], "contato_id": contato_id,
                     "nome": nome, "id_grupo": grupo["id"], "foto_url": foto_url}), 201
