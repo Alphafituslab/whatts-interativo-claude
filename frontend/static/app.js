@@ -2260,6 +2260,7 @@
     if (c.pollSinais) clearInterval(c.pollSinais);
     if (c.pollStatus) clearInterval(c.pollStatus);
     if (c.timerDuracao) clearInterval(c.timerDuracao);
+    if (c.timerQueda) clearTimeout(c.timerQueda);
     if (c.pc) { try { c.pc.close(); } catch (e) {} }
     if (c.streamLocal) c.streamLocal.getTracks().forEach((t) => t.stop());
     if (c.audioEl) { c.audioEl.pause(); c.audioEl.remove(); }
@@ -2290,6 +2291,16 @@
   function _pararToqueChamada() {
     if (state._chamadaToqueInterval) { clearInterval(state._chamadaToqueInterval); state._chamadaToqueInterval = null; }
   }
+
+  window.addEventListener("pagehide", () => {
+    const c = state._chamada;
+    if (!c || !state.accessToken) return;
+    const opts = { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + state.accessToken }, keepalive: true };
+    try {
+      fetch(`${API}/chat-interno/chamadas/${c.id}/sinal`, { ...opts, body: JSON.stringify({ tipo: "encerrar", dados: null }) });
+      fetch(`${API}/chat-interno/chamadas/${c.id}/encerrar`, opts);
+    } catch (e) {}
+  });
 
   function _mmss(segundos) {
     const m = Math.floor(segundos / 60), s2 = Math.floor(segundos % 60);
@@ -2386,13 +2397,41 @@
       if (!c.audioEl) {
         c.audioEl = document.createElement("audio");
         c.audioEl.autoplay = true;
+        c.audioEl.volume = 1;
         document.body.appendChild(c.audioEl);
       }
       c.audioEl.srcObject = ev.streams[0];
+      const tentar = () => c.audioEl.play().catch(() => {
+        // Navegador bloqueou o autoplay (comum com fone Bluetooth ou
+        // Safari) -- avisa e deixa destravar com um toque na barra,
+        // que aí conta como gesto do usuário de verdade.
+        const span = document.querySelector("[data-wpp-chamada-cronometro]");
+        if (span) span.textContent = "🔊 Toque aqui pra ouvir";
+        const barra = document.querySelector("[data-wpp-barra-chamada]");
+        if (barra) {
+          const destravar = () => { c.audioEl.play().catch(() => {}); barra.removeEventListener("click", destravar); };
+          barra.addEventListener("click", destravar, { once: true });
+        }
+      });
+      tentar();
     };
     pc.onconnectionstatechange = () => {
-      if (["failed", "closed"].includes(pc.connectionState) && state._chamada && state._chamada.id === chamadaId) {
+      if (!state._chamada || state._chamada.id !== chamadaId) return;
+      if (["failed", "closed"].includes(pc.connectionState)) {
+        if (state._chamada.timerQueda) clearTimeout(state._chamada.timerQueda);
         _desligarChamada("A ligação caiu.");
+      } else if (pc.connectionState === "disconnected") {
+        // Costuma piscar e voltar sozinho (rede instável) -- só desiste
+        // de verdade se continuar assim depois de um tempo.
+        if (state._chamada.timerQueda) clearTimeout(state._chamada.timerQueda);
+        state._chamada.timerQueda = setTimeout(() => {
+          if (state._chamada && state._chamada.id === chamadaId && pc.connectionState === "disconnected") {
+            _desligarChamada("A ligação caiu.");
+          }
+        }, 8000);
+      } else if (pc.connectionState === "connected" && state._chamada.timerQueda) {
+        clearTimeout(state._chamada.timerQueda);
+        state._chamada.timerQueda = null;
       }
     };
     return pc;
