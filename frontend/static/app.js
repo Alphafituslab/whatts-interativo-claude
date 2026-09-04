@@ -2465,13 +2465,20 @@
 
   async function _ligarChamada(conversaId, nome) {
     if (state._chamada) { definirFlash("erro", "Você já está em uma chamada."); return montarRota(); }
-    // Primeiro confirma que dá pra ligar (o colega pode estar em outra
-    // chamada agora) -- só pede o microfone DEPOIS, pra não interromper
-    // a pessoa com a permissão do navegador à toa quando vai dar ocupado.
-    let resp;
-    try {
-      resp = await chamarApi(`/chat-interno/conversas/${conversaId}/chamadas`, { method: "POST" });
-    } catch (e) {
+    // Os dois saem JUNTOS, disparados já no mesmo instante do clique --
+    // pedir o microfone só depois de esperar o POST responder faz
+    // alguns navegadores não reconhecerem mais aquilo como resultado
+    // direto do clique, e a permissão falha (só funcionava na tentativa
+    // seguinte, sem esse atraso). Se der ocupado/offline, larga o
+    // microfone que já tinha sido pedido, sem usar.
+    const [resultadoChamada, resultadoMicrofone] = await Promise.allSettled([
+      chamarApi(`/chat-interno/conversas/${conversaId}/chamadas`, { method: "POST" }),
+      navigator.mediaDevices.getUserMedia({ audio: true }),
+    ]);
+
+    if (resultadoChamada.status === "rejected") {
+      if (resultadoMicrofone.status === "fulfilled") resultadoMicrofone.value.getTracks().forEach((t) => t.stop());
+      const e = resultadoChamada.reason;
       if (e.codigo === "usuario_ocupado") {
         _tocarSinalOcupado();
         definirFlash("erro", e.mensagem || `${nome || "O colega"} está em outra chamada agora.`);
@@ -2480,14 +2487,13 @@
       }
       return montarRota();
     }
-    let streamLocal;
-    try {
-      streamLocal = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e) {
+    const resp = resultadoChamada.value;
+    if (resultadoMicrofone.status === "rejected") {
       definirFlash("erro", "Não consegui acessar seu microfone. Verifique a permissão do navegador.");
       chamarApi(`/chat-interno/chamadas/${resp.id}/encerrar`, { method: "POST" }).catch(() => {});
       return montarRota();
     }
+    const streamLocal = resultadoMicrofone.value;
     state._chamada = {
       id: resp.id, papel: "chamador", conversaId, outroNome: nome, streamLocal, mudo: false, ultimoSinalId: 0,
     };
