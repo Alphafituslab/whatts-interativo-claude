@@ -2254,6 +2254,7 @@
   const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
 
   function _limparEstadoChamada() {
+    _pararToqueChamada();
     const c = state._chamada;
     if (!c) return;
     if (c.pollSinais) clearInterval(c.pollSinais);
@@ -2276,6 +2277,15 @@
     ]);
     tocar();
     state._chamadaToqueInterval = setInterval(tocar, 2600);
+  }
+  function _tocarToqueChamando() {
+    _pararToqueChamada();
+    const tocar = () => _tocarNotas([
+      { hz: 425, inicio: 0,    duracao: 1.0, volume: 0.12 },
+      { hz: 425, inicio: 1.4,  duracao: 1.0, volume: 0.12 },
+    ]);
+    tocar();
+    state._chamadaToqueInterval = setInterval(tocar, 3600);
   }
   function _pararToqueChamada() {
     if (state._chamadaToqueInterval) { clearInterval(state._chamadaToqueInterval); state._chamadaToqueInterval = null; }
@@ -2432,6 +2442,7 @@
     const barra = _mostrarBarraChamada(nome, null);
     barra.querySelector("[data-wpp-chamada-cronometro]").textContent = "Chamando…";
     barra.querySelector("[data-wpp-chamada-mudo]").hidden = true;
+    _tocarToqueChamando();
 
     _iniciarPollSinais(resp.id, _tratarSinalDurantaChamada);
 
@@ -2444,6 +2455,7 @@
         const atual = await chamarApi(`/chat-interno/chamadas/${resp.id}`);
         if (atual.status === "atendida" && state._chamada.inicioEm === undefined) {
           clearInterval(pollStatus);
+          _pararToqueChamada();
           const span = document.querySelector("[data-wpp-chamada-cronometro]");
           if (span) span.textContent = "Conectando…";
           const botaoMudo = document.querySelector("[data-wpp-chamada-mudo]");
@@ -2451,10 +2463,12 @@
           _iniciarCronometro();
         } else if (atual.status === "recusada") {
           clearInterval(pollStatus);
+          _pararToqueChamada();
           _limparEstadoChamada();
           definirFlash("erro", `${nome || "O colega"} recusou a chamada.`);
         } else if (atual.status === "perdida") {
           clearInterval(pollStatus);
+          _pararToqueChamada();
           _limparEstadoChamada();
           definirFlash("erro", `${nome || "O colega"} não atendeu.`);
         }
