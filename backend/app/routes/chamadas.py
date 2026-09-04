@@ -36,6 +36,27 @@ def _outro_lado(conversa, usuario_id):
     return None
 
 
+def _limpar_chamadas_travadas(conn):
+    """Achado ao vivo (2026-09-04): uma chamada 'atendida' pode ficar
+    presa pra sempre se o navegador travar, a rede cair, ou o aviso de
+    saída-da-página não disparar a tempo -- e enquanto isso a conversa
+    fica bloqueada pra qualquer chamada nova. Chamado no início das
+    rotas mais usadas (iniciar/pendente/sinais) -- a de sinais sozinha
+    já roda a cada 1s durante QUALQUER chamada ativa no sistema, então
+    isto aqui vira, na prática, uma limpeza quase contínua."""
+    conn.execute(
+        "UPDATE chat_interno_chamadas SET status = 'perdida' "
+        "WHERE status = 'chamando' AND datetime(criado_em) < datetime('now', '-60 seconds')"
+    )
+    conn.execute(
+        "UPDATE chat_interno_chamadas SET status = 'encerrada', encerrada_em = ? "
+        "WHERE status = 'atendida' "
+        "AND datetime(COALESCE(ultimo_ping_em, atendida_em)) < datetime('now', '-30 seconds')",
+        (_now_iso(),),
+    )
+    conn.commit()
+
+
 def _carregar_chamada(conn, empresa_id, chamada_id):
     # empresa_id da conversa vem de quem CRIOU ela (uc.empresa_id) --
     # mesma regra de chat_interno_service.carregar_conversa, ele nunca
@@ -65,10 +86,22 @@ def _chamada_publica(conn, chamada):
 def iniciar(conversa_id):
     usuario = g.usuario_atual
     conn = get_db()
+    _limpar_chamadas_travadas(conn)
     conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
     outro = _outro_lado(conversa, usuario["id"])
     if outro is None:
         raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+
+    # Pedido do Clayton (2026-09-04): avisar na hora se o colega está
+    # offline, em vez de deixar tocar pro vácuo até estourar os 60s.
+    destino = conn.execute(
+        "SELECT ultimo_acesso, offline_forcado, ausente, nome FROM usuarios WHERE id = ?", (outro,)
+    ).fetchone()
+    if destino is None or not whatsapp_service.usuario_esta_online(
+        destino["ultimo_acesso"], destino["offline_forcado"], destino["ausente"]
+    ):
+        raise ApiError(f"{destino['nome'] if destino else 'Colega'} está offline agora — não é possível ligar.",
+                        status=409, codigo="operador_offline")
 
     # Já existe uma chamada em andamento nessa conversa (de qualquer um
     # dos dois lados)? Não deixa começar outra por cima -- confunde o
@@ -116,16 +149,7 @@ def pendente():
     # 60s sem ninguém atender: considera "perdida" sozinho, pra não
     # ficar tocando pra sempre se o navegador de quem ligou travou ou
     # a pessoa fechou a aba sem desligar.
-    conn.execute(
-        "UPDATE chat_interno_chamadas SET status = 'perdida' "
-        "WHERE status = 'chamando' AND datetime(criado_em) < datetime('now', '-60 seconds')"
-    )
-    conn.execute(
-        "UPDATE chat_interno_chamadas SET status = 'encerrada', encerrada_em = ? "
-        "WHERE status = 'atendida' AND datetime(atendida_em) < datetime('now', '-4 hours')",
-        (_now_iso(),),
-    )
-    conn.commit()
+    _limpar_chamadas_travadas(conn)
     row = conn.execute(
         "SELECT ch.* FROM chat_interno_chamadas ch "
         "JOIN chat_interno_conversas c ON c.id = ch.conversa_id "
@@ -240,6 +264,10 @@ def listar_sinais(chamada_id):
     chamada = _carregar_chamada(conn, usuario["empresa_id"], chamada_id)
     if usuario["id"] not in (chamada["de_usuario_id"], chamada["para_usuario_id"]):
         raise ApiError("Sem acesso a esta chamada.", status=403, codigo="sem_permissao")
+    if chamada["status"] == "atendida":
+        conn.execute("UPDATE chat_interno_chamadas SET ultimo_ping_em = ? WHERE id = ?", (_now_iso(), chamada_id))
+        conn.commit()
+    _limpar_chamadas_travadas(conn)
     apos = int(request.args.get("apos") or 0)
     rows = conn.execute(
         "SELECT id, tipo, dados, criado_em FROM chat_interno_chamadas_sinais "

@@ -2281,12 +2281,15 @@
   }
   function _tocarToqueChamando() {
     _pararToqueChamada();
+    // Tom de chamada de telefone de verdade: um "tummmm" comprido e
+    // sustentado (não um bipe curto), dois por ciclo, com uma pausa --
+    // pedido do Clayton depois de achar a primeira versão curta demais.
     const tocar = () => _tocarNotas([
-      { hz: 425, inicio: 0,    duracao: 1.0, volume: 0.12 },
-      { hz: 425, inicio: 1.4,  duracao: 1.0, volume: 0.12 },
+      { hz: 400, inicio: 0,   duracao: 4.5, volume: 0.13 },
+      { hz: 400, inicio: 5.3, duracao: 4.5, volume: 0.13 },
     ]);
     tocar();
-    state._chamadaToqueInterval = setInterval(tocar, 3600);
+    state._chamadaToqueInterval = setInterval(tocar, 12000);
   }
   function _pararToqueChamada() {
     if (state._chamadaToqueInterval) { clearInterval(state._chamadaToqueInterval); state._chamadaToqueInterval = null; }
@@ -2360,6 +2363,7 @@
     }
     definirFlash("ok", motivoRemoto || "Chamada encerrada.");
     _limparEstadoChamada();
+    montarRota();
   }
 
   // Poll genérico dos sinais do OUTRO lado -- roda tanto em quem ligou
@@ -2460,7 +2464,7 @@
   }
 
   async function _ligarChamada(conversaId, nome) {
-    if (state._chamada) { definirFlash("erro", "Você já está em uma chamada."); return; }
+    if (state._chamada) { definirFlash("erro", "Você já está em uma chamada."); return montarRota(); }
     // Primeiro confirma que dá pra ligar (o colega pode estar em outra
     // chamada agora) -- só pede o microfone DEPOIS, pra não interromper
     // a pessoa com a permissão do navegador à toa quando vai dar ocupado.
@@ -2474,7 +2478,7 @@
       } else {
         definirFlash("erro", e.mensagem || "Não deu pra iniciar a chamada.");
       }
-      return;
+      return montarRota();
     }
     let streamLocal;
     try {
@@ -2482,7 +2486,7 @@
     } catch (e) {
       definirFlash("erro", "Não consegui acessar seu microfone. Verifique a permissão do navegador.");
       chamarApi(`/chat-interno/chamadas/${resp.id}/encerrar`, { method: "POST" }).catch(() => {});
-      return;
+      return montarRota();
     }
     state._chamada = {
       id: resp.id, papel: "chamador", conversaId, outroNome: nome, streamLocal, mudo: false, ultimoSinalId: 0,
@@ -2522,11 +2526,13 @@
           _pararToqueChamada();
           _limparEstadoChamada();
           definirFlash("erro", `${nome || "O colega"} recusou a chamada.`);
+          montarRota();
         } else if (atual.status === "perdida") {
           clearInterval(pollStatus);
           _pararToqueChamada();
           _limparEstadoChamada();
           definirFlash("erro", `${nome || "O colega"} não atendeu.`);
+          montarRota();
         }
       } catch (e) {}
     }, 1500);
@@ -2572,7 +2578,7 @@
     } catch (e) {
       definirFlash("erro", "Não consegui acessar seu microfone. Verifique a permissão do navegador.");
       try { await chamarApi(`/chat-interno/chamadas/${chamada.id}/recusar`, { method: "POST" }); } catch (e2) {}
-      return;
+      return montarRota();
     }
 
     state._chamada = {
@@ -2595,7 +2601,7 @@
     if (!oferta) {
       definirFlash("erro", "Não deu pra conectar a chamada (sinal não chegou a tempo).");
       _limparEstadoChamada();
-      return;
+      return montarRota();
     }
 
     await pc.setRemoteDescription(oferta);

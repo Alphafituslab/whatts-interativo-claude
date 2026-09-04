@@ -1,0 +1,12 @@
+-- "Batimento" da chamada -- achado ao vivo: mesmo depois do aviso de
+-- saida-da-pagina, uma chamada 'atendida' ficou presa de novo (rede
+-- caiu, navegador travou, ou o pagehide simplesmente nao disparou a
+-- tempo). O prazo de seguranca de 4h era tempo demais pra travar uma
+-- conversa inteira ate se resolver sozinho.
+--
+-- ultimo_ping_em: atualizado toda vez que qualquer um dos dois lados
+-- consulta /sinais (o que acontece a cada 1s, o tempo todo, enquanto a
+-- chamada esta de pe) -- vira um "ainda estou aqui" de graca, sem
+-- precisar de rota nova. Se os dois pararem de bater ponto por mais de
+-- 30s, a chamada se fecha sozinha.
+ALTER TABLE chat_interno_chamadas ADD COLUMN ultimo_ping_em TEXT;
