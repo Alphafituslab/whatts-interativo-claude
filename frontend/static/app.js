@@ -609,6 +609,29 @@
     form.requestSubmit();
   });
 
+  document.addEventListener("input", (e) => {
+    const campo = e.target.closest("[data-wpp-busca-mensagens-input]");
+    if (!campo) return;
+    _buscarNasMensagens(campo.value);
+  });
+  document.addEventListener("keydown", (e) => {
+    const campo = e.target.closest("[data-wpp-busca-mensagens-input]");
+    if (!campo || e.key !== "Enter") return;
+    e.preventDefault();
+    _irParaResultadoBusca(e.shiftKey ? -1 : 1);
+  });
+  document.addEventListener("keydown", (e) => {
+    // Atalho tipo navegador: Ctrl+F com uma conversa aberta abre a busca
+    // em vez da busca nativa da página, que aqui não ajudaria em nada.
+    if (!(e.key === "f" && (e.ctrlKey || e.metaKey))) return;
+    const painel = document.querySelector("[data-wpp-mensagens], [data-wpp-mensagens-interno]");
+    const barra = document.querySelector("[data-wpp-busca-mensagens]");
+    if (!painel || !barra) return;
+    e.preventDefault();
+    barra.hidden = false;
+    barra.querySelector("[data-wpp-busca-mensagens-input]").focus();
+  });
+
   // Busca enquanto digita, nas Conversas.
   //
   // Antes só buscava no Enter (ou na lupa), e quem digitava ficava
@@ -3276,6 +3299,58 @@
       </form>`);
   }
 
+  // Busca dentro da conversa aberta -- 100% no que já está na tela (a
+  // rota de mensagens não pagina, vem tudo de uma vez), sem precisar de
+  // nenhuma chamada nova ao servidor. Ignora acento/maiúscula pra achar
+  // "aniversario" mesmo escrito "Aniversário".
+  function _normalizarBusca(txt) {
+    return (txt || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  }
+
+  function _buscarNasMensagens(texto) {
+    const painel = document.querySelector("[data-wpp-mensagens], [data-wpp-mensagens-interno]");
+    if (!painel) return;
+    painel.querySelectorAll(".wpp-bolha-destaque, .wpp-bolha-destaque-atual").forEach((b) => {
+      b.classList.remove("wpp-bolha-destaque", "wpp-bolha-destaque-atual");
+    });
+    const alvo = _normalizarBusca(texto).trim();
+    if (!alvo) { state._buscaMensagens = null; _atualizarContadorBusca(); return; }
+    const achados = [...painel.querySelectorAll(".wpp-bolha")].filter((b) => _normalizarBusca(b.textContent).includes(alvo));
+    achados.forEach((b) => b.classList.add("wpp-bolha-destaque"));
+    state._buscaMensagens = { itens: achados, indice: -1 };
+    if (achados.length) _irParaResultadoBusca(1);
+    else _atualizarContadorBusca();
+  }
+
+  function _irParaResultadoBusca(delta) {
+    const b = state._buscaMensagens;
+    if (!b || !b.itens.length) return;
+    const atual = b.itens[b.indice];
+    if (atual) atual.classList.remove("wpp-bolha-destaque-atual");
+    b.indice = (b.indice + delta + b.itens.length) % b.itens.length;
+    const novo = b.itens[b.indice];
+    novo.classList.add("wpp-bolha-destaque-atual");
+    novo.scrollIntoView({ block: "center", behavior: "smooth" });
+    _atualizarContadorBusca();
+  }
+
+  function _atualizarContadorBusca() {
+    const el = document.querySelector("[data-wpp-busca-mensagens-contador]");
+    if (!el) return;
+    const b = state._buscaMensagens;
+    el.textContent = (!b || !b.itens.length) ? "0 de 0" : `${b.indice + 1} de ${b.itens.length}`;
+  }
+
+  function _limparBuscaMensagens() {
+    state._buscaMensagens = null;
+    const input = document.querySelector("[data-wpp-busca-mensagens-input]");
+    if (input) input.value = "";
+    document.querySelectorAll(".wpp-bolha-destaque, .wpp-bolha-destaque-atual").forEach((b) => {
+      b.classList.remove("wpp-bolha-destaque", "wpp-bolha-destaque-atual");
+    });
+    _atualizarContadorBusca();
+  }
+
   function htmlChat(conversa, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes) {
     if (!conversa) {
       return `<div class="wpp-chat-vazio"><div class="wpp-chat-vazio-icone">💬</div><p class="texto-suave">Selecione uma conversa à esquerda para ver as mensagens.</p></div>`;
@@ -3318,6 +3393,7 @@
           ${conversa.sem_pendencia_em ? `<button type="button" class="botao secundario pequeno botao-sem-pendencia-ligado" data-acao="sem-pendencia" data-id="${conversa.id}" data-desmarcar="1" title="Esta conversa está marcada como resolvida e fora do alerta de atraso. Clique pra voltar a cobrar resposta.">✓ Sem pendência</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="sem-pendencia" data-id="${conversa.id}" title="Vi e não precisa responder — tira do alerta de atraso sem mandar mensagem">✓ Não precisa responder</button>`}
           <button type="button" class="botao secundario pequeno ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Só a equipe vê, nunca vai pro cliente">🗒️ Notas internas${(notas || []).length ? ` (${notas.length})` : ""}</button>
+          <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
           ${fechada
@@ -3328,6 +3404,13 @@
             data-negociacoes="${(negociacoes || []).length}"
             data-proximo="${escapeHtml(conversa.proximo_contato_em || "")}" title="Mais ações">⋯</button>
         </div>
+      </div>
+      <div class="wpp-busca-mensagens" data-wpp-busca-mensagens hidden>
+        <input type="search" class="wpp-busca-mensagens-input" data-wpp-busca-mensagens-input placeholder="Buscar nesta conversa…" autocomplete="off">
+        <span class="texto-suave wpp-busca-mensagens-contador" data-wpp-busca-mensagens-contador>0 de 0</span>
+        <button type="button" class="botao-icone" data-acao="busca-mensagens-anterior" title="Resultado anterior (Shift+Enter)">↑</button>
+        <button type="button" class="botao-icone" data-acao="busca-mensagens-proxima" title="Próximo resultado (Enter)">↓</button>
+        <button type="button" class="botao-icone" data-acao="fechar-busca-mensagens" title="Fechar busca">✕</button>
       </div>
       ${conversa.eh_grupo ? `
         <div class="wpp-grupo-membros">
@@ -3573,6 +3656,7 @@
     }
 
     if (_minhaGeracao !== _geracaoRenderWhatsapp) return; // uma chamada mais nova já assumiu — essa aqui desiste
+    state._buscaMensagens = null; // troca de conversa: os elementos destacados de antes nem existem mais no DOM
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Conversas</h2>
@@ -4075,6 +4159,7 @@
           <button type="button" class="botao-icone" data-acao="abrir-lembrete-interno" data-id="${conversa.id}" title="Criar lembrete (avisa só você)">🔔</button>
           <button type="button" class="botao-icone" data-acao="abrir-agendar-interno" data-id="${conversa.id}" title="Agendar mensagem pro colega">🕒</button>
           <button type="button" class="botao-icone" data-acao="chamar-atencao-interna" data-id="${conversa.id}" data-nome="${escapeHtml(outroNome)}" title="Dar um toque sonoro no colega — aperte quantas vezes precisar até ele responder">📣</button>
+          <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar-interno" data-id="${conversa.id}">Encaminhar</button>
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-interno" data-id="${conversa.id}">Reabrir</button>`
@@ -4084,6 +4169,13 @@
       <div class="wpp-tags-linha">
         ${(conversa.tags || []).map((t) => `<span class="wpp-tag-chip" data-id="${t.id}" data-nome="${escapeHtml(t.nome)}" data-interna="1" style="background:${t.cor};" title="Botão direito: editar/excluir esta etiqueta">${escapeHtml(t.nome)}${souAlheio ? "" : `<button type="button" class="wpp-tag-tirar" data-acao="tirar-etiqueta" data-id="${conversa.id}" data-tag="${t.id}" data-interna="1" title="Tirar a etiqueta ${escapeHtml(t.nome)} desta conversa">✕</button>`}</span>`).join("")}
         ${souAlheio ? "" : `<button type="button" class="wpp-tag-adicionar ${(conversa.tags || []).length ? "" : "wpp-tag-adicionar-vazio"}" data-acao="abrir-tags-interna" data-id="${conversa.id}" data-tags='${escapeHtml(JSON.stringify((conversa.tags || []).map((t) => t.id)))}' title="Etiquetar esta conversa — só você vê, e depois dá pra filtrar a lista por ela">${(conversa.tags || []).length ? "+ etiqueta" : "🏷️ Etiquetar conversa"}</button>`}
+      </div>
+      <div class="wpp-busca-mensagens" data-wpp-busca-mensagens hidden>
+        <input type="search" class="wpp-busca-mensagens-input" data-wpp-busca-mensagens-input placeholder="Buscar nesta conversa…" autocomplete="off">
+        <span class="texto-suave wpp-busca-mensagens-contador" data-wpp-busca-mensagens-contador>0 de 0</span>
+        <button type="button" class="botao-icone" data-acao="busca-mensagens-anterior" title="Resultado anterior (Shift+Enter)">↑</button>
+        <button type="button" class="botao-icone" data-acao="busca-mensagens-proxima" title="Próximo resultado (Enter)">↓</button>
+        <button type="button" class="botao-icone" data-acao="fechar-busca-mensagens" title="Fechar busca">✕</button>
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
       <div class="wpp-mensagens" data-wpp-mensagens-interno data-conversa-id="${conversa.id}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa)).join("")}</div>
@@ -4184,6 +4276,7 @@
     if (usuario.super_admin) abas.push({ chave: "todas", label: "Todas" });
 
     if (_minhaGeracaoInterno !== _geracaoRenderChatInterno) return; // uma chamada mais nova já assumiu — essa aqui desiste
+    state._buscaMensagens = null; // troca de conversa: os elementos destacados de antes nem existem mais no DOM
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Chat interno</h2>
@@ -7214,6 +7307,25 @@
         painel.hidden = !painel.hidden;
         return;
       }
+      case "alternar-busca-mensagens": {
+        const barra = document.querySelector("[data-wpp-busca-mensagens]");
+        if (!barra) return;
+        barra.hidden = !barra.hidden;
+        if (barra.hidden) {
+          _limparBuscaMensagens();
+        } else {
+          barra.querySelector("[data-wpp-busca-mensagens-input]").focus();
+        }
+        return;
+      }
+      case "fechar-busca-mensagens": {
+        const barra = document.querySelector("[data-wpp-busca-mensagens]");
+        if (barra) barra.hidden = true;
+        _limparBuscaMensagens();
+        return;
+      }
+      case "busca-mensagens-proxima": _irParaResultadoBusca(1); return;
+      case "busca-mensagens-anterior": _irParaResultadoBusca(-1); return;
       case "inserir-emoji": {
         const textarea = document.querySelector(".wpp-textarea");
         const inicio = textarea.selectionStart || textarea.value.length;
