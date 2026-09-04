@@ -118,7 +118,12 @@ def pendente():
     # a pessoa fechou a aba sem desligar.
     conn.execute(
         "UPDATE chat_interno_chamadas SET status = 'perdida' "
-        "WHERE status = 'chamando' AND criado_em < datetime('now', '-60 seconds')"
+        "WHERE status = 'chamando' AND datetime(criado_em) < datetime('now', '-60 seconds')"
+    )
+    conn.execute(
+        "UPDATE chat_interno_chamadas SET status = 'encerrada', encerrada_em = ? "
+        "WHERE status = 'atendida' AND datetime(atendida_em) < datetime('now', '-4 hours')",
+        (_now_iso(),),
     )
     conn.commit()
     row = conn.execute(
