@@ -215,6 +215,7 @@ def obter_configuracao(conn, empresa_id: int):
             "aviso_conversa_parada_ativo": 0, "aviso_conversa_parada_horas": 24, "aviso_conversa_parada_minutos_fechar": 10,
             "aviso_conversa_parada_max_prorrogacoes": 3,
             "aviso_ligacoes_ativo": 0, "dias_prorrogar_ligacao": 3,
+            "envio_massa_ativo": 0, "envio_massa_intervalo_segundos": 8,
         }
     return dict(row)
 
@@ -238,6 +239,7 @@ def config_publica(config):
     d["aviso_boasvindas_ativo"] = bool(d.get("aviso_boasvindas_ativo"))
     d["aviso_conversa_parada_ativo"] = bool(d.get("aviso_conversa_parada_ativo"))
     d["aviso_ligacoes_ativo"] = bool(d.get("aviso_ligacoes_ativo"))
+    d["envio_massa_ativo"] = bool(d.get("envio_massa_ativo"))
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -392,6 +394,17 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         (1 if dados.get("aviso_ligacoes_ativo") else 0) if "aviso_ligacoes_ativo" in dados
         else (1 if anterior.get("aviso_ligacoes_ativo") else 0)
     )
+    # Envio em massa: desligado por padrao, de proposito -- risco real
+    # de banimento do numero se usado sem cuidado (ja avisado na tela).
+    envio_massa_ativo = (
+        (1 if dados.get("envio_massa_ativo") else 0) if "envio_massa_ativo" in dados
+        else (1 if anterior.get("envio_massa_ativo") else 0)
+    )
+    if dados.get("envio_massa_intervalo_segundos") not in (None, ""):
+        envio_massa_intervalo_segundos = max(3, int(dados["envio_massa_intervalo_segundos"]))
+    else:
+        atual_intervalo = anterior.get("envio_massa_intervalo_segundos")
+        envio_massa_intervalo_segundos = 8 if atual_intervalo is None else atual_intervalo
     if dados.get("dias_prorrogar_ligacao") not in (None, ""):
         dias_prorrogar_ligacao = max(1, int(dados["dias_prorrogar_ligacao"]))
     else:
@@ -423,8 +436,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
                                               aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
                                               aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
-                                              aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
+                                              envio_massa_ativo, envio_massa_intervalo_segundos)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -459,6 +473,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             aviso_conversa_parada_max_prorrogacoes = excluded.aviso_conversa_parada_max_prorrogacoes,
             aviso_ligacoes_ativo = excluded.aviso_ligacoes_ativo,
             dias_prorrogar_ligacao = excluded.dias_prorrogar_ligacao,
+            envio_massa_ativo = excluded.envio_massa_ativo,
+            envio_massa_intervalo_segundos = excluded.envio_massa_intervalo_segundos,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -470,7 +486,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
          aviso_fila_sem_escolha_setores, aviso_sla_ativo, aviso_resumo_diario_ativo, aviso_boasvindas_ativo,
          aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
-         aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao),
+         aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
+         envio_massa_ativo, envio_massa_intervalo_segundos),
     )
     return obter_configuracao(conn, empresa_id)
 

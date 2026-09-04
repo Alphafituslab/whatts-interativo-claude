@@ -3577,6 +3577,7 @@
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Conversas</h2>
          <div style="display:flex; gap:8px;">
+           ${state.usuarioAtual.admin ? `<button type="button" class="botao secundario pequeno" data-acao="abrir-envio-massa" title="Mandar a mesma mensagem pra vários contatos">📢 Envio em massa</button>` : ""}
            <button type="button" class="botao secundario pequeno" data-acao="abrir-contatos">📇 Contatos</button>
            <button type="button" class="botao pequeno" data-acao="abrir-nova-conversa">+ Nova conversa</button>
          </div>
@@ -4214,6 +4215,87 @@
   function _setoresDoColega(u) {
     if (u.setores && u.setores.length) return u.setores;
     return u.setor ? [u.setor] : [];
+  }
+
+  async function modalEnvioMassa() {
+    let config;
+    try {
+      config = await chamarApi("/whatsapp/configuracao");
+    } catch (e) {
+      definirFlash("erro", "Não consegui verificar a configuração.");
+      return;
+    }
+    if (!config.envio_massa_ativo) {
+      abrirModal(`
+        <h3 style="margin-top:0;">📢 Envio em massa</h3>
+        <p class="dica">Essa função está desativada. Ative em <strong>Configuração → Envio em massa</strong> antes de usar.</p>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
+          <a class="botao" href="#/configuracao" data-acao="fechar-modal">Ir pra Configuração</a>
+        </div>`);
+      return;
+    }
+
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">📢 Envio em massa</h3>
+      <p class="dica" style="background:color-mix(in srgb, var(--vermelho) 10%, transparent); padding:8px 10px; border-radius:8px;">
+        ⚠️ Mandado espaçado (${config.envio_massa_intervalo_segundos || 8}s entre cada um), respeitando os limites de ritmo já configurados. Ainda assim, use com moderação — número banido por disparo em massa não volta fácil.
+      </p>
+      <div class="campo">
+        <input data-busca-envio-massa placeholder="Procurar cliente por nome ou número…" autofocus>
+      </div>
+      <div class="wpp-encaminhar-lista" style="margin-bottom:12px; max-height:26vh; overflow-y:auto;" data-lista-envio-massa><p class="dica">Digite pra buscar…</p></div>
+      <p class="dica" data-resumo-envio-massa>Nenhum destinatário escolhido ainda.</p>
+      <div class="campo"><label>Mensagem</label><textarea data-envio-massa-texto rows="4" placeholder="Escreva a mensagem..." required></textarea></div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-acao="confirmar-envio-massa">Iniciar envio</button>
+      </div>`, "modal-largo");
+
+    const escolhidos = new Map(); // telefone -> nome
+    const lista = wrap.querySelector("[data-lista-envio-massa]");
+    const busca = wrap.querySelector("[data-busca-envio-massa]");
+    const resumo = wrap.querySelector("[data-resumo-envio-massa]");
+    wrap._envioMassaEscolhidos = escolhidos;
+
+    function atualizarResumo() {
+      resumo.textContent = escolhidos.size
+        ? `${escolhidos.size} destinatário(s): ${[...escolhidos.values()].slice(0, 6).join(", ")}${escolhidos.size > 6 ? "…" : ""}`
+        : "Nenhum destinatário escolhido ainda.";
+    }
+
+    function desenhar(itens) {
+      if (!itens.length) { lista.innerHTML = `<p class="dica">Nenhum contato encontrado.</p>`; return; }
+      lista.innerHTML = itens.map((c) => `
+        <label class="wpp-encaminhar-item">
+          <input type="checkbox" data-envio-massa-item value="${escapeHtml(c.telefone)}" data-nome="${escapeHtml(c.nome || c.telefone)}" ${escolhidos.has(c.telefone) ? "checked" : ""}>
+          <span class="wpp-encaminhar-nome">${escapeHtml(c.nome || c.telefone)}</span>
+          <span class="wpp-encaminhar-tel">${escapeHtml(c.telefone)}</span>
+        </label>`).join("");
+      lista.querySelectorAll("[data-envio-massa-item]").forEach((cx) => {
+        cx.addEventListener("change", () => {
+          if (cx.checked) escolhidos.set(cx.value, cx.dataset.nome);
+          else escolhidos.delete(cx.value);
+          atualizarResumo();
+        });
+      });
+    }
+
+    async function buscarContatos(termo) {
+      if (!termo || termo.trim().length < 2) { lista.innerHTML = `<p class="dica">Digite pelo menos 2 letras/números…</p>`; return; }
+      try {
+        const r = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(termo)}`);
+        desenhar((r.contatos || r || []).filter((c) => !c.eh_grupo).slice(0, 40));
+      } catch (e) {
+        lista.innerHTML = `<p class="dica">Não consegui buscar agora.</p>`;
+      }
+    }
+    let debounce = null;
+    busca.addEventListener("input", (e) => {
+      clearTimeout(debounce);
+      const termo = e.target.value;
+      debounce = setTimeout(() => buscarContatos(termo), 250);
+    });
   }
 
   function modalNovaConversaInterna(usuarios, setores) {
@@ -5044,6 +5126,24 @@
            <div class="campo" style="max-width:220px;">
              <label>Ao prorrogar o lembrete, adiar quantos dias</label>
              <input type="number" name="dias_prorrogar_ligacao" min="1" max="90" value="${config.dias_prorrogar_ligacao ?? 3}">
+           </div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">📢 Envio em massa</h3>
+         <p class="dica" style="background:color-mix(in srgb, var(--vermelho) 10%, transparent); padding:8px 10px; border-radius:8px;">
+           ⚠️ Risco real: mandar a mesma mensagem pra muita gente de uma vez é o tipo de coisa que faz o WhatsApp marcar o número como robô e banir — mesmo com o freio de ritmo (limites de envio por minuto/hora, já configurados na Conexão) e o intervalo entre mensagens aqui embaixo. Use só quando precisar mesmo, e prefira listas pequenas.
+         </p>
+         <form data-form="salvar-envio-massa">
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="envio_massa_ativo" ${config.envio_massa_ativo ? "checked" : ""}> Habilitar envio em massa</label>
+           </div>
+           <div class="campo" style="max-width:260px;">
+             <label>Intervalo entre cada mensagem (segundos)</label>
+             <input type="number" name="envio_massa_intervalo_segundos" min="3" max="120" value="${config.envio_massa_intervalo_segundos ?? 8}">
+             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">Quanto maior, mais devagar e mais parecido com uma pessoa mandando de verdade.</p>
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
@@ -6528,6 +6628,27 @@
             rotulo: arquivada ? "📤 Desarquivar" : "🗄️ Arquivar" },
           { acao: "excluir-conversa", id, rotulo: "🗑️ Excluir conversa" },
         ]);
+      }
+      case "abrir-envio-massa": return modalEnvioMassa();
+      case "confirmar-envio-massa": {
+        const wrapModal = alvo.closest(".fundo-modal");
+        const modal = alvo.closest(".modal");
+        const escolhidos = wrapModal ? wrapModal._envioMassaEscolhidos : null;
+        const texto = modal.querySelector("[data-envio-massa-texto]").value.trim();
+        if (!escolhidos || !escolhidos.size) { definirFlash("erro", "Escolha pelo menos um destinatário."); return; }
+        if (!texto) { definirFlash("erro", "Escreva a mensagem."); return; }
+        if (!confirm(`Confirma o envio pra ${escolhidos.size} contato(s)? Vai ser mandado aos poucos, não tem como desfazer depois de começar.`)) return;
+        try {
+          const r = await chamarApi("/whatsapp/envio-massa", {
+            method: "POST",
+            body: { texto, telefones: [...escolhidos.keys()] },
+          });
+          fecharModais();
+          definirFlash("ok", `Envio iniciado — ${r.total} destinatário(s) na fila, sendo mandado aos poucos.`);
+        } catch (e) {
+          definirFlash("erro", e.message || "Não consegui iniciar o envio.");
+        }
+        return;
       }
       case "abrir-nova-conversa": modalNovaConversa(); return;
       case "abrir-criar-grupo": {
@@ -8170,6 +8291,17 @@
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-envio-massa": {
+        await chamarApi("/whatsapp/configuracao", {
+          method: "PUT",
+          body: {
+            envio_massa_ativo: !!dados.get("envio_massa_ativo"),
+            envio_massa_intervalo_segundos: Number(dados.get("envio_massa_intervalo_segundos")) || 8,
+          },
+        });
+        definirFlash("ok", "Configuração de envio em massa salva.");
         return renderWhatsappConfiguracao();
       }
       case "iniciar-conversa": {
