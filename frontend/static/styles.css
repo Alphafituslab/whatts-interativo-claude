@@ -538,8 +538,8 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 }
 .wpp-busca-mensagens-input:focus { outline: none; border-color: var(--primaria); }
 .wpp-busca-mensagens-contador { font-size: 11.5px; white-space: nowrap; }
-.wpp-bolha-destaque { outline: 2px solid color-mix(in srgb, var(--primaria) 45%, transparent); outline-offset: 2px; border-radius: 10px; }
-.wpp-bolha-destaque-atual { outline: 2px solid var(--primaria); background: color-mix(in srgb, var(--primaria) 12%, transparent); border-radius: 10px; }
+.wpp-bolha-destaque { outline: 2px solid color-mix(in srgb, #f5b300 55%, transparent); outline-offset: 2px; border-radius: 10px; transition: outline-color .15s, background .15s; }
+.wpp-bolha-destaque-atual { outline: 3px solid #f5b300; background: color-mix(in srgb, #f5b300 30%, transparent); border-radius: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, #f5b300 20%, transparent); }
 
 .wpp-tags-linha { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 18px; border-bottom: 1px solid var(--borda); }
 .wpp-tags-linha-lista { padding: 2px 0 0; border-bottom: none; }
