@@ -5158,9 +5158,14 @@
              <label><input type="checkbox" name="ia_ativa" ${config.ia_ativa ? "checked" : ""}> Habilitar assistente de IA</label>
            </div>
            <div class="campo">
-             <label>Chave da API (Anthropic)</label>
+             <label>Chave da API (Anthropic / Claude)</label>
              <input type="password" name="ia_api_key" placeholder="${config.ia_api_key_configurada ? "•••••••••••• (já configurada — deixe em branco pra manter)" : "sk-ant-..."}" autocomplete="off">
            </div>
+           <div class="campo">
+             <label>Chave da API (OpenAI / ChatGPT)</label>
+             <input type="password" name="ia_openai_api_key" placeholder="${config.ia_openai_api_key_configurada ? "•••••••••••• (já configurada — deixe em branco pra manter)" : "sk-..."}" autocomplete="off">
+           </div>
+           <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">Pode preencher uma ou as duas — quando a fase 2 entrar, dá pra escolher qual usar.</p>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
@@ -8346,6 +8351,7 @@
             body: {
               ia_ativa: !!dados.get("ia_ativa"),
               ia_api_key: dados.get("ia_api_key") || undefined,
+              ia_openai_api_key: dados.get("ia_openai_api_key") || undefined,
             },
           });
         } catch (erro) {
