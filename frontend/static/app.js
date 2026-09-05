@@ -255,6 +255,7 @@
       if (!ok) { limparSessao(); return renderLogin(); }
       try { state.usuarioAtual = await chamarApi("/auth/me"); }
       catch (e) { limparSessao(); return renderLogin(); }
+      await _obterMenuOcultos();
     }
 
     if (rota === "#/login") return navegarPara("#/whatsapp");
@@ -304,6 +305,36 @@
     { rota: "#/usuarios", chave: "usuarios", label: "Usuários", icone: "👥", admin: true },
     { rota: "#/catalogo", chave: "catalogo", label: "Catálogo/Proposta", icone: "🗂️", admin: true },
   ];
+
+  // Itens de menu que dá pra esconder dos usuários comuns (pedido do
+  // Clayton 2026-09-05) -- só os que TODO mundo vê por padrão; os
+  // admin-only (dashboard, usuários...) já ficam escondidos deles de
+  // qualquer jeito, então oferecer toggle pra esses não faria sentido.
+  const ITENS_MENU_TOGGLAVEIS = [
+    { chave: "whatsapp", label: "WhatsApp" },
+    { chave: "chat-interno", label: "Chat interno" },
+    { chave: "agendamentos", label: "Agendamentos" },
+    { chave: "lembretes", label: "Lembretes" },
+    { chave: "seguranca", label: "Segurança" },
+    { chave: "follow-up", label: "Follow-up" },
+    { chave: "ligacoes", label: "Leads do Consulta Anvisa" },
+  ];
+
+  // Busca uma vez (por sessão do navegador) quais itens o admin
+  // escondeu -- disponível pra QUALQUER usuário (rota própria, não a de
+  // configuração inteira que é admin-only). Admin/Master nunca filtra
+  // pelo que vier aqui (vê o menu inteiro sempre).
+  async function _obterMenuOcultos() {
+    try {
+      const r = await chamarApi("/whatsapp/menu-visibilidade");
+      state._menuOcultos = r.ocultos || [];
+    } catch (e) { state._menuOcultos = []; }
+  }
+  function _itemMenuVisivel(chave) {
+    const u = state.usuarioAtual;
+    if (u && u.admin) return true;
+    return !(state._menuOcultos || []).includes(chave);
+  }
 
   // Colaborador que só usa o chat interno. Esconder o menu é conforto;
   // a trava de verdade é no servidor (ver o before_request em
@@ -381,6 +412,7 @@
     const linksHtml = ITENS_MENU
       .filter((it) => !it.admin || (usuario && usuario.admin))
       .filter((it) => !it.exigeConversas || _podeVerConversas())
+      .filter((it) => _itemMenuVisivel(it.chave))
       .map((it) => {
         let extra = "";
         if (it.chave === "whatsapp") {
@@ -395,13 +427,15 @@
       // Follow-up é botão, não link de página: abre o painel lateral sem
       // sair de onde a pessoa está. Fica no menu (e não flutuando sobre a
       // conversa) porque ali nunca disputa espaço com botão nenhum.
-      + `<button type="button" class="link-nav link-nav-botao" data-acao="alternar-followup" title="Clientes que precisam de contato">
-           <span>🔔</span> Follow-up
-           <span class="wpp-badge-nao-lidas wpp-badge-nav" data-followup-contador hidden>0</span>
-         </button>`
+      + (_itemMenuVisivel("follow-up")
+          ? `<button type="button" class="link-nav link-nav-botao" data-acao="alternar-followup" title="Clientes que precisam de contato">
+               <span>🔔</span> Follow-up
+               <span class="wpp-badge-nao-lidas wpp-badge-nav" data-followup-contador hidden>0</span>
+             </button>`
+          : "")
       // Ligações: pedido do Clayton (2026-09-03), logo abaixo do
       // Follow-up no menu.
-      + (usuario && _podeVerConversas()
+      + (usuario && _podeVerConversas() && _itemMenuVisivel("ligacoes")
           ? `<a class="link-nav ${paginaAtiva === "ligacoes" ? "ativo" : ""}" href="#/ligacoes"><span>📞</span> Leads do Consulta Anvisa</a>`
           : "");
 
@@ -5764,6 +5798,21 @@
        </div>
 
        <div class="cartao">
+         <h3 style="margin-top:0;">📋 Menu — o que os usuários comuns veem</h3>
+         <p class="dica">Admin e Admin Master sempre veem o menu inteiro. Desmarque aqui o que NÃO quer que apareça pros demais usuários.</p>
+         <form data-form="salvar-menu-visibilidade">
+           <div class="escolha-lista">
+             ${ITENS_MENU_TOGGLAVEIS.map((it) => `
+               <label class="escolha-item">
+                 <input type="checkbox" name="menu_item" value="${it.chave}" ${(config.menu_itens_ocultos || []).includes(it.chave) ? "" : "checked"}>
+                 <span class="escolha-texto">${escapeHtml(it.label)}</span>
+               </label>`).join("")}
+           </div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
          <h3 style="margin-top:0;">Backup</h3>
          <p class="dica">Backup automático todo dia, guardando os últimos 14 dias. Baixe uma cópia de vez em quando pra guardar fora deste computador — se algo acontecer, é só importar de volta.</p>
          <div class="barra-acoes" style="margin-bottom:14px;">
@@ -8650,7 +8699,7 @@
     return janelas;
   }
 
-  function _finalizarLogin(resp, email, lembrar) {
+  async function _finalizarLogin(resp, email, lembrar) {
     state.accessToken = resp.access_token;
     state.refreshToken = resp.refresh_token;
     localStorage.setItem("whatts_refresh_token", state.refreshToken);
@@ -8659,6 +8708,7 @@
     state.usuarioAtual = resp.usuario;
     state._aguardando2fa = false;
     state._loginPendente = null;
+    await _obterMenuOcultos();
     return navegarPara("#/whatsapp");
   }
 
@@ -9196,6 +9246,19 @@
           return renderWhatsappConfiguracao();
         }
         definirFlash("ok", "Configuração do assistente de IA salva.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-menu-visibilidade": {
+        const marcados = form.querySelectorAll('input[name="menu_item"]:checked');
+        const marcadosChaves = new Set([...marcados].map((c) => c.value));
+        const ocultos = ITENS_MENU_TOGGLAVEIS.map((it) => it.chave).filter((chave) => !marcadosChaves.has(chave));
+        try {
+          await chamarApi("/whatsapp/configuracao", { method: "PUT", body: { menu_itens_ocultos: ocultos } });
+        } catch (erro) {
+          definirFlash("erro", erro.mensagem || "Não deu pra salvar.");
+          return renderWhatsappConfiguracao();
+        }
+        definirFlash("ok", "Menu atualizado — vale a partir do próximo login/atualização de página de cada usuário.");
         return renderWhatsappConfiguracao();
       }
       case "salvar-catalogo-config": {
