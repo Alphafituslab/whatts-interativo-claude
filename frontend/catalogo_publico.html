@@ -27,6 +27,7 @@
   .item-linha-qtd { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   .item-linha-qtd label { font-size: 12.5px; color: var(--texto-suave); }
   .item-linha-qtd input[type="number"] { width: 90px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--borda); font-size: 14px; }
+  .item-preco-unit { color: var(--verde-escuro); font-size: 13px; font-weight: 600; }
   .item-subtotal { margin-left: auto; font-weight: 700; font-size: 14px; }
   .faixas-ref { font-size: 11px; color: var(--texto-suave); margin-top: 8px; line-height: 1.6; }
   @keyframes piscar-aviso { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -154,6 +155,7 @@
         <div class="item-linha-qtd">
           <label>Quantidade</label>
           <input type="number" min="0" placeholder="0" data-qtd-item="${item.id}">
+          <span class="item-preco-unit" data-preco-unit-item="${item.id}"></span>
           <span class="item-subtotal" data-subtotal-item="${item.id}"></span>
         </div>
         <div class="aviso-desconto" data-aviso-desconto="${item.id}"></div>
@@ -176,12 +178,14 @@
 
   function atualizarSubtotalItem(itemId, qtd) {
     const item = itens.find((i) => i.id === itemId);
-    const el = document.querySelector(`[data-subtotal-item="${itemId}"]`);
-    if (!item || !el) return;
-    if (!qtd) { el.textContent = ""; return; }
+    const elSubtotal = document.querySelector(`[data-subtotal-item="${itemId}"]`);
+    const elUnitario = document.querySelector(`[data-preco-unit-item="${itemId}"]`);
+    if (!item || !elSubtotal || !elUnitario) return;
+    if (!qtd) { elSubtotal.textContent = ""; elUnitario.textContent = ""; return; }
     const preco = precoDaFaixa(item, qtd);
-    el.textContent = preco != null ? fmtMoeda(preco * qtd) : "fora das faixas";
-    el.style.color = preco != null ? "" : "#c93a3f";
+    elSubtotal.textContent = preco != null ? fmtMoeda(preco * qtd) : "fora das faixas";
+    elSubtotal.style.color = preco != null ? "" : "#c93a3f";
+    elUnitario.textContent = preco != null ? `${fmtMoeda(preco)} / un.` : "";
   }
 
   function atualizarDicaProximaFaixa(itemId, qtd) {
