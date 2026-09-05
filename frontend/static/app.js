@@ -3883,6 +3883,7 @@
           <button type="button" class="botao secundario pequeno ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Só a equipe vê, nunca vai pro cliente">🗒️ Notas internas${(notas || []).length ? ` (${notas.length})` : ""}</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
+          ${!conversa.eh_grupo && state.usuarioAtual.admin ? `<button type="button" class="botao secundario pequeno" data-acao="enviar-catalogo" data-id="${conversa.id}" title="Manda um link pro cliente escolher item e quantidade — a proposta volta pronta pra esta conversa">🗂️ Enviar catálogo</button>` : ""}
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}
@@ -6526,6 +6527,29 @@
       </div>`;
   }
 
+  // Reconhece uma tabela nutricional colada (de Excel/Word/PDF) --
+  // pedido do Clayton: "copiar a tabela já pronta e colocar ali e você
+  // reconhecer". Cada ferramenta cola de um jeito (Excel/Word mandam
+  // TAB entre colunas; PDF às vezes vira só espaços largos), então
+  // tenta TAB primeiro e cai pra "2+ espaços" se não achar nenhum.
+  function _interpretarTabelaNutricional(texto) {
+    const CABECALHOS_IGNORAR = /^(informa[cç][aã]o nutricional|por[cç][aã]o|valores? di[aá]rios?|percentual|%vd)/i;
+    const linhas = texto.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    let porcao = null;
+    const nutrientes = [];
+    for (const linha of linhas) {
+      const mPorcao = linha.match(/^por[cç][aã]o\s*(?:por embalagem)?\s*:?\s*(.+)$/i);
+      if (mPorcao && !porcao && !/embalagem/i.test(linha)) { porcao = mPorcao[1].trim(); continue; }
+      let colunas = linha.split("\t").map((c) => c.trim()).filter((c) => c !== "");
+      if (colunas.length < 2) colunas = linha.split(/ {2,}/).map((c) => c.trim()).filter((c) => c !== "");
+      if (colunas.length < 2) continue; // linha de 1 coluna só -- provavelmente título/rodapé, não dado
+      const [nome, ...resto] = colunas;
+      if (CABECALHOS_IGNORAR.test(nome) || /^\*+$/.test(nome) || /^%vd\*?$/i.test(resto[0] || "")) continue;
+      nutrientes.push({ nome, quantidade: resto[0] || "", vd: resto[1] || "" });
+    }
+    return { porcao, nutrientes };
+  }
+
   function _htmlLinhaFaixa(f) {
     const id = f ? f.id : `novo-${Math.random().toString(36).slice(2, 8)}`;
     return `
@@ -6573,6 +6597,11 @@
         <label class="rotulo-forte">Informação nutricional</label>
         <p class="dica" style="margin-top:0;">Copiado do modelo de portifólio: porção + tabela de nutrientes.</p>
         <div class="campo" style="max-width:260px;"><label>Porção</label><input type="text" name="porcao" placeholder="Ex.: 3g (1 dosador)" value="${escapeHtml(item && item.porcao || "")}"></div>
+        <div class="campo">
+          <label>Colar tabela copiada <span class="texto-suave">(selecione a tabela no Word/Excel/PDF, copie e cole aqui)</span></label>
+          <textarea data-colar-tabela-nutri rows="3" placeholder="Cole aqui a tabela de Informação Nutricional copiada…"></textarea>
+          <button type="button" class="botao secundario pequeno" data-acao="importar-tabela-nutri" style="margin-top:6px;">Reconhecer e preencher</button>
+        </div>
         <div data-lista-nutrientes>${(item && item.nutrientes.length ? item.nutrientes : [null]).map((n) => _htmlLinhaNutriente(n)).join("")}</div>
         <button type="button" class="botao secundario pequeno" data-acao="adicionar-linha-nutriente" style="margin-bottom:14px;">+ nutriente</button>
         <div class="campo"><label>Observação nutricional <span class="texto-suave">(ex.: "*Valores diários com base em 2.000kcal")</span></label><textarea name="observacao_nutricional" rows="2">${escapeHtml(item && item.observacao_nutricional || "")}</textarea></div>
@@ -7973,6 +8002,17 @@
       case "busca-mensagens-proxima": _irParaResultadoBusca(1); return;
       case "busca-mensagens-anterior": _irParaResultadoBusca(-1); return;
       case "ligar-interno": return _ligarChamada(Number(alvo.dataset.id), alvo.dataset.nome);
+      case "enviar-catalogo": {
+        if (!confirm("Mandar o link do catálogo pro cliente agora?")) return;
+        try {
+          await chamarApi(`/whatsapp/conversas/${alvo.dataset.id}/catalogo-link`, { method: "POST" });
+        } catch (erro) {
+          definirFlash("erro", erro.mensagem || "Não deu pra enviar o catálogo.");
+          return montarRota();
+        }
+        definirFlash("ok", "Catálogo enviado! A proposta volta automaticamente pra esta conversa.");
+        return renderWhatsapp(Number(alvo.dataset.id));
+      }
       case "abrir-catalogo-item": return modalCatalogoItem(alvo.dataset.id ? Number(alvo.dataset.id) : null);
       case "adicionar-linha-faixa": {
         const lista = alvo.closest("form").querySelector("[data-lista-faixas]");
@@ -7984,6 +8024,16 @@
         const lista = alvo.closest("[data-lista-faixas]");
         if (lista.querySelectorAll("[data-faixa-linha]").length > 1) linha.remove();
         else definirFlash("erro", "Precisa de pelo menos uma faixa.");
+        return;
+      }
+      case "importar-tabela-nutri": {
+        const form = alvo.closest("form");
+        const texto = form.querySelector("[data-colar-tabela-nutri]").value;
+        const { porcao, nutrientes } = _interpretarTabelaNutricional(texto);
+        if (!nutrientes.length) { definirFlash("erro", "Não consegui reconhecer nenhuma linha nessa tabela colada."); return; }
+        if (porcao) form.querySelector('[name="porcao"]').value = porcao;
+        form.querySelector("[data-lista-nutrientes]").innerHTML = nutrientes.map((n) => _htmlLinhaNutriente(n)).join("");
+        definirFlash("ok", `${nutrientes.length} linha(s) reconhecida(s).`);
         return;
       }
       case "adicionar-linha-nutriente": {

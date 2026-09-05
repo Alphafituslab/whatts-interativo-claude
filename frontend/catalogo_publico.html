@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catálogo Alphafitus</title>
+<style>
+  :root {
+    --verde: #1fa855; --verde-escuro: #0f6b34; --fundo: #f4f7f5; --superficie: #ffffff;
+    --texto: #1c2b22; --texto-suave: #62766a; --borda: #e2e8e4; --raio: 14px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: var(--fundo); color: var(--texto); padding-bottom: 90px; }
+  .cabecalho { background: linear-gradient(135deg, var(--verde-escuro), var(--verde)); color: #fff; padding: 22px 16px 26px; text-align: center; }
+  .cabecalho img { max-height: 44px; margin-bottom: 8px; }
+  .cabecalho h1 { margin: 4px 0 2px; font-size: 19px; }
+  .cabecalho p { margin: 0; font-size: 13px; opacity: 0.92; }
+  .conteudo { max-width: 620px; margin: 0 auto; padding: 16px; }
+  .cartao-item { background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px; margin-bottom: 14px; }
+  .item-topo { display: flex; gap: 12px; }
+  .item-topo img { width: 76px; height: 76px; border-radius: 10px; object-fit: cover; background: var(--fundo); flex-shrink: 0; }
+  .item-topo .sem-imagem { width: 76px; height: 76px; border-radius: 10px; background: var(--fundo); display: flex; align-items: center; justify-content: center; font-size: 26px; flex-shrink: 0; }
+  .item-info { flex: 1; min-width: 0; }
+  .item-info h3 { margin: 0 0 3px; font-size: 15px; }
+  .item-info .meta { font-size: 12px; color: var(--texto-suave); }
+  .item-preco { font-size: 13px; color: var(--verde-escuro); font-weight: 700; margin-top: 4px; }
+  .item-linha-qtd { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .item-linha-qtd label { font-size: 12.5px; color: var(--texto-suave); }
+  .item-linha-qtd input[type="number"] { width: 90px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--borda); font-size: 14px; }
+  .item-subtotal { margin-left: auto; font-weight: 700; font-size: 14px; }
+  .faixas-ref { font-size: 11px; color: var(--texto-suave); margin-top: 8px; line-height: 1.6; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; font-size: 12.5px; color: var(--verde-escuro); font-weight: 600; }
+  .tabela-nutri { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  .tabela-nutri th, .tabela-nutri td { border: 1px solid var(--borda); padding: 5px 8px; text-align: left; }
+  .tabela-nutri th { background: var(--fundo); }
+  .bloco-texto-nutri { font-size: 12px; color: var(--texto-suave); margin-top: 8px; line-height: 1.5; }
+  .barra-total { position: fixed; bottom: 0; left: 0; right: 0; background: var(--superficie); border-top: 1px solid var(--borda); padding: 12px 16px; display: flex; align-items: center; gap: 14px; box-shadow: 0 -4px 14px rgba(0,0,0,0.06); }
+  .barra-total .resumo { flex: 1; font-size: 13px; }
+  .barra-total .resumo strong { display: block; font-size: 17px; color: var(--verde-escuro); }
+  .botao { background: var(--verde); color: #fff; border: none; border-radius: 999px; padding: 12px 22px; font-size: 14.5px; font-weight: 700; cursor: pointer; }
+  .botao:disabled { opacity: 0.5; cursor: not-allowed; }
+  .estado { text-align: center; padding: 60px 20px; color: var(--texto-suave); }
+  .estado h2 { color: var(--texto); }
+  [hidden] { display: none !important; }
+  .sucesso { text-align: center; padding: 60px 20px; }
+  .sucesso .icone { font-size: 52px; }
+</style>
+</head>
+<body>
+  <div class="cabecalho">
+    <img id="logo" src="" alt="" hidden>
+    <h1 id="titulo-saudacao">Catálogo Alphafitus</h1>
+    <p>Escolha os produtos e as quantidades — o valor certinho aparece na hora.</p>
+  </div>
+  <div class="conteudo">
+    <div id="estado-carregando" class="estado">Carregando catálogo…</div>
+    <div id="estado-erro" class="estado" hidden><h2>😕 Ops</h2><p id="texto-erro"></p></div>
+    <div id="lista-itens" hidden></div>
+    <div id="tela-sucesso" class="sucesso" hidden>
+      <div class="icone">✅</div>
+      <h2>Proposta enviada!</h2>
+      <p>Já chegou certinho na sua conversa do WhatsApp. Em breve alguém da nossa equipe entra em contato.</p>
+    </div>
+  </div>
+  <div class="barra-total" id="barra-total" hidden>
+    <div class="resumo"><span id="resumo-itens">0 itens</span><strong id="resumo-total">R$ 0,00</strong></div>
+    <button type="button" class="botao" id="botao-enviar">Enviar proposta</button>
+  </div>
+
+<script>
+(function () {
+  const token = location.pathname.split("/").filter(Boolean).pop();
+  const API = "/api/v1/catalogo-publico";
+  let itens = [];
+  const quantidades = {}; // item_id -> quantidade
+
+  function fmtMoeda(v) {
+    return Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function precoDaFaixa(item, qtd) {
+    if (!qtd || qtd <= 0) return null;
+    const faixa = item.faixas.find((f) => qtd >= f.quantidade_min && (f.quantidade_max == null || qtd <= f.quantidade_max));
+    return faixa ? faixa.preco : null;
+  }
+
+  function htmlFaixasRef(item) {
+    return item.faixas.map((f) => {
+      const alcance = f.quantidade_max ? `${f.quantidade_min}–${f.quantidade_max}` : `${f.quantidade_min}+`;
+      return `${alcance} un.: ${fmtMoeda(f.preco)}`;
+    }).join(" · ");
+  }
+
+  function htmlNutricional(item) {
+    if (!item.nutrientes.length && !item.ingredientes && !item.modo_de_uso) return "";
+    const linhasTabela = item.nutrientes.map((n) => `<tr><td>${escapeHtml(n.nome)}</td><td>${escapeHtml(n.quantidade || "")}</td><td>${escapeHtml(n.vd || "")}</td></tr>`).join("");
+    return `
+      <details>
+        <summary>Ver informação nutricional</summary>
+        ${item.porcao ? `<p class="bloco-texto-nutri"><strong>Porção:</strong> ${escapeHtml(item.porcao)}</p>` : ""}
+        ${linhasTabela ? `<table class="tabela-nutri"><thead><tr><th>Nutriente</th><th>Qtd.</th><th>%VD</th></tr></thead><tbody>${linhasTabela}</tbody></table>` : ""}
+        ${item.observacao_nutricional ? `<p class="bloco-texto-nutri">${escapeHtml(item.observacao_nutricional)}</p>` : ""}
+        ${item.ingredientes ? `<p class="bloco-texto-nutri"><strong>Ingredientes:</strong> ${escapeHtml(item.ingredientes)}</p>` : ""}
+        ${item.modo_de_uso ? `<p class="bloco-texto-nutri"><strong>Modo de uso:</strong> ${escapeHtml(item.modo_de_uso)}</p>` : ""}
+      </details>`;
+  }
+
+  function renderItens() {
+    const lista = document.getElementById("lista-itens");
+    lista.innerHTML = itens.map((item) => {
+      const meta = [item.forma, item.linha, item.sabor ? `Sabor ${item.sabor}` : null].filter(Boolean).join(" · ");
+      return `
+      <div class="cartao-item" data-item="${item.id}">
+        <div class="item-topo">
+          ${item.imagem_url ? `<img src="${item.imagem_url}" alt="">` : `<div class="sem-imagem">📦</div>`}
+          <div class="item-info">
+            <h3>${escapeHtml(item.nome)}</h3>
+            <div class="meta">${escapeHtml(meta)}</div>
+            <div class="faixas-ref">${htmlFaixasRef(item)}</div>
+          </div>
+        </div>
+        <div class="item-linha-qtd">
+          <label>Quantidade</label>
+          <input type="number" min="0" placeholder="0" data-qtd-item="${item.id}">
+          <span class="item-subtotal" data-subtotal-item="${item.id}"></span>
+        </div>
+        ${htmlNutricional(item)}
+      </div>`;
+    }).join("");
+    lista.hidden = false;
+
+    lista.querySelectorAll("[data-qtd-item]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const itemId = Number(input.dataset.qtdItem);
+        const qtd = Math.max(0, parseInt(input.value || "0", 10) || 0);
+        if (qtd > 0) quantidades[itemId] = qtd; else delete quantidades[itemId];
+        atualizarSubtotalItem(itemId, qtd);
+        atualizarResumo();
+      });
+    });
+  }
+
+  function atualizarSubtotalItem(itemId, qtd) {
+    const item = itens.find((i) => i.id === itemId);
+    const el = document.querySelector(`[data-subtotal-item="${itemId}"]`);
+    if (!item || !el) return;
+    if (!qtd) { el.textContent = ""; return; }
+    const preco = precoDaFaixa(item, qtd);
+    el.textContent = preco != null ? fmtMoeda(preco * qtd) : "fora das faixas";
+    el.style.color = preco != null ? "" : "#c93a3f";
+  }
+
+  function atualizarResumo() {
+    const ids = Object.keys(quantidades);
+    const barra = document.getElementById("barra-total");
+    if (!ids.length) { barra.hidden = true; return; }
+    let total = 0, valido = true;
+    ids.forEach((id) => {
+      const item = itens.find((i) => i.id === Number(id));
+      const preco = precoDaFaixa(item, quantidades[id]);
+      if (preco == null) valido = false; else total += preco * quantidades[id];
+    });
+    document.getElementById("resumo-itens").textContent = `${ids.length} ${ids.length === 1 ? "item" : "itens"}`;
+    document.getElementById("resumo-total").textContent = fmtMoeda(total);
+    document.getElementById("botao-enviar").disabled = !valido;
+    barra.hidden = false;
+  }
+
+  async function carregar() {
+    try {
+      const resp = await fetch(`${API}/${token}`);
+      if (!resp.ok) {
+        const erro = await resp.json().catch(() => ({}));
+        throw new Error(erro.mensagem || "Não foi possível abrir este catálogo.");
+      }
+      const dados = await resp.json();
+      itens = dados.itens || [];
+      if (dados.logo_url) { document.getElementById("logo").src = dados.logo_url; document.getElementById("logo").hidden = false; }
+      if (dados.contato_nome) document.getElementById("titulo-saudacao").textContent = `Olá, ${dados.contato_nome}!`;
+      document.getElementById("estado-carregando").hidden = true;
+      if (!itens.length) {
+        document.getElementById("texto-erro").textContent = "Nenhum produto disponível no momento.";
+        document.getElementById("estado-erro").hidden = false;
+        return;
+      }
+      renderItens();
+    } catch (e) {
+      document.getElementById("estado-carregando").hidden = true;
+      document.getElementById("texto-erro").textContent = e.message;
+      document.getElementById("estado-erro").hidden = false;
+    }
+  }
+
+  document.getElementById("botao-enviar").addEventListener("click", async (ev) => {
+    const botao = ev.currentTarget;
+    botao.disabled = true;
+    botao.textContent = "Enviando…";
+    const corpo = { itens: Object.keys(quantidades).map((id) => ({ item_id: Number(id), quantidade: quantidades[id] })) };
+    try {
+      const resp = await fetch(`${API}/${token}/proposta`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo),
+      });
+      if (!resp.ok) {
+        const erro = await resp.json().catch(() => ({}));
+        throw new Error(erro.mensagem || "Não deu pra enviar a proposta.");
+      }
+      document.getElementById("lista-itens").hidden = true;
+      document.getElementById("barra-total").hidden = true;
+      document.getElementById("tela-sucesso").hidden = false;
+    } catch (e) {
+      alert(e.message);
+      botao.disabled = false;
+      botao.textContent = "Enviar proposta";
+    }
+  });
+
+  carregar();
+})();
+</script>
+</body>
+</html>

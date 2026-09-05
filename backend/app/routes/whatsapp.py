@@ -2727,6 +2727,59 @@ def compartilhar_localizacao(conversa_id):
     return jsonify({"ok": True, "status": status_msg, "erro": erro})
 
 
+@bp.post("/conversas/<int:conversa_id>/catalogo-link")
+@requires_auth
+def enviar_link_catalogo(conversa_id):
+    """Gera o link do catálogo/proposta (Fase 2) e já manda ele pro
+    cliente como mensagem normal -- pedido do Clayton: escolher item,
+    ver o preço na hora e a proposta voltar sozinha pra conversa."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa, " Encaminhe para si mesmo antes de responder."), status=403, codigo="sem_permissao")
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    if not config.get("catalogo_proposta_ativo"):
+        raise ApiError("O catálogo/proposta está desativado. Ative em Configuração antes de usar.",
+                        status=403, codigo="catalogo_desativado")
+    tem_item = conn.execute(
+        "SELECT 1 FROM whatsapp_catalogo_itens WHERE empresa_id = ? AND ativo = 1 LIMIT 1", (g.empresa_id,)
+    ).fetchone()
+    if not tem_item:
+        raise ApiError("Cadastre pelo menos um item ativo no catálogo antes de enviar.", status=400, codigo="catalogo_vazio")
+
+    whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
+    agora = _now_iso()
+    token = secrets.token_urlsafe(24)
+    expira_em = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    conn.execute(
+        "INSERT INTO whatsapp_catalogo_links (token, conversa_id, empresa_id, criado_por, criado_em, expira_em) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (token, conversa_id, g.empresa_id, usuario["id"], agora, expira_em),
+    )
+    url = whatsapp_service.url_publica(config, f"/catalogo/{token}")
+    texto = (
+        "🗂️ Preparamos um catálogo pra você montar sua proposta: escolha os produtos e "
+        f"as quantidades, e já vemos os valores certinhos!\n\n{url}"
+    )
+    try:
+        externo_id = whatsapp_service.enviar_texto(config, conversa["telefone"], texto)
+        status_msg, erro = "enviada", None
+    except ApiError as e:
+        externo_id, status_msg, erro = None, "falhou", e.mensagem
+    conn.execute(
+        "INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, usuario_id, status, erro, criado_em) "
+        "VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?, ?)",
+        (conversa_id, texto, externo_id, usuario["id"], status_msg, erro, agora),
+    )
+    conn.execute(
+        "UPDATE whatsapp_conversas SET ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
+        (agora, texto[:120], conversa_id),
+    )
+    conn.commit()
+    return jsonify({"ok": True, "status": status_msg, "erro": erro, "url": url})
+
+
 @bp.post("/conversas/<int:conversa_id>/prorrogar")
 @requires_auth
 def prorrogar_conversa(conversa_id):

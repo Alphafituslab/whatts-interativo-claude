@@ -83,7 +83,7 @@ def create_app(test_config: dict = None) -> Flask:
         app.logger.exception("Erro não tratado")
         return jsonify({"erro": "erro_interno", "mensagem": "Erro interno do servidor."}), 500
 
-    from .routes import auth, catalogo, chamadas, chat_interno, downloads, envio_massa, followup, ligacoes, sistema, usuarios, whatsapp
+    from .routes import auth, catalogo, catalogo_publico, chamadas, chat_interno, downloads, envio_massa, followup, ligacoes, sistema, usuarios, whatsapp
     app.register_blueprint(auth.bp)
     app.register_blueprint(whatsapp.bp)
     app.register_blueprint(usuarios.bp)
@@ -95,6 +95,7 @@ def create_app(test_config: dict = None) -> Flask:
     app.register_blueprint(envio_massa.bp)
     app.register_blueprint(chamadas.bp)
     app.register_blueprint(catalogo.bp)
+    app.register_blueprint(catalogo_publico.bp)
 
     @app.get("/api/v1/saude")
     def saude():
@@ -154,6 +155,15 @@ def create_app(test_config: dict = None) -> Flask:
         # atualizacao, nao servia pra nada.
         resposta.headers["Cache-Control"] = "no-store, must-revalidate"
         resposta.headers["Pragma"] = "no-cache"
+        return resposta
+
+    @app.get("/catalogo/<token>")
+    def catalogo_publico_pagina(token):
+        caminho = os.path.join(FRONTEND_DIR, "catalogo_publico.html")
+        with open(caminho, encoding="utf-8") as f:
+            html = f.read()
+        resposta = app.response_class(html, mimetype="text/html")
+        resposta.headers["Cache-Control"] = "no-store, must-revalidate"
         return resposta
 
     @app.get("/instalador/WhattsInbox-instalador.zip")
