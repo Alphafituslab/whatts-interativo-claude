@@ -218,6 +218,7 @@ def obter_configuracao(conn, empresa_id: int):
             "envio_massa_ativo": 0, "envio_massa_intervalo_segundos": 8,
             "ia_ativa": 0, "ia_api_key": None, "ia_modo": "sugestao", "ia_openai_api_key": None,
             "catalogo_proposta_ativo": 0,
+            "menu_itens_ocultos": "[]",
         }
     return dict(row)
 
@@ -248,6 +249,10 @@ def config_publica(config):
     d.pop("ia_api_key", None)
     d.pop("ia_openai_api_key", None)
     d["catalogo_proposta_ativo"] = bool(d.get("catalogo_proposta_ativo"))
+    try:
+        d["menu_itens_ocultos"] = json.loads(d.get("menu_itens_ocultos") or "[]")
+    except (TypeError, ValueError):
+        d["menu_itens_ocultos"] = []
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -438,6 +443,13 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         (1 if dados.get("catalogo_proposta_ativo") else 0) if "catalogo_proposta_ativo" in dados
         else (1 if anterior.get("catalogo_proposta_ativo") else 0)
     )
+    # Quais itens de menu ficam escondidos dos usuários comuns (admin
+    # sempre vê tudo) -- lista de "chave" (ver ITENS_MENU no app.js).
+    if "menu_itens_ocultos" in dados:
+        menu_itens_ocultos = json.dumps([str(c) for c in (dados.get("menu_itens_ocultos") or []) if c])
+    else:
+        anterior_menu = anterior.get("menu_itens_ocultos")
+        menu_itens_ocultos = json.dumps(anterior_menu) if isinstance(anterior_menu, list) else (anterior.get("menu_itens_ocultos") or "[]")
 
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
@@ -466,8 +478,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
-                                              catalogo_proposta_ativo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              catalogo_proposta_ativo, menu_itens_ocultos)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -509,6 +521,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             ia_modo = excluded.ia_modo,
             ia_openai_api_key = excluded.ia_openai_api_key,
             catalogo_proposta_ativo = excluded.catalogo_proposta_ativo,
+            menu_itens_ocultos = excluded.menu_itens_ocultos,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -522,7 +535,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
-         catalogo_proposta_ativo),
+         catalogo_proposta_ativo, menu_itens_ocultos),
     )
     return obter_configuracao(conn, empresa_id)
 

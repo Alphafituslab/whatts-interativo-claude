@@ -29,6 +29,9 @@
   .item-linha-qtd input[type="number"] { width: 90px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--borda); font-size: 14px; }
   .item-subtotal { margin-left: auto; font-weight: 700; font-size: 14px; }
   .faixas-ref { font-size: 11px; color: var(--texto-suave); margin-top: 8px; line-height: 1.6; }
+  @keyframes piscar-aviso { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+  .aviso-desconto { display: none; align-items: center; gap: 6px; margin-top: 8px; padding: 7px 10px; border-radius: 8px; background: #fff6e0; color: #8a5a00; font-size: 12px; font-weight: 600; animation: piscar-aviso 1.6s ease-in-out infinite; }
+  .aviso-desconto.mostrar { display: flex; }
   details { margin-top: 10px; }
   summary { cursor: pointer; font-size: 12.5px; color: var(--verde-escuro); font-weight: 600; }
   .tabela-nutri { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
@@ -95,6 +98,24 @@
     return faixa ? faixa.preco : null;
   }
 
+  // "Empurrãozinho" pra próxima faixa -- pedido do Clayton: se o
+  // cliente está perto (mas não chegou) da próxima faixa mais barata,
+  // avisa quantas unidades faltam. A margem que conta como "perto" é
+  // 5% da quantidade mínima da próxima faixa (nunca menos que 10 un.) --
+  // se ele tá em 490 e a próxima começa em 501 (margem de 25), entra;
+  // se ele tá em 100, não incomoda à toa.
+  function _dicaProximaFaixa(item, qtd) {
+    if (!qtd || qtd <= 0) return null;
+    const faixasOrdenadas = [...item.faixas].sort((a, b) => a.quantidade_min - b.quantidade_min);
+    const indiceAtual = faixasOrdenadas.findIndex((f) => qtd >= f.quantidade_min && (f.quantidade_max == null || qtd <= f.quantidade_max));
+    const proxima = faixasOrdenadas[indiceAtual + 1];
+    if (!proxima) return null; // já está na faixa mais barata
+    const faltam = proxima.quantidade_min - qtd;
+    const margem = Math.max(10, Math.round(proxima.quantidade_min * 0.05));
+    if (faltam <= 0 || faltam > margem) return null;
+    return `💡 Coloque mais ${faltam} un. e o preço cai pra ${fmtMoeda(proxima.preco)} cada!`;
+  }
+
   function htmlFaixasRef(item) {
     return item.faixas.map((f) => {
       const alcance = f.quantidade_max ? `${f.quantidade_min}–${f.quantidade_max}` : `${f.quantidade_min}+`;
@@ -135,6 +156,7 @@
           <input type="number" min="0" placeholder="0" data-qtd-item="${item.id}">
           <span class="item-subtotal" data-subtotal-item="${item.id}"></span>
         </div>
+        <div class="aviso-desconto" data-aviso-desconto="${item.id}"></div>
         ${htmlNutricional(item)}
       </div>`;
     }).join("");
@@ -146,6 +168,7 @@
         const qtd = Math.max(0, parseInt(input.value || "0", 10) || 0);
         if (qtd > 0) quantidades[itemId] = qtd; else delete quantidades[itemId];
         atualizarSubtotalItem(itemId, qtd);
+        atualizarDicaProximaFaixa(itemId, qtd);
         atualizarResumo();
       });
     });
@@ -159,6 +182,15 @@
     const preco = precoDaFaixa(item, qtd);
     el.textContent = preco != null ? fmtMoeda(preco * qtd) : "fora das faixas";
     el.style.color = preco != null ? "" : "#c93a3f";
+  }
+
+  function atualizarDicaProximaFaixa(itemId, qtd) {
+    const item = itens.find((i) => i.id === itemId);
+    const el = document.querySelector(`[data-aviso-desconto="${itemId}"]`);
+    if (!item || !el) return;
+    const dica = _dicaProximaFaixa(item, qtd);
+    if (dica) { el.textContent = dica; el.classList.add("mostrar"); }
+    else { el.textContent = ""; el.classList.remove("mostrar"); }
   }
 
   function atualizarResumo() {

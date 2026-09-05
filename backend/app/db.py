@@ -89,6 +89,7 @@ SCHEMA_FILES = [
     "schema_074_catalogo_proposta.sql",
     "schema_075_catalogo_nutricional.sql",
     "schema_076_catalogo_publico.sql",
+    "schema_077_menu_visibilidade.sql",
 ]
 
 

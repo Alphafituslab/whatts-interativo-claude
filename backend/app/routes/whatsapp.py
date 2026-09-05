@@ -8,6 +8,7 @@ não lidas dele (só o próprio dono zera, ao abrir a conversa que é dele).
 """
 import csv
 import io
+import json
 import datetime
 import os
 import re
@@ -139,6 +140,23 @@ def _now_iso():
 def obter_configuracao():
     conn = get_db()
     return jsonify(whatsapp_service.config_publica(whatsapp_service.obter_configuracao(conn, g.empresa_id)))
+
+
+@bp.get("/menu-visibilidade")
+@requires_auth
+def menu_visibilidade():
+    """Pra QUALQUER usuário logado (não só admin) saber quais itens de
+    menu o admin escondeu -- sem expor o resto da configuração (que
+    continua admin-only). Admin/Master sempre vê o menu inteiro no
+    frontend, independente do que vier aqui."""
+    conn = get_db()
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    ocultos = config.get("menu_itens_ocultos")
+    try:
+        ocultos = json.loads(ocultos) if isinstance(ocultos, str) else (ocultos or [])
+    except (TypeError, ValueError):
+        ocultos = []
+    return jsonify({"ocultos": ocultos})
 
 
 @bp.put("/configuracao")
