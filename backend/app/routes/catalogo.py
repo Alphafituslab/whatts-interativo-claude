@@ -4,24 +4,25 @@ Catálogo interativo / montador de proposta -- pedido do Clayton
 escolher item + faixa de quantidade, já vendo o preço, e no final
 montar uma proposta bonita e enviar pelo WhatsApp.
 
-Fase 1 (esta): só o cadastro (admin) dos itens, faixas de preço e a
-informação nutricional (porção, tabela de nutrientes, ingredientes,
-modo de uso -- copiado do modelo de portifólio que o Clayton mandou).
-Fica escondido dos usuários comuns -- só admin mexe -- e a FUTURA tela
-do cliente (fase 2) só liga de verdade com catalogo_proposta_ativo em
-Configuração, desligado por padrão ("não deixar aparecer ainda para os
-usuários, eu quero testar").
+Fase 1 (esta): só o cadastro (admin) dos itens, faixas de preço,
+galeria de imagens e a informação nutricional (porção, tabela de
+nutrientes, ingredientes, modo de uso -- copiado do modelo de
+portifólio que o Clayton mandou). Fica escondido dos usuários comuns --
+só admin mexe -- e a FUTURA tela do cliente (fase 2) só liga de
+verdade com catalogo_proposta_ativo em Configuração, desligado por
+padrão ("não deixar aparecer ainda para os usuários, eu quero testar").
 
 Layout consistente conforme o Clayton vai cadastrando mais fórmulas:
-o cadastro é só DADOS (nome, tabela nutricional, faixas...); quem
-desenha o cartão do produto é sempre o MESMO template (no frontend),
-nunca um layout novo por item -- é assim que garante "tudo igual"
-sem precisar redesenhar nada a cada produto novo.
+o cadastro é só DADOS (nome, tabela nutricional, faixas, galeria...);
+quem desenha o cartão do produto é sempre o MESMO template (no
+frontend), nunca um layout novo por item -- é assim que garante "tudo
+igual" sem precisar redesenhar nada a cada produto novo.
 """
 from flask import Blueprint, g, jsonify, request
 
 from .. import whatsapp_service
 from ..context import ApiError, get_db, requires_admin
+from .whatsapp import _classificar_tipo
 
 bp = Blueprint("catalogo", __name__, url_prefix="/api/v1/whatsapp/catalogo")
 
@@ -50,9 +51,14 @@ def _item_publico(conn, item):
         "WHERE item_id = ? ORDER BY ordem, id",
         (item["id"],),
     ).fetchall()
+    imagens = conn.execute(
+        "SELECT id, url, tipo FROM whatsapp_catalogo_imagens WHERE item_id = ? ORDER BY ordem, id",
+        (item["id"],),
+    ).fetchall()
     d["ativo"] = bool(d.get("ativo"))
     d["faixas"] = [dict(f) for f in faixas]
     d["nutrientes"] = [dict(n) for n in nutrientes]
+    d["imagens"] = [dict(im) for im in imagens]
     return d
 
 
@@ -97,12 +103,30 @@ def _validar_nutrientes(nutrientes_brutos):
     return nutrientes
 
 
+def _validar_imagens(imagens_brutas):
+    """Lista de URLs (string) -- cada produto pode ter de 1 a N fotos.
+    Ignora entradas vazias."""
+    return [u.strip() for u in (imagens_brutas or []) if isinstance(u, str) and u.strip()]
+
+
 def _salvar_nutrientes(conn, item_id, nutrientes):
     conn.execute("DELETE FROM whatsapp_catalogo_nutrientes WHERE item_id = ?", (item_id,))
     for i, (nome, quantidade, vd) in enumerate(nutrientes):
         conn.execute(
             "INSERT INTO whatsapp_catalogo_nutrientes (item_id, nome, quantidade, vd, ordem) VALUES (?, ?, ?, ?, ?)",
             (item_id, nome, quantidade, vd, i),
+        )
+
+
+def _salvar_imagens(conn, item_id, imagens):
+    conn.execute("DELETE FROM whatsapp_catalogo_imagens WHERE item_id = ?", (item_id,))
+    for i, url in enumerate(imagens):
+        # Vídeo ou imagem, decidido pela extensão do arquivo -- pedido
+        # do Clayton: "se for um vídeo deixar também" na galeria.
+        tipo = "video" if _classificar_tipo(url) == "video" else "imagem"
+        conn.execute(
+            "INSERT INTO whatsapp_catalogo_imagens (item_id, url, tipo, ordem) VALUES (?, ?, ?, ?)",
+            (item_id, url, tipo, i),
         )
 
 
@@ -147,20 +171,22 @@ def criar():
         raise ApiError("Informe o nome do item.", status=400)
     faixas = _validar_faixas(dados.get("faixas"))
     nutrientes = _validar_nutrientes(dados.get("nutrientes"))
+    imagens = _validar_imagens(dados.get("imagens"))
 
     conn = get_db()
     agora = _now_iso()
     cur = conn.execute(
         """INSERT INTO whatsapp_catalogo_itens (empresa_id, nome, forma, linha, descricao, imagem_url, ordem,
                                                   sabor, porcao, ingredientes, modo_de_uso, observacao_nutricional,
-                                                  ativo, criado_por, criado_em, atualizado_em)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+                                                  complemento, ativo, criado_por, criado_em, atualizado_em)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
         (g.empresa_id, nome, (dados.get("forma") or "").strip() or None, (dados.get("linha") or "").strip() or None,
-         (dados.get("descricao") or "").strip() or None, (dados.get("imagem_url") or "").strip() or None,
+         (dados.get("descricao") or "").strip() or None, imagens[0] if imagens else None,
          int(dados.get("ordem") or 0),
          (dados.get("sabor") or "").strip() or None, (dados.get("porcao") or "").strip() or None,
          (dados.get("ingredientes") or "").strip() or None, (dados.get("modo_de_uso") or "").strip() or None,
          (dados.get("observacao_nutricional") or "").strip() or None,
+         (dados.get("complemento") or "").strip() or None,
          usuario["id"], agora, agora),
     )
     item_id = cur.lastrowid
@@ -170,6 +196,7 @@ def criar():
             (item_id, qmin, qmax, preco, i),
         )
     _salvar_nutrientes(conn, item_id, nutrientes)
+    _salvar_imagens(conn, item_id, imagens)
     conn.commit()
     item = conn.execute("SELECT * FROM whatsapp_catalogo_itens WHERE id = ?", (item_id,)).fetchone()
     return jsonify(_item_publico(conn, item)), 201
@@ -189,19 +216,20 @@ def editar(item_id):
     nome = (dados.get("nome") or "").strip() or item["nome"]
     faixas = _validar_faixas(dados.get("faixas")) if "faixas" in dados else None
     nutrientes = _validar_nutrientes(dados.get("nutrientes")) if "nutrientes" in dados else None
+    imagens = _validar_imagens(dados.get("imagens")) if "imagens" in dados else None
 
     def _campo(chave):
         return (dados.get(chave) or "").strip() or None if chave in dados else item[chave]
 
+    imagem_url = (imagens[0] if imagens else None) if imagens is not None else item["imagem_url"]
     conn.execute(
         """UPDATE whatsapp_catalogo_itens SET nome = ?, forma = ?, linha = ?, descricao = ?, imagem_url = ?,
                ordem = ?, sabor = ?, porcao = ?, ingredientes = ?, modo_de_uso = ?, observacao_nutricional = ?,
-               ativo = ?, atualizado_em = ? WHERE id = ?""",
-        (nome, _campo("forma"), _campo("linha"), _campo("descricao"),
-         (dados.get("imagem_url") if "imagem_url" in dados else item["imagem_url"]) or None,
+               complemento = ?, ativo = ?, atualizado_em = ? WHERE id = ?""",
+        (nome, _campo("forma"), _campo("linha"), _campo("descricao"), imagem_url,
          int(dados["ordem"]) if dados.get("ordem") not in (None, "") else item["ordem"],
          _campo("sabor"), _campo("porcao"), _campo("ingredientes"), _campo("modo_de_uso"),
-         _campo("observacao_nutricional"),
+         _campo("observacao_nutricional"), _campo("complemento"),
          1 if dados.get("ativo", bool(item["ativo"])) else 0,
          _now_iso(), item_id),
     )
@@ -214,6 +242,8 @@ def editar(item_id):
             )
     if nutrientes is not None:
         _salvar_nutrientes(conn, item_id, nutrientes)
+    if imagens is not None:
+        _salvar_imagens(conn, item_id, imagens)
     conn.commit()
     item = conn.execute("SELECT * FROM whatsapp_catalogo_itens WHERE id = ?", (item_id,)).fetchone()
     return jsonify(_item_publico(conn, item))

@@ -16,13 +16,20 @@
   .cabecalho h1 { margin: 4px 0 2px; font-size: 19px; }
   .cabecalho p { margin: 0; font-size: 13px; opacity: 0.92; }
   .conteudo { max-width: 620px; margin: 0 auto; padding: 16px; }
-  .cartao-item { background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px; margin-bottom: 14px; }
-  .item-topo { display: flex; gap: 12px; }
-  .item-topo img { width: 76px; height: 76px; border-radius: 10px; object-fit: cover; background: var(--fundo); flex-shrink: 0; }
-  .item-topo .sem-imagem { width: 76px; height: 76px; border-radius: 10px; background: var(--fundo); display: flex; align-items: center; justify-content: center; font-size: 26px; flex-shrink: 0; }
-  .item-info { flex: 1; min-width: 0; }
+  .cartao-item { background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); padding: 16px; margin-bottom: 16px; }
+  .item-principal { display: flex; gap: 16px; flex-wrap: wrap; }
+  .item-galeria { flex: 0 0 150px; width: 150px; }
+  .item-galeria-principal { width: 150px; height: 150px; border-radius: 10px; overflow: hidden; background: var(--fundo); display: flex; align-items: center; justify-content: center; font-size: 32px; }
+  .item-galeria-principal img, .item-galeria-principal video { width: 100%; height: 100%; object-fit: cover; }
+  .item-galeria-minis { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .item-galeria-mini { width: 32px; height: 32px; border-radius: 6px; overflow: hidden; border: 2px solid transparent; cursor: pointer; background: var(--fundo); position: relative; flex-shrink: 0; }
+  .item-galeria-mini img, .item-galeria-mini video { width: 100%; height: 100%; object-fit: cover; }
+  .item-galeria-mini.ativa { border-color: var(--verde); }
+  .item-galeria-mini .selo-video { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.35); color: #fff; font-size: 10px; }
+  .item-info { flex: 1; min-width: 200px; }
   .item-info h3 { margin: 0 0 3px; font-size: 15px; }
   .item-info .meta { font-size: 12px; color: var(--texto-suave); }
+  .item-complemento { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--verde) 8%, transparent); font-size: 12.5px; color: var(--verde-escuro); white-space: pre-line; }
   .item-preco { font-size: 13px; color: var(--verde-escuro); font-weight: 700; margin-top: 4px; }
   .item-linha-qtd { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   .item-linha-qtd label { font-size: 12.5px; color: var(--texto-suave); }
@@ -138,28 +145,54 @@
       </details>`;
   }
 
+  function _htmlMidia(im, classe) {
+    return im.tipo === "video"
+      ? `<video src="${im.url}" ${classe.includes("principal") ? "controls" : "muted"}></video>`
+      : `<img src="${im.url}" alt="">`;
+  }
+
+  function htmlGaleria(item) {
+    const imagens = item.imagens && item.imagens.length ? item.imagens : [];
+    const principal = imagens[0] || null;
+    return `
+      <div class="item-galeria" data-galeria-produto="${item.id}">
+        <div class="item-galeria-principal" data-galeria-principal>
+          ${principal ? _htmlMidia(principal, "principal") : `<span>📦</span>`}
+        </div>
+        ${imagens.length > 1 ? `
+          <div class="item-galeria-minis">
+            ${imagens.map((im, i) => `
+              <div class="item-galeria-mini ${i === 0 ? "ativa" : ""}" data-galeria-mini data-indice="${i}">
+                ${_htmlMidia(im, "mini")}
+                ${im.tipo === "video" ? `<span class="selo-video">▶</span>` : ""}
+              </div>`).join("")}
+          </div>` : ""}
+      </div>`;
+  }
+
   function renderItens() {
     const lista = document.getElementById("lista-itens");
     lista.innerHTML = itens.map((item) => {
       const meta = [item.forma, item.linha, item.sabor ? `Sabor ${item.sabor}` : null].filter(Boolean).join(" · ");
       return `
       <div class="cartao-item" data-item="${item.id}">
-        <div class="item-topo">
-          ${item.imagem_url ? `<img src="${item.imagem_url}" alt="">` : `<div class="sem-imagem">📦</div>`}
+        <div class="item-principal">
+          ${htmlGaleria(item)}
           <div class="item-info">
             <h3>${escapeHtml(item.nome)}</h3>
             <div class="meta">${escapeHtml(meta)}</div>
             <div class="faixas-ref">${htmlFaixasRef(item)}</div>
+            <div class="item-linha-qtd">
+              <label>Quantidade</label>
+              <input type="number" min="0" placeholder="0" data-qtd-item="${item.id}">
+              <span class="item-preco-unit" data-preco-unit-item="${item.id}"></span>
+              <span class="item-subtotal" data-subtotal-item="${item.id}"></span>
+            </div>
+            <div class="aviso-desconto" data-aviso-desconto="${item.id}"></div>
           </div>
         </div>
-        <div class="item-linha-qtd">
-          <label>Quantidade</label>
-          <input type="number" min="0" placeholder="0" data-qtd-item="${item.id}">
-          <span class="item-preco-unit" data-preco-unit-item="${item.id}"></span>
-          <span class="item-subtotal" data-subtotal-item="${item.id}"></span>
-        </div>
-        <div class="aviso-desconto" data-aviso-desconto="${item.id}"></div>
         ${htmlNutricional(item)}
+        ${item.complemento ? `<div class="item-complemento">${escapeHtml(item.complemento)}</div>` : ""}
       </div>`;
     }).join("");
     lista.hidden = false;
@@ -172,6 +205,21 @@
         atualizarSubtotalItem(itemId, qtd);
         atualizarDicaProximaFaixa(itemId, qtd);
         atualizarResumo();
+      });
+    });
+
+    // Clicar numa miniatura troca a foto/vídeo principal daquele produto.
+    lista.querySelectorAll("[data-galeria-produto]").forEach((galeria) => {
+      const itemId = Number(galeria.dataset.galeriaProduto);
+      const item = itens.find((i) => i.id === itemId);
+      galeria.querySelectorAll("[data-galeria-mini]").forEach((mini) => {
+        mini.addEventListener("click", () => {
+          const indice = Number(mini.dataset.indice);
+          const midia = item.imagens[indice];
+          galeria.querySelector("[data-galeria-principal]").innerHTML = _htmlMidia(midia, "principal");
+          galeria.querySelectorAll("[data-galeria-mini]").forEach((m) => m.classList.remove("ativa"));
+          mini.classList.add("ativa");
+        });
       });
     });
   }

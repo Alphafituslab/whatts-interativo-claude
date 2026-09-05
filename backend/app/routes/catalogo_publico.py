@@ -68,6 +68,9 @@ def ver_catalogo(token):
             "SELECT nome, quantidade, vd FROM whatsapp_catalogo_nutrientes "
             "WHERE item_id = ? ORDER BY ordem, id", (item["id"],),
         ).fetchall()
+        imagens = conn.execute(
+            "SELECT url, tipo FROM whatsapp_catalogo_imagens WHERE item_id = ? ORDER BY ordem, id", (item["id"],),
+        ).fetchall()
         d["faixas"] = [dict(f) for f in faixas]
         d["nutrientes"] = [dict(n) for n in nutrientes]
         # Caminho relativo mesmo (ex.: "/api/v1/whatsapp/uploads/x.png") --
@@ -76,6 +79,9 @@ def ver_catalogo(token):
         # a Evolution API, rodando num container à parte, precisa
         # alcançar por dentro da rede Docker -- não serve pro navegador).
         d["imagem_url"] = item["imagem_url"] or None
+        # Galeria de verdade se tiver; senão cai pra imagem única antiga
+        # (item cadastrado antes da galeria existir).
+        d["imagens"] = [dict(im) for im in imagens] or ([{"url": d["imagem_url"], "tipo": "imagem"}] if d["imagem_url"] else [])
         itens_publicos.append(d)
 
     conversa = conn.execute(

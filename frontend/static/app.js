@@ -6599,6 +6599,18 @@
     return { porcao, nutrientes };
   }
 
+  function _htmlGaleriaItem(im) {
+    const url = im.url || im; // aceita tanto {url,tipo} quanto string pura
+    const tipo = im.tipo || "imagem";
+    return `
+      <div class="wpp-galeria-item" data-galeria-item data-url="${escapeHtml(url)}" data-tipo="${tipo}">
+        ${tipo === "video"
+          ? `<video src="${urlImagemSegura(url)}" muted></video><span class="wpp-galeria-video-selo">▶ vídeo</span>`
+          : `<img src="${urlImagemSegura(url)}" alt="">`}
+        <button type="button" class="wpp-galeria-remover" data-acao="remover-imagem-galeria" title="Remover">✕</button>
+      </div>`;
+  }
+
   function _htmlLinhaFaixa(f) {
     const id = f ? f.id : `novo-${Math.random().toString(36).slice(2, 8)}`;
     return `
@@ -6631,12 +6643,11 @@
           <div class="campo" style="flex:1;"><label>Sabor <span class="texto-suave">(se tiver)</span></label><input type="text" name="sabor" placeholder="Morango, Limão…" value="${escapeHtml(item && item.sabor || "")}"></div>
         </div>
         <div class="campo">
-          <label>Imagem</label>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <img data-preview-imagem src="${item && item.imagem_url ? urlImagemSegura(item.imagem_url) : ""}" style="width:56px; height:56px; object-fit:cover; border-radius:8px; background:var(--superficie-2); ${item && item.imagem_url ? "" : "display:none;"}">
-            <input type="file" name="imagem" accept="image/*" data-input-imagem>
-          </div>
-          <input type="hidden" name="imagem_url" value="${escapeHtml(item && item.imagem_url || "")}">
+          <label>Fotos / vídeos do produto</label>
+          <p class="dica" style="margin-top:0;">Pode escolher várias de uma vez (e misturar foto com vídeo).</p>
+          <div class="wpp-galeria-lista" data-lista-galeria>${(item && item.imagens && item.imagens.length ? item.imagens : (item && item.imagem_url ? [{ url: item.imagem_url, tipo: "imagem" }] : [])).map((im) => _htmlGaleriaItem(im)).join("")}</div>
+          <input type="file" accept="image/*,video/*" multiple data-input-galeria>
+          <p class="texto-suave" style="font-size:11px; margin-top:4px;" data-galeria-status hidden></p>
         </div>
         <label class="rotulo-forte">Faixas de quantidade → preço</label>
         <p class="dica" style="margin-top:0;">Ex.: 1 a 300 un. = R$ 32,50 · 301 a 500 = R$ 29,90…</p>
@@ -6656,6 +6667,7 @@
         <div class="campo"><label>Observação nutricional <span class="texto-suave">(ex.: "*Valores diários com base em 2.000kcal")</span></label><textarea name="observacao_nutricional" rows="2">${escapeHtml(item && item.observacao_nutricional || "")}</textarea></div>
         <div class="campo"><label>Ingredientes</label><textarea name="ingredientes" rows="2">${escapeHtml(item && item.ingredientes || "")}</textarea></div>
         <div class="campo"><label>Modo de uso</label><textarea name="modo_de_uso" rows="2">${escapeHtml(item && item.modo_de_uso || "")}</textarea></div>
+        <div class="campo"><label>Complemento <span class="texto-suave">(opcional — só aparece pro cliente se preencher algo aqui)</span></label><textarea name="complemento" rows="2" placeholder="Ex.: combo com desconto, garantia, frete...">${escapeHtml(item && item.complemento || "")}</textarea></div>
 
         <div class="rodape-modal">
           <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
@@ -6663,20 +6675,30 @@
         </div>
       </form>`, "modal-largo");
 
-    wrap.querySelector("[data-input-imagem]").addEventListener("change", async (ev) => {
-      const arquivo = ev.target.files[0];
-      if (!arquivo) return;
-      const forma = new FormData();
-      forma.append("arquivo", arquivo, arquivo.name || "imagem");
-      const resp = await fetch(`${API}/whatsapp/upload-avulso`, {
-        method: "POST", headers: { Authorization: "Bearer " + state.accessToken }, body: forma,
-      });
-      if (!resp.ok) { definirFlash("erro", "Não deu pra enviar a imagem."); return; }
-      const { url } = await resp.json();
-      wrap.querySelector('input[name="imagem_url"]').value = url;
-      const preview = wrap.querySelector("[data-preview-imagem]");
-      preview.src = urlImagemSegura(url);
-      preview.style.display = "";
+    wrap.querySelector("[data-input-galeria]").addEventListener("change", async (ev) => {
+      const arquivos = [...ev.target.files];
+      if (!arquivos.length) return;
+      const status = wrap.querySelector("[data-galeria-status]");
+      const lista = wrap.querySelector("[data-lista-galeria]");
+      let enviados = 0;
+      status.hidden = false;
+      for (const arquivo of arquivos) {
+        status.textContent = `Enviando ${enviados + 1} de ${arquivos.length}…`;
+        const forma = new FormData();
+        forma.append("arquivo", arquivo, arquivo.name || "arquivo");
+        try {
+          const resp = await fetch(`${API}/whatsapp/upload-avulso`, {
+            method: "POST", headers: { Authorization: "Bearer " + state.accessToken }, body: forma,
+          });
+          if (!resp.ok) { definirFlash("erro", `Não deu pra enviar "${arquivo.name}".`); continue; }
+          const { url } = await resp.json();
+          const tipo = /\.(mp4|mov|avi|webm|mkv)$/i.test(arquivo.name) ? "video" : "imagem";
+          lista.insertAdjacentHTML("beforeend", _htmlGaleriaItem({ url, tipo }));
+        } catch (e) { definirFlash("erro", `Não deu pra enviar "${arquivo.name}".`); }
+        enviados++;
+      }
+      status.hidden = true;
+      ev.target.value = ""; // permite escolher os mesmos arquivos de novo depois, se precisar
     });
   }
 
@@ -8063,6 +8085,10 @@
         return renderWhatsapp(Number(alvo.dataset.id));
       }
       case "abrir-catalogo-item": return modalCatalogoItem(alvo.dataset.id ? Number(alvo.dataset.id) : null);
+      case "remover-imagem-galeria": {
+        alvo.closest("[data-galeria-item]").remove();
+        return;
+      }
       case "adicionar-linha-faixa": {
         const lista = alvo.closest("form").querySelector("[data-lista-faixas]");
         lista.insertAdjacentHTML("beforeend", _htmlLinhaFaixa(null));
@@ -9286,13 +9312,15 @@
           quantidade: linha.querySelector("[data-nutriente-qtd]").value,
           vd: linha.querySelector("[data-nutriente-vd]").value,
         })).filter((n) => n.nome.trim() !== "");
+        const imagens = [...form.querySelectorAll("[data-galeria-item]")].map((el) => el.dataset.url);
         const itemId = form.dataset.id;
         const corpo = {
           nome: dados.get("nome"), forma: dados.get("forma") || undefined, linha: dados.get("linha") || undefined,
           sabor: dados.get("sabor") || "", porcao: dados.get("porcao") || "",
           ingredientes: dados.get("ingredientes") || "", modo_de_uso: dados.get("modo_de_uso") || "",
           observacao_nutricional: dados.get("observacao_nutricional") || "",
-          imagem_url: dados.get("imagem_url") || null, faixas, nutrientes,
+          complemento: dados.get("complemento") || "",
+          imagens, faixas, nutrientes,
         };
         try {
           await chamarApi(itemId ? `/whatsapp/catalogo/${itemId}` : "/whatsapp/catalogo", {

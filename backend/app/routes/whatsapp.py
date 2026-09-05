@@ -1133,8 +1133,12 @@ def upload_avulso():
     if arquivo is None or not arquivo.filename:
         raise ApiError("Nenhum arquivo enviado.", status=400)
     nome_original = secure_filename(arquivo.filename) or "arquivo"
-    if _classificar_tipo(nome_original) != "imagem":
-        raise ApiError("Só imagem por aqui.", status=400)
+    # Imagem (foto de grupo, item de catálogo) ou vídeo (item de
+    # catálogo com vídeo do produto, pedido do Clayton 2026-09-05) --
+    # o resto (documento/áudio) continua indo pelo caminho normal de
+    # anexo de conversa, não por aqui.
+    if _classificar_tipo(nome_original) not in ("imagem", "video"):
+        raise ApiError("Só imagem ou vídeo por aqui.", status=400)
     os.makedirs(PASTA_UPLOADS, exist_ok=True)
     nome_seguro = f"{secrets.token_hex(8)}_{nome_original}"
     caminho = os.path.join(PASTA_UPLOADS, nome_seguro)
