@@ -6507,6 +6507,25 @@
     );
   }
 
+  async function _obterLinhasSugeridas() {
+    if (!state._linhasCatalogoCache) {
+      try { state._linhasCatalogoCache = await chamarApi("/whatsapp/catalogo/linhas-sugeridas"); }
+      catch (e) { state._linhasCatalogoCache = []; }
+    }
+    return state._linhasCatalogoCache;
+  }
+
+  function _htmlLinhaNutriente(n) {
+    const id = n ? n.id : `novo-${Math.random().toString(36).slice(2, 8)}`;
+    return `
+      <div class="wpp-faixa-linha" data-nutriente-linha data-id="${id}" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+        <input type="text" placeholder="Nome (ex.: Creatina (mg))" value="${escapeHtml(n ? n.nome : "")}" data-nutriente-nome style="flex:1;">
+        <input type="text" placeholder="Quantidade" value="${escapeHtml(n && n.quantidade || "")}" data-nutriente-qtd style="width:110px;">
+        <input type="text" placeholder="%VD" value="${escapeHtml(n && n.vd || "")}" data-nutriente-vd style="width:80px;">
+        <button type="button" class="botao-icone" data-acao="remover-linha-nutriente" title="Remover esta linha">✕</button>
+      </div>`;
+  }
+
   function _htmlLinhaFaixa(f) {
     const id = f ? f.id : `novo-${Math.random().toString(36).slice(2, 8)}`;
     return `
@@ -6521,14 +6540,22 @@
   }
 
   async function modalCatalogoItem(itemId) {
-    const item = itemId ? await chamarApi(`/whatsapp/catalogo/${itemId}`) : null;
+    const [item, linhasSugeridas] = await Promise.all([
+      itemId ? chamarApi(`/whatsapp/catalogo/${itemId}`) : null,
+      _obterLinhasSugeridas(),
+    ]);
     const wrap = abrirModal(`
       <h3 style="margin-top:0;">🗂️ ${item ? "Editar item" : "Novo item"} do catálogo</h3>
       <form data-form="salvar-catalogo-item" data-id="${item ? item.id : ""}">
         <div class="campo"><label>Nome do produto</label><input type="text" name="nome" required value="${escapeHtml(item ? item.nome : "")}"></div>
         <div style="display:flex; gap:10px;">
           <div class="campo" style="flex:1;"><label>Forma</label><input type="text" name="forma" placeholder="Sachê, Stick, Pó, Cápsula…" value="${escapeHtml(item && item.forma || "")}"></div>
-          <div class="campo" style="flex:1;"><label>Linha</label><input type="text" name="linha" placeholder="Imunidade, Fitness…" value="${escapeHtml(item && item.linha || "")}"></div>
+          <div class="campo" style="flex:1;">
+            <label>Linha</label>
+            <input type="text" name="linha" list="lista-linhas-catalogo" placeholder="Escolha ou digite…" value="${escapeHtml(item && item.linha || "")}">
+            <datalist id="lista-linhas-catalogo">${linhasSugeridas.map((l) => `<option value="${escapeHtml(l)}">`).join("")}</datalist>
+          </div>
+          <div class="campo" style="flex:1;"><label>Sabor <span class="texto-suave">(se tiver)</span></label><input type="text" name="sabor" placeholder="Morango, Limão…" value="${escapeHtml(item && item.sabor || "")}"></div>
         </div>
         <div class="campo">
           <label>Imagem</label>
@@ -6542,6 +6569,16 @@
         <p class="dica" style="margin-top:0;">Ex.: 1 a 300 un. = R$ 32,50 · 301 a 500 = R$ 29,90…</p>
         <div data-lista-faixas>${(item && item.faixas.length ? item.faixas : [null, null]).map((f) => _htmlLinhaFaixa(f)).join("")}</div>
         <button type="button" class="botao secundario pequeno" data-acao="adicionar-linha-faixa" style="margin-bottom:14px;">+ faixa</button>
+
+        <label class="rotulo-forte">Informação nutricional</label>
+        <p class="dica" style="margin-top:0;">Copiado do modelo de portifólio: porção + tabela de nutrientes.</p>
+        <div class="campo" style="max-width:260px;"><label>Porção</label><input type="text" name="porcao" placeholder="Ex.: 3g (1 dosador)" value="${escapeHtml(item && item.porcao || "")}"></div>
+        <div data-lista-nutrientes>${(item && item.nutrientes.length ? item.nutrientes : [null]).map((n) => _htmlLinhaNutriente(n)).join("")}</div>
+        <button type="button" class="botao secundario pequeno" data-acao="adicionar-linha-nutriente" style="margin-bottom:14px;">+ nutriente</button>
+        <div class="campo"><label>Observação nutricional <span class="texto-suave">(ex.: "*Valores diários com base em 2.000kcal")</span></label><textarea name="observacao_nutricional" rows="2">${escapeHtml(item && item.observacao_nutricional || "")}</textarea></div>
+        <div class="campo"><label>Ingredientes</label><textarea name="ingredientes" rows="2">${escapeHtml(item && item.ingredientes || "")}</textarea></div>
+        <div class="campo"><label>Modo de uso</label><textarea name="modo_de_uso" rows="2">${escapeHtml(item && item.modo_de_uso || "")}</textarea></div>
+
         <div class="rodape-modal">
           <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
           <button type="submit" class="botao">Salvar</button>
@@ -7949,6 +7986,15 @@
         else definirFlash("erro", "Precisa de pelo menos uma faixa.");
         return;
       }
+      case "adicionar-linha-nutriente": {
+        const lista = alvo.closest("form").querySelector("[data-lista-nutrientes]");
+        lista.insertAdjacentHTML("beforeend", _htmlLinhaNutriente(null));
+        return;
+      }
+      case "remover-linha-nutriente": {
+        alvo.closest("[data-nutriente-linha]").remove();
+        return;
+      }
       case "excluir-catalogo-item": {
         if (!confirm(`Desativar "${alvo.dataset.nome}"? Ele some da lista mas não quebra propostas antigas.`)) return;
         await chamarApi(`/whatsapp/catalogo/${alvo.dataset.id}`, { method: "DELETE" });
@@ -9121,10 +9167,19 @@
           quantidade_max: linha.querySelector("[data-faixa-max]").value || null,
           preco: linha.querySelector("[data-faixa-preco]").value,
         })).filter((f) => f.quantidade_min !== "" && f.preco !== "");
+        const linhasNutri = [...form.querySelectorAll("[data-nutriente-linha]")];
+        const nutrientes = linhasNutri.map((linha) => ({
+          nome: linha.querySelector("[data-nutriente-nome]").value,
+          quantidade: linha.querySelector("[data-nutriente-qtd]").value,
+          vd: linha.querySelector("[data-nutriente-vd]").value,
+        })).filter((n) => n.nome.trim() !== "");
         const itemId = form.dataset.id;
         const corpo = {
           nome: dados.get("nome"), forma: dados.get("forma") || undefined, linha: dados.get("linha") || undefined,
-          imagem_url: dados.get("imagem_url") || null, faixas,
+          sabor: dados.get("sabor") || "", porcao: dados.get("porcao") || "",
+          ingredientes: dados.get("ingredientes") || "", modo_de_uso: dados.get("modo_de_uso") || "",
+          observacao_nutricional: dados.get("observacao_nutricional") || "",
+          imagem_url: dados.get("imagem_url") || null, faixas, nutrientes,
         };
         try {
           await chamarApi(itemId ? `/whatsapp/catalogo/${itemId}` : "/whatsapp/catalogo", {

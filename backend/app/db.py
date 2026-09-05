@@ -87,6 +87,7 @@ SCHEMA_FILES = [
     "schema_072_chamadas_internas.sql",
     "schema_073_chamadas_ping.sql",
     "schema_074_catalogo_proposta.sql",
+    "schema_075_catalogo_nutricional.sql",
 ]
 
 
