@@ -6680,10 +6680,17 @@
       if (!arquivos.length) return;
       const status = wrap.querySelector("[data-galeria-status]");
       const lista = wrap.querySelector("[data-lista-galeria]");
+      // Trava o Salvar enquanto sobe -- achado real: clicar Salvar no
+      // meio do envio das fotos gravava só as que já tinham terminado
+      // até aquele instante, perdendo o resto silenciosamente.
+      const botaoSalvar = wrap.querySelector('button[type="submit"]');
+      const inputArquivo = ev.target;
+      botaoSalvar.disabled = true;
+      inputArquivo.disabled = true;
       let enviados = 0;
       status.hidden = false;
       for (const arquivo of arquivos) {
-        status.textContent = `Enviando ${enviados + 1} de ${arquivos.length}…`;
+        status.textContent = `Enviando ${enviados + 1} de ${arquivos.length}… (não feche nem clique em Salvar ainda)`;
         const forma = new FormData();
         forma.append("arquivo", arquivo, arquivo.name || "arquivo");
         try {
@@ -6698,6 +6705,8 @@
         enviados++;
       }
       status.hidden = true;
+      botaoSalvar.disabled = false;
+      inputArquivo.disabled = false;
       ev.target.value = ""; // permite escolher os mesmos arquivos de novo depois, se precisar
     });
   }

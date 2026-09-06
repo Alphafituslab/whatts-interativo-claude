@@ -84,7 +84,11 @@ MAX_ANEXO_MB_ADMIN = 90
 def _limite_anexo_mb(usuario) -> int:
     return MAX_ANEXO_MB_ADMIN if usuario and usuario["admin"] else MAX_ANEXO_MB
 EXTENSOES_TIPO = {
-    "imagem": {"jpg", "jpeg", "png", "gif", "webp"},
+    # heic/heif: formato padrão de foto do iPhone (iOS 11+) -- sem isso,
+    # cliente/atendente subindo foto direto do iPhone (comum: galeria do
+    # catálogo, foto de grupo) caía em "documento" e era recusado com um
+    # erro que passava batido no meio de várias fotos sendo enviadas.
+    "imagem": {"jpg", "jpeg", "png", "gif", "webp", "heic", "heif"},
     "video": {"mp4", "mov", "avi", "webm", "mkv"},
     "audio": {"mp3", "ogg", "wav", "m4a", "opus"},
 }
@@ -1146,6 +1150,25 @@ def upload_avulso():
     if os.path.getsize(caminho) > MAX_ANEXO_MB * 1024 * 1024:
         os.remove(caminho)
         raise ApiError(f"Arquivo maior que {MAX_ANEXO_MB}MB.", status=400)
+
+    # HEIC/HEIF (foto de iPhone) nenhum navegador mostra direto num
+    # <img> -- some silenciosamente na galeria do catálogo mesmo com o
+    # upload "dando certo" (achado real: Clayton subindo fotos e nem
+    # todas apareciam). Converte pra JPG na hora, aqui mesmo.
+    if nome_seguro.lower().rsplit(".", 1)[-1] in ("heic", "heif"):
+        try:
+            import pillow_heif
+            from PIL import Image
+            pillow_heif.register_heif_opener()
+            destino = os.path.splitext(caminho)[0] + ".jpg"
+            with Image.open(caminho) as img:
+                img.convert("RGB").save(destino, "JPEG", quality=90)
+            os.remove(caminho)
+            nome_seguro = os.path.basename(destino)
+        except Exception:
+            os.remove(caminho)
+            raise ApiError("Não consegui converter essa foto (formato HEIC do iPhone). Tenta exportar como JPG.", status=400)
+
     return jsonify({"url": f"/api/v1/whatsapp/uploads/{nome_seguro}"}), 201
 
 
