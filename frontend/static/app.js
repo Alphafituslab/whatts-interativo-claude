@@ -6564,13 +6564,19 @@
 
   async function renderCatalogo() {
     _carregandoSeTrocouDeTela("catalogo");
+    const aba = state._catalogoAba || "itens";
+    if (aba === "propostas") return renderCatalogoPropostas();
     const itens = await chamarApi("/whatsapp/catalogo?todos=1");
     renderShell(`
       <div class="wpp-cabecalho-tela">
         <h2 style="margin:0;">🗂️ Catálogo / Proposta</h2>
         <button type="button" class="botao pequeno" data-acao="abrir-catalogo-item">+ Novo item</button>
       </div>
-      <p class="dica">Cadastro dos itens e faixas de preço do portfólio de terceirização. A tela do cliente ainda não existe — isso aqui é só a base pra montar ela depois. Liberar/travar pro cliente é em <strong>Configuração → Catálogo/Proposta</strong>.</p>
+      <div class="wpp-abas" style="margin-bottom:14px; width:fit-content;">
+        <button type="button" class="wpp-aba ativa" data-acao="catalogo-aba" data-aba="itens">Itens</button>
+        <button type="button" class="wpp-aba" data-acao="catalogo-aba" data-aba="propostas">Propostas enviadas</button>
+      </div>
+      <p class="dica">Cadastro dos itens e faixas de preço do portfólio de terceirização. Liberar/travar pro cliente é em <strong>Configuração → Catálogo/Proposta</strong>.</p>
       <div class="cartao">
         ${itens.length ? `
         <table class="tabela-simples">
@@ -6593,6 +6599,60 @@
       </div>`,
       "catalogo"
     );
+  }
+
+  // Propostas que clientes já preencheram e mandaram de volta pelo link
+  // público -- pedido do Clayton (2026-09-07): "quando o cliente
+  // preenche, devolve com as fórmulas escolhidas?" -- já devolvia na
+  // conversa; isso aqui é o relatório que faltava.
+  async function renderCatalogoPropostas() {
+    const params = new URLSearchParams();
+    if (state._propostasDe) params.set("de", state._propostasDe);
+    if (state._propostasAte) params.set("ate", state._propostasAte);
+    if (state._propostasBusca) params.set("busca", state._propostasBusca);
+    const propostas = await chamarApi(`/whatsapp/catalogo/propostas?${params.toString()}`);
+    const totalGeral = propostas.reduce((s, p) => s + p.total, 0);
+    renderShell(`
+      <div class="wpp-cabecalho-tela">
+        <h2 style="margin:0;">🗂️ Catálogo / Proposta</h2>
+        <button type="button" class="botao pequeno" data-acao="abrir-catalogo-item">+ Novo item</button>
+      </div>
+      <div class="wpp-abas" style="margin-bottom:14px; width:fit-content;">
+        <button type="button" class="wpp-aba" data-acao="catalogo-aba" data-aba="itens">Itens</button>
+        <button type="button" class="wpp-aba ativa" data-acao="catalogo-aba" data-aba="propostas">Propostas enviadas</button>
+      </div>
+      <form data-form="filtrar-propostas" class="cartao" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px;">
+        <div class="campo"><label>De</label><input type="date" name="de" value="${state._propostasDe || ""}"></div>
+        <div class="campo"><label>Até</label><input type="date" name="ate" value="${state._propostasAte || ""}"></div>
+        <div class="campo" style="flex:1; min-width:180px;"><label>Cliente (nome ou telefone)</label><input type="text" name="busca" value="${escapeHtml(state._propostasBusca || "")}" placeholder="Buscar..."></div>
+        <button type="submit" class="botao secundario">Filtrar</button>
+      </form>
+      <p class="dica">${propostas.length} proposta(s) — total somado: <strong>R$ ${_brlFormatar(totalGeral)}</strong></p>
+      <div class="cartao">
+        ${propostas.length ? propostas.map((p) => `
+          <div style="padding:12px 0; border-bottom:1px solid var(--borda);">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;">
+              <div>
+                <strong>${escapeHtml(p.cliente_nome || p.cliente_telefone || "Cliente")}</strong>
+                <span class="texto-suave"> · ${fmtData(p.criado_em)}</span>
+                ${p.enviado_por_nome ? `<span class="texto-suave"> · link enviado por ${escapeHtml(p.enviado_por_nome)}</span>` : ""}
+              </div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <strong>R$ ${_brlFormatar(p.total)}</strong>
+                <a class="botao-icone" href="#/whatsapp/${p.conversa_id}" title="Abrir conversa do cliente">💬</a>
+              </div>
+            </div>
+            <ul style="margin:8px 0 0; padding-left:18px; font-size:13px; color:var(--texto-suave);">
+              ${p.itens.map((it) => `<li>${escapeHtml(it.nome_item)} — ${it.quantidade} un. × R$ ${_brlFormatar(it.preco_unitario)} = R$ ${_brlFormatar(it.subtotal)}</li>`).join("")}
+            </ul>
+          </div>`).join("") : `<p class="dica">Nenhuma proposta recebida ainda${state._propostasDe || state._propostasAte || state._propostasBusca ? " com esse filtro" : ""}.</p>`}
+      </div>`,
+      "catalogo"
+    );
+  }
+
+  function _brlFormatar(v) {
+    return Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   async function _obterLinhasSugeridas() {
@@ -8138,6 +8198,9 @@
         return renderWhatsapp(Number(alvo.dataset.id));
       }
       case "abrir-catalogo-item": return modalCatalogoItem(alvo.dataset.id ? Number(alvo.dataset.id) : null);
+      case "catalogo-aba":
+        state._catalogoAba = alvo.dataset.aba;
+        return renderCatalogo();
       case "excluir-feriado": {
         if (!confirm("Remover este feriado?")) return;
         await chamarApi(`/whatsapp/feriados/${alvo.dataset.id}`, { method: "DELETE" });
@@ -9358,6 +9421,12 @@
         }
         definirFlash("ok", "Feriado cadastrado.");
         return renderWhatsappConfiguracao();
+      }
+      case "filtrar-propostas": {
+        state._propostasDe = dados.get("de") || "";
+        state._propostasAte = dados.get("ate") || "";
+        state._propostasBusca = dados.get("busca") || "";
+        return renderCatalogoPropostas();
       }
       case "salvar-catalogo-config": {
         try {

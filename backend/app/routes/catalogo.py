@@ -136,6 +136,74 @@ def linhas_sugeridas():
     return jsonify(LINHAS_SUGERIDAS)
 
 
+@bp.get("/propostas")
+@requires_admin
+def listar_propostas():
+    """Propostas que clientes já preencheram e mandaram de volta pelo
+    link público -- pedido do Clayton (2026-09-07): "quando o cliente
+    preenche, devolve com as fórmulas escolhidas?" (devolve, só que até
+    aqui só aparecia dentro da conversa do WhatsApp; isso aqui é a
+    telinha de relatório que faltava)."""
+    conn = get_db()
+    condicoes = ["p.empresa_id = ?"]
+    params = [g.empresa_id]
+
+    de = (request.args.get("de") or "").strip()
+    if de:
+        condicoes.append("p.criado_em >= ?")
+        params.append(de + "T00:00:00.000Z")
+    ate = (request.args.get("ate") or "").strip()
+    if ate:
+        condicoes.append("p.criado_em <= ?")
+        params.append(ate + "T23:59:59.999Z")
+    busca = (request.args.get("busca") or "").strip()
+    if busca:
+        condicoes.append("(ct.nome LIKE ? OR ct.telefone LIKE ?)")
+        params.extend([f"%{busca}%", f"%{busca}%"])
+
+    sql = f"""
+        SELECT p.id, p.criado_em, p.total, p.conversa_id,
+               ct.nome AS cliente_nome, ct.telefone AS cliente_telefone,
+               u.nome AS enviado_por_nome
+        FROM whatsapp_catalogo_propostas p
+        JOIN whatsapp_catalogo_links l ON l.id = p.link_id
+        JOIN whatsapp_conversas c ON c.id = p.conversa_id
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN usuarios u ON u.id = l.criado_por
+        WHERE {" AND ".join(condicoes)}
+        ORDER BY p.criado_em DESC
+        LIMIT 300
+    """
+    propostas = conn.execute(sql, params).fetchall()
+    if not propostas:
+        return jsonify([])
+
+    ids = [p["id"] for p in propostas]
+    marcadores = ",".join("?" for _ in ids)
+    itens = conn.execute(
+        f"SELECT proposta_id, nome_item, quantidade, preco_unitario, subtotal "
+        f"FROM whatsapp_catalogo_propostas_itens WHERE proposta_id IN ({marcadores}) ORDER BY id",
+        ids,
+    ).fetchall()
+    itens_por_proposta = {}
+    for it in itens:
+        itens_por_proposta.setdefault(it["proposta_id"], []).append(dict(it))
+
+    return jsonify([
+        {
+            "id": p["id"],
+            "criado_em": p["criado_em"],
+            "total": p["total"],
+            "conversa_id": p["conversa_id"],
+            "cliente_nome": p["cliente_nome"],
+            "cliente_telefone": p["cliente_telefone"],
+            "enviado_por_nome": p["enviado_por_nome"],
+            "itens": itens_por_proposta.get(p["id"], []),
+        }
+        for p in propostas
+    ])
+
+
 @bp.get("")
 @requires_admin
 def listar():
