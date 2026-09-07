@@ -300,6 +300,37 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-status-bolinha.wpp-status-aguardando { background: var(--amarelo); animation: pulso-suave 1.6s ease-in-out infinite; }
 
 .rodape-barra-lateral { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--borda); }
+
+/* Recolher/abrir o menu lateral -- pedido do Clayton (2026-09-07): "pode
+   esconde e abrir esse menu assim a tela pode ficar maior... pode ser
+   pra todos". Vira uma faixa só de ícones; o mesmo botão da marca abre
+   de novo (sem botão flutuante -- ficava sobreposto na logo). */
+.botao-recolher-menu { margin-left: auto; flex-shrink: 0; width: 26px; height: 26px; font-size: 14px; }
+@media (min-width: 861px) {
+  body.menu-recolhido .barra-lateral { width: 62px; padding-left: 8px; padding-right: 8px; }
+  body.menu-recolhido .marca-icone,
+  body.menu-recolhido .marca-texto,
+  body.menu-recolhido .wpp-status-texto,
+  body.menu-recolhido .link-nav-texto,
+  body.menu-recolhido .wpp-versao-rodape,
+  body.menu-recolhido .rodape-barra-lateral > *:not(.usuario-atual-chip),
+  body.menu-recolhido .usuario-atual-chip > div {
+    display: none;
+  }
+  body.menu-recolhido .marca { justify-content: center; padding-left: 0; padding-right: 0; }
+  body.menu-recolhido .wpp-status-linha { justify-content: center; padding-left: 0; padding-right: 0; }
+  body.menu-recolhido .link-nav { justify-content: center; padding-left: 6px; padding-right: 6px; }
+  body.menu-recolhido .link-nav .wpp-badge-sla,
+  body.menu-recolhido .link-nav .wpp-badge-nao-lidas { position: absolute; top: 2px; right: 2px; margin-left: 0; }
+  body.menu-recolhido .link-nav { position: relative; }
+  body.menu-recolhido .usuario-atual-chip { justify-content: center; }
+}
+/* Menu recolhido é preferência de tela grande -- no celular a barra já
+   tem seu próprio jeito de abrir/fechar (hambúrguer + overlay), então o
+   botão de recolher/reabrir do desktop fica fora do caminho. */
+@media (max-width: 860px) {
+  .botao-recolher-menu { display: none !important; }
+}
 .wpp-versao-rodape { margin-top: 10px; font-size: 10px; color: var(--texto-suave); opacity: 0.55; text-align: center; font-variant-numeric: tabular-nums; }
 .wpp-digitando { color: var(--primaria); font-style: italic; font-weight: 600; animation: piscar-aviso 1.4s ease-in-out infinite; }
 .wpp-icone-preenchido { background: color-mix(in srgb, var(--primaria) 16%, transparent); }

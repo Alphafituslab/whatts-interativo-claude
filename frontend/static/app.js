@@ -9,6 +9,15 @@
   const API = "/api/v1";
   const app = document.getElementById("app");
 
+  // Recolher/abrir o menu lateral -- preferência por navegador (qualquer
+  // usuário pode usar), aplicada já de cara pra não "piscar" o menu
+  // aberto antes de recolher.
+  try {
+    if (localStorage.getItem("whatts_menu_recolhido") === "1") {
+      document.body.classList.add("menu-recolhido");
+    }
+  } catch (e) { /* localStorage bloqueado -- fica com o menu aberto normalmente */ }
+
   const state = {
     accessToken: null,
     refreshToken: localStorage.getItem("whatts_refresh_token") || null,
@@ -421,7 +430,7 @@
         } else if (it.chave === "chat-interno") {
           extra = '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-chat-interno-nao-lidas-badge hidden title="Mensagens novas de colegas que você ainda não leu"></span>';
         }
-        return `<a class="link-nav ${it.chave === paginaAtiva ? "ativo" : ""}" href="${it.rota}"><span>${it.icone}</span> ${escapeHtml(it.label)}${extra}</a>`;
+        return `<a class="link-nav ${it.chave === paginaAtiva ? "ativo" : ""}" href="${it.rota}" title="${escapeHtml(it.label)}"><span>${it.icone}</span> <span class="link-nav-texto">${escapeHtml(it.label)}</span>${extra}</a>`;
       })
       .join("")
       // Follow-up é botão, não link de página: abre o painel lateral sem
@@ -429,14 +438,14 @@
       // conversa) porque ali nunca disputa espaço com botão nenhum.
       + (_itemMenuVisivel("follow-up")
           ? `<button type="button" class="link-nav link-nav-botao" data-acao="alternar-followup" title="Clientes que precisam de contato">
-               <span>🔔</span> Follow-up
+               <span>🔔</span> <span class="link-nav-texto">Follow-up</span>
                <span class="wpp-badge-nao-lidas wpp-badge-nav" data-followup-contador hidden>0</span>
              </button>`
           : "")
       // Ligações: pedido do Clayton (2026-09-03), logo abaixo do
       // Follow-up no menu.
       + (usuario && _podeVerConversas() && _itemMenuVisivel("ligacoes")
-          ? `<a class="link-nav ${paginaAtiva === "ligacoes" ? "ativo" : ""}" href="#/ligacoes"><span>📞</span> Leads do Consulta Anvisa</a>`
+          ? `<a class="link-nav ${paginaAtiva === "ligacoes" ? "ativo" : ""}" href="#/ligacoes" title="Leads do Consulta Anvisa"><span>📞</span> <span class="link-nav-texto">Leads do Consulta Anvisa</span></a>`
           : "");
 
     const flashHtml = state.flash
@@ -450,7 +459,13 @@
       <div class="layout">
         <div class="fundo-menu-mobile" data-acao="alternar-menu-mobile"></div>
         <aside class="barra-lateral">
-          <div class="marca"><img class="marca-icone marca-logo" src="${state.logoUrl || "/static/img/logo_alphafitus.png"}" alt="" data-wpp-logo> Seja Alpha</div>
+          <div class="marca">
+            <img class="marca-icone marca-logo" src="${state.logoUrl || "/static/img/logo_alphafitus.png"}" alt="" data-wpp-logo>
+            <span class="marca-texto">Seja Alpha</span>
+            <button type="button" class="botao-icone botao-recolher-menu" data-acao="alternar-menu-desktop" title="Recolher/abrir menu">
+              <span class="seta-recolher-menu">${document.body.classList.contains("menu-recolhido") ? "»" : "«"}</span>
+            </button>
+          </div>
           <div class="wpp-status-linha" data-wpp-status-linha>
             <span class="wpp-status-bolinha wpp-status-desconhecido" data-wpp-status-bolinha></span>
             <span data-wpp-status-texto>Verificando…</span>
@@ -7060,6 +7075,12 @@
         document.querySelector(".barra-lateral").classList.toggle("aberta");
         document.querySelector(".fundo-menu-mobile").classList.toggle("visivel");
         return;
+      case "alternar-menu-desktop": {
+        const recolhido = document.body.classList.toggle("menu-recolhido");
+        try { localStorage.setItem("whatts_menu_recolhido", recolhido ? "1" : "0"); } catch (e) { /* segue sem salvar */ }
+        document.querySelectorAll(".seta-recolher-menu").forEach((s) => { s.textContent = recolhido ? "»" : "«"; });
+        return;
+      }
       case "abrir-reacao": {
         // Os seis do WhatsApp, na mesma ordem — quem já usa o aplicativo
         // acha o que quer sem procurar.
