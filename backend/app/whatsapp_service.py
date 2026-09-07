@@ -2646,15 +2646,19 @@ def fechar_conversa(conn, conversa_id: int, resultado: str = None, motivo: str =
     # Zera qualquer menu em andamento — se a conversa for encerrada bem no
     # meio do menu de setor (cliente nunca respondeu), reabrir depois
     # precisa começar do zero, não continuar de onde parou.
+    # Encerrar sempre desarquiva -- pedido do Clayton (2026-09-07): fechou
+    # um atendimento que outra pessoa tinha arquivado e ele continuou
+    # preso em "Arquivados" em vez de ficar livre de novo. Não faz
+    # sentido um atendimento já encerrado continuar escondido lá.
     if pesquisa_recente:
         conn.execute(
-            "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, resultado = ?, motivo_finalizacao = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
+            "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, resultado = ?, motivo_finalizacao = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0, arquivada = 0, arquivada_por = NULL WHERE id = ?",
             (agora, resultado, motivo, conversa_id),
         )
         return
 
     conn.execute(
-        "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, aguardando_avaliacao = 1, resultado = ?, motivo_finalizacao = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
+        "UPDATE whatsapp_conversas SET status = 'fechada', fechada_em = ?, aguardando_avaliacao = 1, resultado = ?, motivo_finalizacao = ?, menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0, arquivada = 0, arquivada_por = NULL WHERE id = ?",
         (agora, resultado, motivo, conversa_id),
     )
     # Grupo não recebe pesquisa: a pergunta é sobre UM atendimento a UMA
