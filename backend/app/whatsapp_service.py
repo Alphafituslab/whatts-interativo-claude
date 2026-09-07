@@ -3254,6 +3254,18 @@ def _dentro_do_expediente(janelas_json) -> bool:
     return any(j.get("inicio") and j.get("fim") and j["inicio"] <= agora <= j["fim"] for j in janelas)
 
 
+def _feriado_hoje(conn, empresa_id):
+    """Feriado cadastrado pra HOJE, se tiver -- pedido do Clayton:
+    "quando for feriado na cidade e não estivermos em funcionamento me
+    deixar colocar um aviso sobre isso". Funciona independente do
+    Horário de funcionamento estar ligado ou não -- um feriado marcado
+    já basta."""
+    hoje = datetime.datetime.now().strftime("%Y-%m-%d")
+    return conn.execute(
+        "SELECT * FROM whatsapp_feriados WHERE empresa_id = ? AND data = ?", (empresa_id, hoje)
+    ).fetchone()
+
+
 def _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone):
     # Grupo não recebe aviso automático. "Estamos fora do horário" cai
     # pra todo mundo do grupo, várias vezes por dia, e não é resposta a
@@ -3267,10 +3279,21 @@ def _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone):
         return
 
     config = obter_configuracao(conn, empresa_id)
-    if not config.get("expediente_ativo"):
+    feriado = _feriado_hoje(conn, empresa_id)
+    if feriado is not None:
+        mensagem = feriado["mensagem"] or (
+            f"Hoje é feriado ({feriado['descricao']}) e não teremos atendimento. "
+            "Assim que voltarmos, retornaremos sua mensagem! 🙏"
+        )
+    elif not config.get("expediente_ativo"):
         return
-    if _dentro_do_expediente(config.get("expediente_janelas")):
+    elif _dentro_do_expediente(config.get("expediente_janelas")):
         return
+    else:
+        mensagem = config.get("expediente_mensagem") or (
+            "No momento estamos fora do horário de atendimento. Assim que reabrirmos, retornaremos sua mensagem! 🙏"
+        )
+
     ultimo_aviso = conversa.get("ultimo_aviso_expediente")
     if ultimo_aviso:
         try:
@@ -3279,9 +3302,6 @@ def _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone):
                 return
         except ValueError:
             pass
-    mensagem = config.get("expediente_mensagem") or (
-        "No momento estamos fora do horário de atendimento. Assim que reabrirmos, retornaremos sua mensagem! 🙏"
-    )
     try:
         enviar_texto(config, telefone, mensagem)
     except ApiError:

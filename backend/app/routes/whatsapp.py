@@ -146,6 +146,63 @@ def obter_configuracao():
     return jsonify(whatsapp_service.config_publica(whatsapp_service.obter_configuracao(conn, g.empresa_id)))
 
 
+# ============================================================
+# FERIADOS -- pedido do Clayton (2026-09-07): "quando for feriado na
+# cidade e não estivermos em funcionamento me deixar colocar um aviso
+# sobre isso". Funciona independente do Horário de funcionamento estar
+# ligado (ver _feriado_hoje/_avisar_fora_expediente_se_preciso).
+# ============================================================
+@bp.get("/feriados")
+@requires_admin
+def listar_feriados():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM whatsapp_feriados WHERE empresa_id = ? ORDER BY data", (g.empresa_id,)
+    ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@bp.post("/feriados")
+@requires_admin
+def criar_feriado():
+    usuario = g.usuario_atual
+    dados = request.get_json(silent=True) or {}
+    data = (dados.get("data") or "").strip()
+    descricao = (dados.get("descricao") or "").strip()
+    if not data or not descricao:
+        raise ApiError("Informe a data e a descrição do feriado.", status=400)
+    try:
+        datetime.datetime.strptime(data, "%Y-%m-%d")
+    except ValueError:
+        raise ApiError("Data inválida.", status=400)
+    conn = get_db()
+    ja_existe = conn.execute(
+        "SELECT 1 FROM whatsapp_feriados WHERE empresa_id = ? AND data = ?", (g.empresa_id, data)
+    ).fetchone()
+    if ja_existe:
+        raise ApiError("Já tem um feriado cadastrado nessa data.", status=409, codigo="ja_existe")
+    conn.execute(
+        "INSERT INTO whatsapp_feriados (empresa_id, data, descricao, mensagem, criado_por, criado_em) VALUES (?, ?, ?, ?, ?, ?)",
+        (g.empresa_id, data, descricao, (dados.get("mensagem") or "").strip() or None, usuario["id"], _now_iso()),
+    )
+    conn.commit()
+    return jsonify({"ok": True}), 201
+
+
+@bp.delete("/feriados/<int:feriado_id>")
+@requires_admin
+def excluir_feriado(feriado_id):
+    conn = get_db()
+    feriado = conn.execute(
+        "SELECT id FROM whatsapp_feriados WHERE id = ? AND empresa_id = ?", (feriado_id, g.empresa_id)
+    ).fetchone()
+    if feriado is None:
+        raise ApiError("Feriado não encontrado.", status=404, codigo="nao_encontrado")
+    conn.execute("DELETE FROM whatsapp_feriados WHERE id = ?", (feriado_id,))
+    conn.commit()
+    return jsonify({"ok": True})
+
+
 @bp.get("/menu-visibilidade")
 @requires_auth
 def menu_visibilidade():

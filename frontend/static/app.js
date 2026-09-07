@@ -5432,12 +5432,13 @@
     // a plataforma tem acesso — o servidor barra de qualquer jeito, aqui
     // é só pra não mostrar uma seção que daria erro ao usar.
     const ehSuperAdmin = !!state.usuarioAtual.super_admin;
-    const [{ config, webhookUrl }, setoresDetalhado, backups, catalogos, usuarios] = await Promise.all([
+    const [{ config, webhookUrl }, setoresDetalhado, backups, catalogos, usuarios, feriados] = await Promise.all([
       buscarConfigECriarWebhookUrl(),
       chamarApi("/usuarios/setores/detalhado"),
       ehSuperAdmin ? chamarApi("/sistema/backups") : Promise.resolve([]),
       chamarApi("/whatsapp/catalogos?todos=1").catch(() => []),
       chamarApi("/usuarios").catch(() => []),
+      chamarApi("/whatsapp/feriados").catch(() => []),
     ]);
     const setoresAtuais = setoresDetalhado.map((s) => s.nome);
 
@@ -5667,6 +5668,28 @@
              <input type="number" name="sla_minutos_alerta" min="1" value="${config.sla_minutos_alerta || 15}" style="max-width:120px;">
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">📅 Feriados / dias sem funcionamento</h3>
+         <p class="dica">Cadastre um feriado (ou qualquer dia parado, tipo aniversário da cidade) -- nesse dia, quem escrever no WhatsApp recebe um aviso automático avisando, mesmo que o Horário de funcionamento acima esteja desligado.</p>
+         ${feriados.length ? `
+         <ul style="list-style:none; padding:0; margin:0 0 14px; display:flex; flex-direction:column; gap:6px;">
+           ${feriados.map((f) => `
+             <li style="display:flex; align-items:center; gap:8px; padding:7px 10px; background:var(--superficie-2); border-radius:8px;">
+               <strong>${f.data.split("-").reverse().join("/")}</strong>
+               <span style="flex:1;">${escapeHtml(f.descricao)}</span>
+               <button type="button" class="botao-icone" data-acao="excluir-feriado" data-id="${f.id}" title="Remover">🗑️</button>
+             </li>`).join("")}
+         </ul>` : ""}
+         <form data-form="criar-feriado">
+           <div style="display:flex; gap:10px;">
+             <div class="campo" style="flex:1;"><label>Data</label><input type="date" name="data" required></div>
+             <div class="campo" style="flex:2;"><label>Descrição</label><input type="text" name="descricao" placeholder="Ex.: Aniversário da cidade" required></div>
+           </div>
+           <div class="campo"><label>Mensagem automática (opcional)</label><textarea name="mensagem" rows="2" placeholder="Se deixar em branco, usa uma mensagem padrão com a descrição acima."></textarea></div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao secundario">+ Adicionar feriado</button></div>
          </form>
        </div>
 
@@ -8094,6 +8117,12 @@
         return renderWhatsapp(Number(alvo.dataset.id));
       }
       case "abrir-catalogo-item": return modalCatalogoItem(alvo.dataset.id ? Number(alvo.dataset.id) : null);
+      case "excluir-feriado": {
+        if (!confirm("Remover este feriado?")) return;
+        await chamarApi(`/whatsapp/feriados/${alvo.dataset.id}`, { method: "DELETE" });
+        definirFlash("ok", "Feriado removido.");
+        return renderWhatsappConfiguracao();
+      }
       case "remover-imagem-galeria": {
         alvo.closest("[data-galeria-item]").remove();
         return;
@@ -9294,6 +9323,19 @@
           return renderWhatsappConfiguracao();
         }
         definirFlash("ok", "Menu atualizado — vale a partir do próximo login/atualização de página de cada usuário.");
+        return renderWhatsappConfiguracao();
+      }
+      case "criar-feriado": {
+        try {
+          await chamarApi("/whatsapp/feriados", {
+            method: "POST",
+            body: { data: dados.get("data"), descricao: dados.get("descricao"), mensagem: dados.get("mensagem") || "" },
+          });
+        } catch (erro) {
+          definirFlash("erro", erro.mensagem || "Não deu pra cadastrar o feriado.");
+          return renderWhatsappConfiguracao();
+        }
+        definirFlash("ok", "Feriado cadastrado.");
         return renderWhatsappConfiguracao();
       }
       case "salvar-catalogo-config": {
