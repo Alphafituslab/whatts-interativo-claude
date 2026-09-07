@@ -77,6 +77,20 @@
     #lista-itens.modo-cheia .item-galeria-principal { width: 210px; height: 210px; }
     #lista-itens.modo-cheia .item-galeria-mini { width: 40px; height: 40px; }
   }
+  /* Na tela cheia, usa a largura disponível de verdade em vez de ficar
+     preso nos 620px da lista normal -- em tela grande sobrava espaço
+     vazio enorme nas laterais. */
+  body.modo-cheia-ativo .conteudo { max-width: 1180px; }
+  @media (min-width: 860px) {
+    body.modo-cheia-ativo #lista-itens.modo-cheia .item-principal { gap: 40px; }
+    body.modo-cheia-ativo #lista-itens.modo-cheia .item-galeria-principal { width: 460px; height: 460px; }
+    body.modo-cheia-ativo #lista-itens.modo-cheia .item-galeria-mini { width: 76px; height: 76px; }
+    body.modo-cheia-ativo #lista-itens.modo-cheia .item-galeria-minis { max-height: 460px; }
+    body.modo-cheia-ativo #lista-itens.modo-cheia .item-info { min-width: 340px; }
+    body.modo-cheia-ativo #lista-itens.modo-cheia .item-info h3 { font-size: 24px; }
+    body.modo-cheia-ativo #lista-itens.modo-cheia .categoria-inline { font-size: 13px; }
+    body.modo-cheia-ativo #lista-itens.modo-cheia .item-info .meta { font-size: 14px; }
+  }
 </style>
 </head>
 <body>
@@ -277,6 +291,7 @@
     const lista = document.getElementById("lista-itens");
     const navCheia = document.getElementById("nav-tela-cheia");
     lista.classList.toggle("modo-cheia", modoTelaCheia);
+    document.body.classList.toggle("modo-cheia-ativo", modoTelaCheia);
     document.getElementById("barra-modo").hidden = modoTelaCheia;
     navCheia.hidden = !modoTelaCheia;
     const cards = Array.from(lista.querySelectorAll(".cartao-item"));
