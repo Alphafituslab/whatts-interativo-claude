@@ -54,7 +54,13 @@ def ver_catalogo(token):
     conn = get_db()
     link = _carregar_link(conn, token)
     itens = conn.execute(
-        "SELECT * FROM whatsapp_catalogo_itens WHERE empresa_id = ? AND ativo = 1 ORDER BY ordem, nome",
+        # Pedido do Clayton (2026-09-06): "no portifólio colocar sempre por
+        # ordem de categoria... se não tiver colocar na sequência" -- linha
+        # vazia/nula sempre por último (a expressão vale 1 pra vazio/nulo,
+        # 0 pra quem tem categoria -- SQLite ordena falso antes de
+        # verdadeiro), depois por linha em si, e só então ordem/nome.
+        "SELECT * FROM whatsapp_catalogo_itens WHERE empresa_id = ? AND ativo = 1 "
+        "ORDER BY (linha IS NULL OR linha = ''), linha, ordem, nome",
         (link["empresa_id"],),
     ).fetchall()
     itens_publicos = []

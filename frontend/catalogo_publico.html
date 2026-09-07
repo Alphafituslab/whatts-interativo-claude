@@ -30,6 +30,10 @@
   .item-info h3 { margin: 0 0 3px; font-size: 15px; }
   .item-info .meta { font-size: 12px; color: var(--texto-suave); }
   .item-complemento { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--verde) 8%, transparent); font-size: 12.5px; color: var(--verde-escuro); white-space: pre-line; }
+  .titulo-categoria { margin: 22px 2px 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--verde-escuro); padding-bottom: 6px; border-bottom: 2px solid var(--verde); }
+  .titulo-categoria:first-child { margin-top: 4px; }
+  .bloco-nutricional { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--borda); }
+  .titulo-nutricional { margin: 0 0 6px; font-size: 12.5px; font-weight: 700; color: var(--texto); }
   .item-preco { font-size: 13px; color: var(--verde-escuro); font-weight: 700; margin-top: 4px; }
   .item-linha-qtd { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   .item-linha-qtd label { font-size: 12.5px; color: var(--texto-suave); }
@@ -134,15 +138,17 @@
   function htmlNutricional(item) {
     if (!item.nutrientes.length && !item.ingredientes && !item.modo_de_uso) return "";
     const linhasTabela = item.nutrientes.map((n) => `<tr><td>${escapeHtml(n.nome)}</td><td>${escapeHtml(n.quantidade || "")}</td><td>${escapeHtml(n.vd || "")}</td></tr>`).join("");
+    // Sempre aberta (não é mais <details> recolhível) -- pedido do
+    // Clayton: "pode até deixar a tabela assim sempre aberta".
     return `
-      <details>
-        <summary>Ver informação nutricional</summary>
+      <div class="bloco-nutricional">
+        <p class="titulo-nutricional">Informação nutricional</p>
         ${item.porcao ? `<p class="bloco-texto-nutri"><strong>Porção:</strong> ${escapeHtml(item.porcao)}</p>` : ""}
         ${linhasTabela ? `<table class="tabela-nutri"><thead><tr><th>Nutriente</th><th>Qtd.</th><th>%VD</th></tr></thead><tbody>${linhasTabela}</tbody></table>` : ""}
         ${item.observacao_nutricional ? `<p class="bloco-texto-nutri">${escapeHtml(item.observacao_nutricional)}</p>` : ""}
         ${item.ingredientes ? `<p class="bloco-texto-nutri"><strong>Ingredientes:</strong> ${escapeHtml(item.ingredientes)}</p>` : ""}
         ${item.modo_de_uso ? `<p class="bloco-texto-nutri"><strong>Modo de uso:</strong> ${escapeHtml(item.modo_de_uso)}</p>` : ""}
-      </details>`;
+      </div>`;
   }
 
   function _htmlMidia(im, classe) {
@@ -172,15 +178,27 @@
 
   function renderItens() {
     const lista = document.getElementById("lista-itens");
+    // O backend já manda ordenado por categoria (linha) -- aqui só
+    // detecta quando ela muda pra inserir um cabeçalho de seção.
+    // Pedido do Clayton: "no portifólio colocar sempre por ordem de
+    // categoria" + "só deve aparecer a que ela pertence".
+    let categoriaAnterior = undefined;
     lista.innerHTML = itens.map((item) => {
-      const meta = [item.forma, item.linha, item.sabor ? `Sabor ${item.sabor}` : null].filter(Boolean).join(" · ");
+      const categoria = (item.linha || "").trim();
+      let cabecalho = "";
+      if (categoria !== categoriaAnterior) {
+        cabecalho = `<h2 class="titulo-categoria">${categoria ? escapeHtml(categoria) : "Outros"}</h2>`;
+        categoriaAnterior = categoria;
+      }
+      const meta = [item.forma, item.sabor ? `Sabor ${item.sabor}` : null].filter(Boolean).join(" · ");
       return `
+      ${cabecalho}
       <div class="cartao-item" data-item="${item.id}">
         <div class="item-principal">
           ${htmlGaleria(item)}
           <div class="item-info">
             <h3>${escapeHtml(item.nome)}</h3>
-            <div class="meta">${escapeHtml(meta)}</div>
+            ${meta ? `<div class="meta">${escapeHtml(meta)}</div>` : ""}
             <div class="faixas-ref">${htmlFaixasRef(item)}</div>
             <div class="item-linha-qtd">
               <label>Quantidade</label>
