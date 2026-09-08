@@ -26,6 +26,63 @@ from .whatsapp import _classificar_tipo
 
 bp = Blueprint("catalogo", __name__, url_prefix="/api/v1/whatsapp/catalogo")
 
+# Ícone/cor padrão por categoria -- só entra em ação quando ninguém
+# personalizou ainda (ver whatsapp_catalogo_categorias). Pedido do
+# Clayton (2026-09-08): menu de categorias no catálogo público, com
+# ícone "que dá pra mudar depois". Casamento por palavra-chave (não por
+# nome exato) porque a categoria é texto livre no cadastro -- ex.: o
+# Clayton já cadastrou "imunidade" em minúsculo, sem o prefixo "Linha".
+_ICONES_POR_PALAVRA = [
+    (("imunidade",), "🛡️"),
+    (("peso", "emagre"), "⚖️"),
+    (("beauty", "beleza"), "✨"),
+    (("sono",), "🌙"),
+    (("cogni",), "🧠"),
+    (("osso", "articula"), "🦴"),
+    (("isolado",), "🧬"),
+    (("polivitam", "mineral", "vitamin"), "💊"),
+    (("fitness", "muscul", "hipertrofia"), "🏋️"),
+]
+_CORES_PADRAO = ["#1fa855", "#e08a2b", "#d3567c", "#5b6fd1", "#8552c9", "#4a7a92", "#0f9e7a", "#9aa832", "#c65b3a"]
+
+
+def _icone_padrao(nome):
+    baixo = (nome or "").lower()
+    for palavras, icone in _ICONES_POR_PALAVRA:
+        if any(p in baixo for p in palavras):
+            return icone
+    return "📦"
+
+
+def _cor_padrao(nome):
+    indice = sum(ord(c) for c in (nome or "")) % len(_CORES_PADRAO)
+    return _CORES_PADRAO[indice]
+
+
+def categorias_publicas(conn, empresa_id, nomes):
+    """Lista de categorias (nome + ícone + cor), na ordem recebida em
+    `nomes` -- usada tanto pelo cadastro (admin) quanto pela página
+    pública do cliente, pra sempre bater o mesmo ícone/cor nos dois
+    lugares."""
+    if not nomes:
+        return []
+    marcadores = ",".join("?" for _ in nomes)
+    salvas = {
+        r["nome"]: r for r in conn.execute(
+            f"SELECT nome, icone, cor FROM whatsapp_catalogo_categorias WHERE empresa_id = ? AND nome IN ({marcadores})",
+            (empresa_id, *nomes),
+        ).fetchall()
+    }
+    resultado = []
+    for nome in nomes:
+        s = salvas.get(nome)
+        resultado.append({
+            "nome": nome,
+            "icone": (s["icone"] if s and s["icone"] else _icone_padrao(nome)),
+            "cor": (s["cor"] if s and s["cor"] else _cor_padrao(nome)),
+        })
+    return resultado
+
 # Linhas do portifólio modelo -- só uma sugestão pro campo (não trava:
 # o cadastro aceita texto livre também, caso surja uma linha nova).
 LINHAS_SUGERIDAS = [
@@ -134,6 +191,37 @@ def _salvar_imagens(conn, item_id, imagens):
 @requires_admin
 def linhas_sugeridas():
     return jsonify(LINHAS_SUGERIDAS)
+
+
+@bp.get("/categorias")
+@requires_admin
+def listar_categorias():
+    conn = get_db()
+    linhas = conn.execute(
+        "SELECT DISTINCT linha FROM whatsapp_catalogo_itens "
+        "WHERE empresa_id = ? AND ativo = 1 AND linha IS NOT NULL AND linha != '' ORDER BY linha",
+        (g.empresa_id,),
+    ).fetchall()
+    return jsonify(categorias_publicas(conn, g.empresa_id, [l["linha"] for l in linhas]))
+
+
+@bp.put("/categorias")
+@requires_admin
+def salvar_categoria():
+    dados = request.get_json(silent=True) or {}
+    nome = (dados.get("nome") or "").strip()
+    if not nome:
+        raise ApiError("Categoria inválida.", status=400)
+    icone = (dados.get("icone") or "").strip() or None
+    cor = (dados.get("cor") or "").strip() or None
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO whatsapp_catalogo_categorias (empresa_id, nome, icone, cor, criado_em) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(empresa_id, nome) DO UPDATE SET icone = excluded.icone, cor = excluded.cor",
+        (g.empresa_id, nome, icone, cor, _now_iso()),
+    )
+    conn.commit()
+    return jsonify({"ok": True})
 
 
 @bp.get("/propostas")

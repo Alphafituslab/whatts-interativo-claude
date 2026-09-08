@@ -6570,13 +6570,16 @@
     renderShell(`
       <div class="wpp-cabecalho-tela">
         <h2 style="margin:0;">🗂️ Catálogo / Proposta</h2>
-        <button type="button" class="botao pequeno" data-acao="abrir-catalogo-item">+ Novo item</button>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="botao secundario pequeno" data-acao="abrir-categorias-catalogo">🎨 Ícones das categorias</button>
+          <button type="button" class="botao pequeno" data-acao="abrir-catalogo-item">+ Novo item</button>
+        </div>
       </div>
       <div class="wpp-abas" style="margin-bottom:14px; width:fit-content;">
         <button type="button" class="wpp-aba ativa" data-acao="catalogo-aba" data-aba="itens">Itens</button>
         <button type="button" class="wpp-aba" data-acao="catalogo-aba" data-aba="propostas">Propostas enviadas</button>
       </div>
-      <p class="dica">Cadastro dos itens e faixas de preço do portfólio de terceirização. Liberar/travar pro cliente é em <strong>Configuração → Catálogo/Proposta</strong>.</p>
+      <p class="dica">Cadastro dos itens e faixas de preço do portfólio de terceirização. Liberar/travar pro cliente é em <strong>Configuração → Catálogo/Proposta</strong>. As categorias vêm do campo "Linha" de cada item.</p>
       <div class="cartao">
         ${itens.length ? `
         <table class="tabela-simples">
@@ -6649,6 +6652,41 @@
       </div>`,
       "catalogo"
     );
+  }
+
+  async function modalCategoriasCatalogo() {
+    const categorias = await chamarApi("/whatsapp/catalogo/categorias");
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🎨 Ícones das categorias</h3>
+      <p class="dica">Cada categoria usa o ícone e a cor daqui no catálogo que o cliente vê. Sem categoria cadastrada ainda? Cadastre um item com "Linha" preenchida que ela aparece aqui.</p>
+      ${categorias.length ? `
+      <div style="display:flex; flex-direction:column; gap:10px; max-height:50vh; overflow-y:auto;">
+        ${categorias.map((c) => `
+          <div class="wpp-faixa-linha" data-categoria-linha data-nome="${escapeHtml(c.nome)}" style="display:flex; align-items:center; gap:10px;">
+            <input type="text" value="${escapeHtml(c.icone)}" data-categoria-icone maxlength="4" style="width:56px; text-align:center; font-size:18px;" title="Ícone (emoji)">
+            <input type="color" value="${c.cor}" data-categoria-cor style="width:40px; height:36px; padding:2px; flex-shrink:0;" title="Cor">
+            <strong style="flex:1;">${escapeHtml(c.nome)}</strong>
+          </div>`).join("")}
+      </div>` : `<p class="dica">Nenhuma categoria em uso ainda.</p>`}
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button>
+        ${categorias.length ? `<button type="button" class="botao" data-acao="salvar-categorias-catalogo">Salvar</button>` : ""}
+      </div>`);
+    return wrap;
+  }
+
+  async function _salvarCategoriasCatalogo(wrap) {
+    const linhas = wrap.querySelectorAll("[data-categoria-linha]");
+    for (const linha of linhas) {
+      await chamarApi("/whatsapp/catalogo/categorias", {
+        method: "PUT",
+        body: {
+          nome: linha.dataset.nome,
+          icone: linha.querySelector("[data-categoria-icone]").value,
+          cor: linha.querySelector("[data-categoria-cor]").value,
+        },
+      });
+    }
   }
 
   function _brlFormatar(v) {
@@ -8198,6 +8236,22 @@
         return renderWhatsapp(Number(alvo.dataset.id));
       }
       case "abrir-catalogo-item": return modalCatalogoItem(alvo.dataset.id ? Number(alvo.dataset.id) : null);
+      case "abrir-categorias-catalogo": return modalCategoriasCatalogo();
+      case "salvar-categorias-catalogo": {
+        const wrap = alvo.closest(".fundo-modal");
+        alvo.disabled = true;
+        alvo.textContent = "Salvando…";
+        try {
+          await _salvarCategoriasCatalogo(wrap);
+          wrap.remove();
+          definirFlash("ok", "Categorias atualizadas.");
+        } catch (erro) {
+          alvo.disabled = false;
+          alvo.textContent = "Salvar";
+          definirFlash("erro", erro.mensagem || "Não deu pra salvar as categorias.");
+        }
+        return;
+      }
       case "catalogo-aba":
         state._catalogoAba = alvo.dataset.aba;
         return renderCatalogo();

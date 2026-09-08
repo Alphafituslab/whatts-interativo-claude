@@ -92,6 +92,7 @@ SCHEMA_FILES = [
     "schema_077_menu_visibilidade.sql",
     "schema_078_catalogo_galeria.sql",
     "schema_079_feriados.sql",
+    "schema_080_catalogo_categorias.sql",
 ]
 
 

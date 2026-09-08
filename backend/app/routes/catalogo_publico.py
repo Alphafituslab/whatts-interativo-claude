@@ -20,6 +20,7 @@ from flask import Blueprint, jsonify, request
 
 from .. import whatsapp_service
 from ..context import ApiError, get_db
+from .catalogo import categorias_publicas
 
 bp = Blueprint("catalogo_publico", __name__, url_prefix="/api/v1/catalogo-publico")
 
@@ -97,8 +98,26 @@ def ver_catalogo(token):
     config = conn.execute(
         "SELECT logo_url FROM configuracoes_whatsapp WHERE empresa_id = ?", (link["empresa_id"],)
     ).fetchone()
+    # Categorias, na mesma ordem em que os itens já vêm ordenados (por
+    # linha) -- pedido do Clayton (2026-09-08): menu inicial por
+    # categoria no catálogo público, ícone editável depois no cadastro.
+    nomes_categorias = []
+    for it in itens_publicos:
+        nome = (it.get("linha") or "").strip()
+        if nome and nome not in nomes_categorias:
+            nomes_categorias.append(nome)
+    categorias = categorias_publicas(conn, link["empresa_id"], nomes_categorias)
+    contagem = {}
+    for it in itens_publicos:
+        nome = (it.get("linha") or "").strip()
+        if nome:
+            contagem[nome] = contagem.get(nome, 0) + 1
+    for c in categorias:
+        c["qtd"] = contagem.get(c["nome"], 0)
+
     return jsonify({
         "itens": itens_publicos,
+        "categorias": categorias,
         "contato_nome": conversa["contato_nome"] if conversa else None,
         "logo_url": (config["logo_url"] if config and config["logo_url"] else None),
     })
