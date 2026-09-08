@@ -1861,17 +1861,6 @@
     if (_audioCtx.state === "suspended") _audioCtx.resume().catch(() => {});
     return _audioCtx;
   }
-  // Destrava o som assim que a pessoa faz QUALQUER clique/toque/tecla na
-  // página (não precisa ser em nada relacionado a som) -- sem isso, se o
-  // primeiro som que o navegador tenta tocar for um aviso chegando
-  // sozinho (ex.: "chamar atenção" de um colega, sem a pessoa ter
-  // clicado em nada ainda), o navegador pode recusar liberar o áudio
-  // silenciosamente. Achado do Clayton (2026-09-08): "a buzina de aviso
-  // não tá funcionando" -- isso resolve o caso de quem só abriu a aba e
-  // ficou esperando, sem ainda ter clicado em nada.
-  ["click", "keydown", "touchstart"].forEach((ev) => {
-    document.addEventListener(ev, () => _contextoAudio(), { once: true, passive: true });
-  });
 
   function _tocarNotas(notas) {
     const ctx = _contextoAudio();
