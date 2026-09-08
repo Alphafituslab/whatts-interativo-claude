@@ -4800,6 +4800,11 @@
 
   let _geracaoRenderChatInterno = 0;
   async function renderChatInterno(conversaId) {
+    let _veioDaUltimaLembrada = false;
+    if (!conversaId && state.chatInternoEscopo === "minhas") {
+      const ultima = Number(localStorage.getItem("whatts_chat_interno_ultima") || 0);
+      if (ultima) { conversaId = ultima; _veioDaUltimaLembrada = true; }
+    }
     const _minhaGeracaoInterno = ++_geracaoRenderChatInterno;
     _limparCitacaoSeTrocou(`interno:${conversaId}`);
     _carregandoSeTrocouDeTela("chat-interno");
@@ -4820,7 +4825,14 @@
     let conversaAtual = null, mensagens = [];
     if (conversaId) {
       conversaAtual = conversas.find((c) => c.id === conversaId) || null;
-      if (!conversaAtual) {
+      if (!conversaAtual && _veioDaUltimaLembrada) {
+        // Não está mais entre as "Minhas" abertas -- foi encerrada (ou
+        // a pessoa perdeu acesso) desde a última vez. Não busca em
+        // "Encerradas"/"Todas": só volta sozinho pra conversa se ela
+        // ainda estiver em andamento, do contrário cai na lista normal.
+        localStorage.removeItem("whatts_chat_interno_ultima");
+        conversaId = null;
+      } else if (!conversaAtual) {
         // Pode ser uma conversa de outro escopo acessada direto pelo link
         // (ex.: aba "Minhas" selecionada mas o link é de uma encerrada) —
         // busca nos outros escopos antes de desistir. Em PARALELO (não
@@ -4854,6 +4866,9 @@
         // Conversas (WhatsApp).
         if (conversaAtual.criado_por_id === usuario.id) conversaAtual.nao_lidas_criador = 0;
         else if (conversaAtual.participante_id === usuario.id) conversaAtual.nao_lidas_participante = 0;
+        if (escopo === "minhas") {
+          try { localStorage.setItem("whatts_chat_interno_ultima", String(conversaId)); } catch (e) { /* localStorage bloqueado -- só não lembra da próxima vez */ }
+        }
       }
     }
 
