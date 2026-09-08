@@ -219,6 +219,8 @@ def obter_configuracao(conn, empresa_id: int):
             "ia_ativa": 0, "ia_api_key": None, "ia_modo": "sugestao", "ia_openai_api_key": None,
             "catalogo_proposta_ativo": 0,
             "menu_itens_ocultos": "[]",
+            "notificacao_desktop_ativo": 1,
+            "notificacao_desktop_usuarios_ocultos": "[]",
         }
     return dict(row)
 
@@ -253,6 +255,11 @@ def config_publica(config):
         d["menu_itens_ocultos"] = json.loads(d.get("menu_itens_ocultos") or "[]")
     except (TypeError, ValueError):
         d["menu_itens_ocultos"] = []
+    d["notificacao_desktop_ativo"] = bool(d.get("notificacao_desktop_ativo", 1))
+    try:
+        d["notificacao_desktop_usuarios_ocultos"] = json.loads(d.get("notificacao_desktop_usuarios_ocultos") or "[]")
+    except (TypeError, ValueError):
+        d["notificacao_desktop_usuarios_ocultos"] = []
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
     return d
 
@@ -451,6 +458,19 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         anterior_menu = anterior.get("menu_itens_ocultos")
         menu_itens_ocultos = json.dumps(anterior_menu) if isinstance(anterior_menu, list) else (anterior.get("menu_itens_ocultos") or "[]")
 
+    # Chamar atenção mesmo minimizado (chamada de voz + "chamar
+    # atenção" no chat interno) -- ligado por padrão; admin escolhe
+    # quais usuários ficam de fora da lista (o resto do time recebe).
+    notificacao_desktop_ativo = (
+        (1 if dados.get("notificacao_desktop_ativo") else 0) if "notificacao_desktop_ativo" in dados
+        else (1 if anterior.get("notificacao_desktop_ativo") else 0)
+    )
+    if "notificacao_desktop_usuarios_ocultos" in dados:
+        notificacao_desktop_usuarios_ocultos = json.dumps([int(u) for u in (dados.get("notificacao_desktop_usuarios_ocultos") or []) if str(u).isdigit()])
+    else:
+        anterior_notif = anterior.get("notificacao_desktop_usuarios_ocultos")
+        notificacao_desktop_usuarios_ocultos = json.dumps(anterior_notif) if isinstance(anterior_notif, list) else (anterior.get("notificacao_desktop_usuarios_ocultos") or "[]")
+
     # Localização padrão da empresa — formulário próprio em Configuração.
     if "localizacao_nome" in dados:
         localizacao_nome = (dados.get("localizacao_nome") or "").strip() or None
@@ -478,8 +498,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
-                                              catalogo_proposta_ativo, menu_itens_ocultos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -522,6 +542,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             ia_openai_api_key = excluded.ia_openai_api_key,
             catalogo_proposta_ativo = excluded.catalogo_proposta_ativo,
             menu_itens_ocultos = excluded.menu_itens_ocultos,
+            notificacao_desktop_ativo = excluded.notificacao_desktop_ativo,
+            notificacao_desktop_usuarios_ocultos = excluded.notificacao_desktop_usuarios_ocultos,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -535,7 +557,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
-         catalogo_proposta_ativo, menu_itens_ocultos),
+         catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos),
     )
     return obter_configuracao(conn, empresa_id)
 

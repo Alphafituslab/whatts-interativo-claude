@@ -338,7 +338,32 @@
       const r = await chamarApi("/whatsapp/menu-visibilidade");
       state._menuOcultos = r.ocultos || [];
       state._catalogoPropostaAtivo = !!r.catalogo_proposta_ativo;
-    } catch (e) { state._menuOcultos = []; state._catalogoPropostaAtivo = false; }
+      state._notifDesktopAtiva = !!r.notificacao_desktop_ativa;
+    } catch (e) { state._menuOcultos = []; state._catalogoPropostaAtivo = false; state._notifDesktopAtiva = false; }
+    // Pede a permissão de notificação do navegador cedo (só se essa
+    // pessoa realmente vai precisar dela) -- clicar na notificação
+    // depois é o único jeito que o JS tem de "acordar" uma janela
+    // minimizada, por segurança do próprio navegador. Pedido do
+    // Clayton (2026-09-08): "se chamar atenção abrindo a tela o
+    // usuário não pode dizer que não viu".
+    if (state._notifDesktopAtiva && window.Notification && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }
+
+  // Mostra uma notificação de verdade do navegador quando a pessoa
+  // pode não estar olhando (aba minimizada, em outra aba, ou janela
+  // sem foco) -- é isso que aparece por cima de tudo, mesmo com a
+  // janela minimizada, e clicar nela restaura/foca a janela sozinho.
+  function _notificarSeMinimizado(titulo, corpo, tag) {
+    if (!state._notifDesktopAtiva) return;
+    window.focus(); // melhor esforço: se só for outra aba na mesma janela, isso já resolve
+    if (!document.hidden && document.hasFocus()) return; // pessoa já está olhando -- o banner na tela já basta
+    if (!(window.Notification && Notification.permission === "granted")) return;
+    try {
+      const notif = new Notification(titulo, { body: corpo, tag, requireInteraction: true });
+      notif.onclick = () => { window.focus(); notif.close(); };
+    } catch (e) { /* navegador pode recusar -- o toque/banner na tela já avisa de qualquer forma */ }
   }
   function _itemMenuVisivel(chave) {
     const u = state.usuarioAtual;
@@ -2284,6 +2309,7 @@
           const nomeDeQuemChamou = souCriador ? c.participante_nome : c.criado_por_nome;
           tocarAvisoAtencao();
           _mostrarAvisoAtencao(nomeDeQuemChamou, c.id);
+          _notificarSeMinimizado("📣 Chamando sua atenção", `${nomeDeQuemChamou || "Alguém"} está chamando sua atenção no chat interno!`, "chamar-atencao-" + c.id);
         }
       }
     } catch (e) { /* próxima tentativa corrige */ }
@@ -2687,6 +2713,7 @@
     banner.querySelector("[data-wpp-chamada-recusar]").addEventListener("click", () => _recusarChamada(chamada));
     document.body.appendChild(banner);
     _tocarToqueChamada();
+    _notificarSeMinimizado("📞 Chamada recebida", `${chamada.de_nome || "Alguém"} está te ligando…`, "chamada-recebendo");
     return banner;
   }
 
@@ -5839,6 +5866,25 @@
          <form data-form="salvar-catalogo-config">
            <div class="campo campo-checkbox">
              <label><input type="checkbox" name="catalogo_proposta_ativo" ${config.catalogo_proposta_ativo ? "checked" : ""}> Liberar catálogo pro cliente</label>
+           </div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
+         </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">🔔 Chamar atenção mesmo com a tela minimizada</h3>
+         <p class="dica">Quando alguém liga (chamada de voz) ou usa "chamar atenção" no chat interno, o navegador abre um aviso por cima de tudo -- mesmo com a aba minimizada ou em outra aba -- e clicar nele volta pra tela na hora. Útil pra quem não tem caixa de som: assim, pelo menos visualmente, a pessoa vê o chamado.</p>
+         <form data-form="salvar-notificacao-desktop">
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="notificacao_desktop_ativo" ${config.notificacao_desktop_ativo ? "checked" : ""}> Ativar (o navegador de cada pessoa ainda precisa autorizar a notificação uma vez)</label>
+           </div>
+           <p class="dica" style="margin-top:10px;">Desmarque quem NÃO deve receber esse aviso reforçado (o resto do time recebe):</p>
+           <div class="escolha-lista">
+             ${usuarios.filter((u) => u.ativo).map((u) => `
+               <label class="escolha-item">
+                 <input type="checkbox" name="notif_usuario" value="${u.id}" ${(config.notificacao_desktop_usuarios_ocultos || []).includes(u.id) ? "" : "checked"}>
+                 <span class="escolha-texto">${escapeHtml(u.nome)}</span>
+               </label>`).join("")}
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
@@ -9457,6 +9503,22 @@
           return renderWhatsappConfiguracao();
         }
         definirFlash("ok", "Configuração do assistente de IA salva.");
+        return renderWhatsappConfiguracao();
+      }
+      case "salvar-notificacao-desktop": {
+        const marcadosNotif = new Set([...form.querySelectorAll('input[name="notif_usuario"]:checked')].map((c) => c.value));
+        const todosIds = [...form.querySelectorAll('input[name="notif_usuario"]')].map((c) => c.value);
+        const notifOcultos = todosIds.filter((id) => !marcadosNotif.has(id)).map(Number);
+        try {
+          await chamarApi("/whatsapp/configuracao", {
+            method: "PUT",
+            body: { notificacao_desktop_ativo: !!dados.get("notificacao_desktop_ativo"), notificacao_desktop_usuarios_ocultos: notifOcultos },
+          });
+        } catch (erro) {
+          definirFlash("erro", erro.mensagem || "Não deu pra salvar.");
+          return renderWhatsappConfiguracao();
+        }
+        definirFlash("ok", "Salvo — vale a partir do próximo login/atualização de página de cada usuário.");
         return renderWhatsappConfiguracao();
       }
       case "salvar-menu-visibilidade": {

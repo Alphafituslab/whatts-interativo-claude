@@ -223,7 +223,20 @@ def menu_visibilidade():
         ocultos = json.loads(ocultos) if isinstance(ocultos, str) else (ocultos or [])
     except (TypeError, ValueError):
         ocultos = []
-    return jsonify({"ocultos": ocultos, "catalogo_proposta_ativo": bool(config.get("catalogo_proposta_ativo"))})
+    # "Chamar atenção mesmo minimizado" (chamada de voz + chamar
+    # atenção do chat interno) -- já resolvido pro usuário que está
+    # perguntando: ligado geral E ele não está na lista de exceções.
+    notif_ocultos = config.get("notificacao_desktop_usuarios_ocultos")
+    try:
+        notif_ocultos = json.loads(notif_ocultos) if isinstance(notif_ocultos, str) else (notif_ocultos or [])
+    except (TypeError, ValueError):
+        notif_ocultos = []
+    notificacao_desktop_ativa = bool(config.get("notificacao_desktop_ativo", True)) and g.usuario_atual["id"] not in notif_ocultos
+    return jsonify({
+        "ocultos": ocultos,
+        "catalogo_proposta_ativo": bool(config.get("catalogo_proposta_ativo")),
+        "notificacao_desktop_ativa": notificacao_desktop_ativa,
+    })
 
 
 @bp.put("/configuracao")
