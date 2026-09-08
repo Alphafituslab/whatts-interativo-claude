@@ -2872,14 +2872,14 @@
       pararPollingLembretes();
       pararPollingWhatsapp();
       pararPollingStatusWhatsapp();
-      // Sai da conta e recarrega de verdade — o Clayton preferiu assim
-      // (2026-08-27): um recarregar sem sair as vezes nao bastava pra
-      // garantir que o navegador largasse o JS antigo que ja estava
-      // rodando em memoria. Deslogar forca uma pagina nova do zero, sem
-      // chance de sobrar nada da versao anterior.
-      try { await chamarApi("/auth/logout", { method: "POST", body: { refresh_token: state.refreshToken } }); } catch (e) { /* ignora */ }
-      limparSessao();
-      localStorage.setItem("whatts_flash_pos_reload", "O sistema foi atualizado — faça login novamente pra usar a versão mais recente.");
+      // Recarrega a página (sem deslogar) -- pedido do Clayton
+      // (2026-09-08): "consegue fazer atualizar sem deslogar o
+      // usuário?". Um location.reload() sozinho já garante 100% que o
+      // navegador larga o JS antigo da memória (é a mesma garantia que
+      // o logout dava antes) -- só que o refresh_token continua salvo,
+      // então a sessão volta restaurada sozinha (ver montarRota),
+      // sem precisar digitar email/senha de novo.
+      localStorage.setItem("whatts_flash_pos_reload", "Sistema atualizado.");
       location.reload();
     } catch (e) { /* próxima tentativa corrige */ }
   }
