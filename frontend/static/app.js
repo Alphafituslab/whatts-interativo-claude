@@ -1153,9 +1153,19 @@
     const item = e.target.closest("[data-wpp-interno-id]");
     if (!item) return;
     e.preventDefault();
+    const id = item.dataset.wppInternoId;
     const etiquetas = await obterEtiquetas();
-    abrirMenuContexto(e.clientX, e.clientY,
-      _itensEtiquetaMenu(item.dataset.wppInternoId, JSON.parse(item.dataset.wppTags || "[]"), etiquetas, true));
+    // Encerrar (ou reabrir, se já tiver na aba Encerradas) -- pedido do
+    // Clayton (2026-09-08): "ao clicar com o direito sobre a conversa no
+    // chat interno ter a opção de encerrar atendimento também", igual já
+    // existe no botão direito das conversas de WhatsApp.
+    const itemEncerrar = state.chatInternoEscopo === "encerradas"
+      ? { acao: "reabrir-interno", id, rotulo: "↩️ Reabrir conversa" }
+      : { acao: "fechar-interno", id, rotulo: "✅ Encerrar atendimento" };
+    abrirMenuContexto(e.clientX, e.clientY, [
+      itemEncerrar,
+      ..._itensEtiquetaMenu(id, JSON.parse(item.dataset.wppTags || "[]"), etiquetas, true),
+    ]);
   });
 
   document.addEventListener("contextmenu", async (e) => {
