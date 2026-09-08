@@ -337,7 +337,8 @@
     try {
       const r = await chamarApi("/whatsapp/menu-visibilidade");
       state._menuOcultos = r.ocultos || [];
-    } catch (e) { state._menuOcultos = []; }
+      state._catalogoPropostaAtivo = !!r.catalogo_proposta_ativo;
+    } catch (e) { state._menuOcultos = []; state._catalogoPropostaAtivo = false; }
   }
   function _itemMenuVisivel(chave) {
     const u = state.usuarioAtual;
@@ -3932,7 +3933,7 @@
           <button type="button" class="botao secundario pequeno ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Só a equipe vê, nunca vai pro cliente">🗒️ Notas internas${(notas || []).length ? ` (${notas.length})` : ""}</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
-          ${!conversa.eh_grupo && state.usuarioAtual.admin ? `<button type="button" class="botao secundario pequeno" data-acao="enviar-catalogo-proposta" data-id="${conversa.id}" title="Manda um link pro cliente escolher item e quantidade — a proposta volta pronta pra esta conversa">🗂️ Enviar catálogo</button>` : ""}
+          ${!conversa.eh_grupo && state._catalogoPropostaAtivo ? `<button type="button" class="botao secundario pequeno" data-acao="enviar-catalogo-proposta" data-id="${conversa.id}" title="Manda um link pro cliente escolher item e quantidade — a proposta volta pronta pra esta conversa">🗂️ Enviar catálogo</button>` : ""}
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
             : `<button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>`}

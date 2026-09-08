@@ -209,7 +209,13 @@ def menu_visibilidade():
     """Pra QUALQUER usuário logado (não só admin) saber quais itens de
     menu o admin escondeu -- sem expor o resto da configuração (que
     continua admin-only). Admin/Master sempre vê o menu inteiro no
-    frontend, independente do que vier aqui."""
+    frontend, independente do que vier aqui.
+
+    catalogo_proposta_ativo vai junto pelo mesmo motivo -- pedido do
+    Clayton (2026-09-08): "quando eu marcar liberado, todos os usuários
+    devem poder enviar o catálogo" -- o botão "Enviar catálogo" numa
+    conversa é de QUALQUER usuário (a rota que envia já só exige estar
+    logado), só o frontend não sabia se a chave geral tava ligada."""
     conn = get_db()
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
     ocultos = config.get("menu_itens_ocultos")
@@ -217,7 +223,7 @@ def menu_visibilidade():
         ocultos = json.loads(ocultos) if isinstance(ocultos, str) else (ocultos or [])
     except (TypeError, ValueError):
         ocultos = []
-    return jsonify({"ocultos": ocultos})
+    return jsonify({"ocultos": ocultos, "catalogo_proposta_ativo": bool(config.get("catalogo_proposta_ativo"))})
 
 
 @bp.put("/configuracao")
