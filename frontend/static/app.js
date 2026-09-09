@@ -1153,7 +1153,7 @@
       return {
         acao: "alternar-etiqueta-conversa",
         id: conversaId,
-        rotulo: escapeHtml(t.nome),
+        rotulo: t.nome,
         cor: t.cor || "#6b7280",
         marcado: tem,
         dados: { tags: JSON.stringify(depois), interna: interna ? "1" : "0" },
@@ -1191,7 +1191,7 @@
         .map(([k, v]) => ` data-${k}="${escapeHtml(String(v))}"`).join("");
       const bolinha = it.cor ? `<span class="wpp-menu-contexto-cor" style="background:${escapeHtml(it.cor)};"></span>` : "";
       const marca = it.marcado === undefined ? "" : `<span class="wpp-menu-contexto-marca">${it.marcado ? "✓" : ""}</span>`;
-      return `<button type="button" class="wpp-menu-contexto-item" data-acao="${it.acao}" data-id="${it.id}"${extras}>${marca}${bolinha}${it.rotulo}</button>`;
+      return `<button type="button" class="wpp-menu-contexto-item" data-acao="${it.acao}" data-id="${it.id}"${extras}>${marca}${bolinha}${escapeHtml(it.rotulo)}</button>`;
     }).join("");
     document.body.appendChild(menu);
     const largura = menu.offsetWidth, altura = menu.offsetHeight;
@@ -2123,8 +2123,12 @@
       const eu = state.usuarioAtual && state.usuarioAtual.id;
       // Mostra o OUTRO lado da conversa, não quem criou.
       const outro = item.interna_criador_id === eu ? item.interna_participante : item.interna_criador;
+      // escapeHtml aqui é essencial -- "outro" é o nome/apelido de um
+      // colega (editável), e este rótulo entra direto em innerHTML em
+      // várias telas (lembretes, atividades). Achado numa varredura de
+      // segurança (2026-09-09).
       return {
-        rotulo: `${outro || "—"} <span class="selo">interno</span>`,
+        rotulo: `${escapeHtml(outro || "—")} <span class="selo">interno</span>`,
         href: `#/chat-interno/${item.chat_interno_conversa_id}`,
       };
     }
@@ -8251,7 +8255,7 @@
         abrirMenuContexto(rect.left, rect.bottom, [
           { separador: true, rotulo: "Excluir qual etiqueta?" },
           ...etiquetas.map((t) => ({
-            acao: "excluir-etiqueta-menu", id: t.id, rotulo: escapeHtml(t.nome), cor: t.cor || "#6b7280",
+            acao: "excluir-etiqueta-menu", id: t.id, rotulo: t.nome, cor: t.cor || "#6b7280",
             dados: { nome: t.nome, interna: interna ? "1" : "0" },
           })),
         ]);

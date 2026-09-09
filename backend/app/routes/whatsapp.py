@@ -132,6 +132,26 @@ def _classificar_tipo(nome_arquivo: str) -> str:
     return "documento"
 
 
+# Anexo de conversa aceita qualquer coisa como "documento" (PDF, Excel,
+# Word... o time manda de tudo pro cliente) -- mas executável não tem
+# motivo nenhum de ser mandado como anexo de atendimento, e a rota que
+# serve os anexos, embora já force download pra quem não é imagem/
+# vídeo/áudio/PDF (ver baixar_anexo), não deixa de ser um jeito de
+# hospedar/distribuir malware pelo próprio domínio da empresa. Achado
+# numa varredura de segurança (2026-09-09) -- bloqueia na entrada em
+# vez de confiar só na defesa na saída.
+EXTENSOES_PERIGOSAS = {
+    "exe", "msi", "bat", "cmd", "com", "scr", "pif", "vbs", "vbe", "js", "jse",
+    "wsf", "wsh", "ps1", "psm1", "jar", "app", "dmg", "sh", "bash", "dll", "cpl",
+    "gadget", "hta", "apk", "reg", "lnk",
+}
+
+
+def _extensao_perigosa(nome_arquivo: str) -> bool:
+    ext = nome_arquivo.rsplit(".", 1)[-1].lower() if "." in nome_arquivo else ""
+    return ext in EXTENSOES_PERIGOSAS
+
+
 def _now_iso():
     return whatsapp_service._now_iso()
 
@@ -3455,6 +3475,8 @@ def agendar_mensagem(conversa_id):
     tipo, midia_url, nome_arquivo = "texto", None, None
     arquivo = request.files.get("arquivo") if eh_multipart else None
     if arquivo and arquivo.filename:
+        if _extensao_perigosa(arquivo.filename):
+            raise ApiError("Esse tipo de arquivo não pode ser enviado por aqui.", status=400)
         dados_bytes = arquivo.read()
         if len(dados_bytes) > MAX_ANEXO_MB * 1024 * 1024:
             raise ApiError(f"Arquivo maior que o limite de {MAX_ANEXO_MB}MB.", status=400)
@@ -3652,6 +3674,8 @@ def enviar_anexo(conversa_id):
     arquivo = request.files.get("arquivo")
     if not arquivo or not arquivo.filename:
         raise ApiError("Nenhum arquivo enviado.", status=400)
+    if _extensao_perigosa(arquivo.filename):
+        raise ApiError("Esse tipo de arquivo não pode ser enviado por aqui.", status=400)
 
     dados_bytes = arquivo.read()
     limite_mb = _limite_anexo_mb(usuario)

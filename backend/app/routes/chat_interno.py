@@ -417,6 +417,8 @@ def enviar_anexo(conversa_id):
     arquivo = request.files.get("arquivo")
     if not arquivo or not arquivo.filename:
         raise ApiError("Nenhum arquivo enviado.", status=400)
+    if rotas_whatsapp._extensao_perigosa(arquivo.filename):
+        raise ApiError("Esse tipo de arquivo não pode ser enviado por aqui.", status=400)
     dados_bytes = arquivo.read()
     if len(dados_bytes) > rotas_whatsapp.MAX_ANEXO_MB * 1024 * 1024:
         raise ApiError(f"Arquivo maior que o limite de {rotas_whatsapp.MAX_ANEXO_MB}MB.", status=400)
