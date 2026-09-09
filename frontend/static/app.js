@@ -212,23 +212,48 @@
     return dados;
   }
 
+  // O token de acesso dura 30min; passado isso, o próximo pedido de
+  // QUALQUER um dos vários verificadores automáticos rodando em paralelo
+  // (mensagem nova, chamada, versão, SLA, lembretes...) recebe 401 quase
+  // ao mesmo tempo. Cada renovação troca o refresh token por um novo e
+  // invalida o antigo (rotação, por segurança) -- sem essa fila aqui,
+  // dois pedidos de renovação disparados juntos corriam: o primeiro
+  // ganhava e trocava o token; o segundo, com o token já trocado, era
+  // recusado pelo servidor e deslogava a pessoa à toa, mesmo com a
+  // sessão em dia. Achado do Clayton (2026-09-09): "meu está
+  // desconectando depois de um tempo de inatividade" + "o chat do Luiz
+  // caindo direto" -- quem tem mais coisa rodando ao mesmo tempo (mais
+  // telas, chamada em andamento) tromba nessa corrida com mais
+  // frequência. Agora só o PRIMEIRO pedido de renovação de cada vez
+  // realmente chama o servidor; qualquer outro que chegue enquanto esse
+  // ainda não terminou só espera o mesmo resultado, em vez de disparar
+  // o seu próprio.
+  let _renovacaoEmAndamento = null;
   async function tentarRenovarToken() {
+    if (_renovacaoEmAndamento) return _renovacaoEmAndamento;
+    _renovacaoEmAndamento = (async () => {
+      try {
+        // Também com limite de tempo: essa chamada acontece bem no início,
+        // ANTES de qualquer tela abrir ("Restaurando sessão…") -- se
+        // travasse sem limite, a tela nunca chegava a abrir de jeito
+        // nenhum, o que parecia bem pior do que só um pedido lento.
+        const resp = await _fetchComLimite(API + "/auth/refresh", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: state.refreshToken }),
+        });
+        if (!resp.ok) return false;
+        const dados = await resp.json();
+        state.accessToken = dados.access_token;
+        state.refreshToken = dados.refresh_token;
+        localStorage.setItem("whatts_refresh_token", state.refreshToken);
+        return true;
+      } catch (e) { return false; }
+    })();
     try {
-      // Também com limite de tempo: essa chamada acontece bem no início,
-      // ANTES de qualquer tela abrir ("Restaurando sessão…") -- se
-      // travasse sem limite, a tela nunca chegava a abrir de jeito
-      // nenhum, o que parecia bem pior do que só um pedido lento.
-      const resp = await _fetchComLimite(API + "/auth/refresh", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: state.refreshToken }),
-      });
-      if (!resp.ok) return false;
-      const dados = await resp.json();
-      state.accessToken = dados.access_token;
-      state.refreshToken = dados.refresh_token;
-      localStorage.setItem("whatts_refresh_token", state.refreshToken);
-      return true;
-    } catch (e) { return false; }
+      return await _renovacaoEmAndamento;
+    } finally {
+      _renovacaoEmAndamento = null;
+    }
   }
 
   function limparSessao() {
