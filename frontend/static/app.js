@@ -292,7 +292,27 @@
   }
   window.addEventListener("hashchange", montarRota);
 
+  let _timerReconexao = null;
+  function _semConexaoReconectarSozinho() {
+    app.innerHTML = `
+      <div class="carregando-inicial" style="flex-direction:column; gap:14px;">
+        <div>Sem conexão com o servidor no momento.</div>
+        <div class="texto-suave" style="font-size:12.5px;" data-reconexao-contagem>Tentando de novo sozinho em 5s…</div>
+        <button type="button" class="botao secundario pequeno" data-acao="tentar-de-novo-sessao">Tentar agora</button>
+      </div>`;
+    if (_timerReconexao) clearTimeout(_timerReconexao);
+    let restante = 5;
+    const contagem = setInterval(() => {
+      restante -= 1;
+      const el = document.querySelector("[data-reconexao-contagem]");
+      if (el) el.textContent = restante > 0 ? `Tentando de novo sozinho em ${restante}s…` : "Tentando de novo…";
+      if (restante <= 0) clearInterval(contagem);
+    }, 1000);
+    _timerReconexao = setTimeout(() => { clearInterval(contagem); montarRota(); }, 5000);
+  }
+
   async function montarRota() {
+    if (_timerReconexao) { clearTimeout(_timerReconexao); _timerReconexao = null; }
     const rota = location.hash || "#/login";
     pararPollingWhatsapp();
     pararPollingStatusWhatsapp();
@@ -306,30 +326,11 @@
     if (!state.usuarioAtual) {
       app.innerHTML = '<div class="carregando-inicial">Restaurando sessão…</div>';
       const ok = await tentarRenovarToken();
-      if (ok === null) {
-        // Sem conexão com o servidor agora -- não desloga (pedido do
-        // Clayton, 2026-09-09: "não desconectar ninguém em hipótese
-        // nenhuma"). Mostra pra tentar de novo, sem mexer na sessão
-        // salva -- assim que a internet voltar, "Tentar de novo" (ou só
-        // recarregar) restaura normalmente.
-        app.innerHTML = `
-          <div class="carregando-inicial" style="flex-direction:column; gap:14px;">
-            <div>Sem conexão com o servidor no momento.</div>
-            <button type="button" class="botao" data-acao="tentar-de-novo-sessao">Tentar de novo</button>
-          </div>`;
-        return;
-      }
+      if (ok === null) { _semConexaoReconectarSozinho(); return; }
       if (!ok) { limparSessao(); return renderLogin(); }
       try { state.usuarioAtual = await chamarApi("/auth/me"); }
       catch (e) {
-        if (e.semConexao) {
-          app.innerHTML = `
-            <div class="carregando-inicial" style="flex-direction:column; gap:14px;">
-              <div>Sem conexão com o servidor no momento.</div>
-              <button type="button" class="botao" data-acao="tentar-de-novo-sessao">Tentar de novo</button>
-            </div>`;
-          return;
-        }
+        if (e.semConexao) { _semConexaoReconectarSozinho(); return; }
         limparSessao(); return renderLogin();
       }
       await _obterMenuOcultos();
