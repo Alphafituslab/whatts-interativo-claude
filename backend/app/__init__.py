@@ -155,6 +155,29 @@ def create_app(test_config: dict = None) -> Flask:
         # atualizacao, nao servia pra nada.
         resposta.headers["Cache-Control"] = "no-store, must-revalidate"
         resposta.headers["Pragma"] = "no-cache"
+        # CSP na página principal (onde vive a sessão de verdade, com o
+        # token de acesso) -- index.html não tem NENHUM script/estilo
+        # inline (só /static/app.js e /static/styles.css externos), o
+        # que dá pra travar script-src em 'self' sem quebrar nada. Isso
+        # neutraliza boa parte de um XSS futuro mesmo que escape da
+        # revisão de código (ex.: um payload em <img onerror=...> nem
+        # chega a rodar). style-src precisa de 'unsafe-inline' porque o
+        # app inteiro usa style="..." inline nos templates -- travar
+        # isso quebraria o layout todo, então mantém liberado só pra
+        # estilo (não para script). NÃO aplica no /catalogo/<token>
+        # (catálogo público) porque essa página usa <script> inline de
+        # propósito e não carrega token de sessão nenhum -- risco bem
+        # menor. Achado numa varredura de segurança (2026-09-09).
+        resposta.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            # pps.whatsapp.net: foto de perfil do CONTATO vem direto do CDN
+            # do próprio WhatsApp (a Evolution API só devolve o link, não
+            # baixa a imagem) -- achado testando ao vivo, sem isso as fotos
+            # de contato sumiam todas.
+            "img-src 'self' data: blob: https://pps.whatsapp.net; media-src 'self' blob:; font-src 'self'; "
+            "connect-src 'self'; object-src 'none'; base-uri 'self'; "
+            "frame-ancestors 'self'; form-action 'self'"
+        )
         return resposta
 
     @app.get("/catalogo/<token>")
