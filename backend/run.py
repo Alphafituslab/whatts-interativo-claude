@@ -43,4 +43,17 @@ if __name__ == "__main__":
     # a tela aberta: cada pessoa consulta novidades várias vezes por
     # segundo, e uma consulta um pouco mais lenta (envio de mídia,
     # transcrição de áudio) segurava a fila de todo mundo.
-    serve(app, host=host, port=porta, threads=int(os.environ.get("WPP_THREADS", "24")))
+    # connection_limit: o padrão do waitress (100) tava sendo estourado
+    # de verdade em produção -- achado investigando o Clayton relatar
+    # gente caindo/desconectando (2026-09-09): o log mostrava "total
+    # open connections reached the connection limit, no longer
+    # accepting new connections" se repetindo. Com uma equipe inteira
+    # com a tela aberta (cada um consultando novidades várias vezes por
+    # minuto em paralelo) mais uploads/downloads de mídia (que seguram a
+    # conexão mais tempo), 100 é pouco -- sobe pra 300 de propósito, bem
+    # acima das 48 threads, pra sobrar folga de verdade.
+    serve(
+        app, host=host, port=porta,
+        threads=int(os.environ.get("WPP_THREADS", "24")),
+        connection_limit=int(os.environ.get("WPP_CONNECTION_LIMIT", "300")),
+    )
