@@ -193,7 +193,18 @@
       if (renovou) {
         headers["Authorization"] = "Bearer " + state.accessToken;
         resp = await _fetchComLimite(API + caminho, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+      } else if (renovou === null) {
+        // Não deu pra confirmar com o servidor se a sessão é válida --
+        // internet instável, não sessão inválida. NUNCA desloga por
+        // causa disso (pedido do Clayton, 2026-09-09): esse pedido
+        // específico falha agora, mas a sessão continua de pé pro
+        // próximo (poll seguinte, ou a pessoa tentando de novo).
+        const erro = new Error("Sem conexão com o servidor. Tente de novo em instantes.");
+        erro.semConexao = true;
+        throw erro;
       }
+      // renovou === false (o servidor recusou o refresh token de vez):
+      // segue pro tratamento normal abaixo, que aí sim desloga.
     }
 
     let dados = {};
@@ -232,22 +243,31 @@
   async function tentarRenovarToken() {
     if (_renovacaoEmAndamento) return _renovacaoEmAndamento;
     _renovacaoEmAndamento = (async () => {
+      // Também com limite de tempo: essa chamada acontece bem no início,
+      // ANTES de qualquer tela abrir ("Restaurando sessão…") -- se
+      // travasse sem limite, a tela nunca chegava a abrir de jeito
+      // nenhum, o que parecia bem pior do que só um pedido lento.
+      let resp;
       try {
-        // Também com limite de tempo: essa chamada acontece bem no início,
-        // ANTES de qualquer tela abrir ("Restaurando sessão…") -- se
-        // travasse sem limite, a tela nunca chegava a abrir de jeito
-        // nenhum, o que parecia bem pior do que só um pedido lento.
-        const resp = await _fetchComLimite(API + "/auth/refresh", {
+        resp = await _fetchComLimite(API + "/auth/refresh", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refresh_token: state.refreshToken }),
         });
-        if (!resp.ok) return false;
+      } catch (e) {
+        // Não deu pra nem falar com o servidor -- internet instável, não
+        // é a sessão que é inválida. Pedido do Clayton (2026-09-09):
+        // "não desconectar ninguém em hipótese nenhuma" -- null avisa
+        // quem chamou pra NÃO deslogar por causa disso.
+        return null;
+      }
+      try {
+        if (!resp.ok) return false; // servidor respondeu recusando de vez -- aí sim a sessão é inválida
         const dados = await resp.json();
         state.accessToken = dados.access_token;
         state.refreshToken = dados.refresh_token;
         localStorage.setItem("whatts_refresh_token", state.refreshToken);
         return true;
-      } catch (e) { return false; }
+      } catch (e) { return null; }
     })();
     try {
       return await _renovacaoEmAndamento;
@@ -286,9 +306,32 @@
     if (!state.usuarioAtual) {
       app.innerHTML = '<div class="carregando-inicial">Restaurando sessão…</div>';
       const ok = await tentarRenovarToken();
+      if (ok === null) {
+        // Sem conexão com o servidor agora -- não desloga (pedido do
+        // Clayton, 2026-09-09: "não desconectar ninguém em hipótese
+        // nenhuma"). Mostra pra tentar de novo, sem mexer na sessão
+        // salva -- assim que a internet voltar, "Tentar de novo" (ou só
+        // recarregar) restaura normalmente.
+        app.innerHTML = `
+          <div class="carregando-inicial" style="flex-direction:column; gap:14px;">
+            <div>Sem conexão com o servidor no momento.</div>
+            <button type="button" class="botao" data-acao="tentar-de-novo-sessao">Tentar de novo</button>
+          </div>`;
+        return;
+      }
       if (!ok) { limparSessao(); return renderLogin(); }
       try { state.usuarioAtual = await chamarApi("/auth/me"); }
-      catch (e) { limparSessao(); return renderLogin(); }
+      catch (e) {
+        if (e.semConexao) {
+          app.innerHTML = `
+            <div class="carregando-inicial" style="flex-direction:column; gap:14px;">
+              <div>Sem conexão com o servidor no momento.</div>
+              <button type="button" class="botao" data-acao="tentar-de-novo-sessao">Tentar de novo</button>
+            </div>`;
+          return;
+        }
+        limparSessao(); return renderLogin();
+      }
       await _obterMenuOcultos();
     }
 
@@ -7399,6 +7442,7 @@
         localStorage.setItem("whatts_tema", proximo);
         return;
       }
+      case "tentar-de-novo-sessao": return montarRota();
       case "logout": {
         pararPollingLembretes();
         pararPollingStatusGlobal();
