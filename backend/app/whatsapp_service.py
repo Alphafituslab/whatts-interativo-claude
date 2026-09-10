@@ -3988,12 +3988,26 @@ def _iniciar_menu_setor(conn, empresa_id: int, conversa_id: int, telefone: str):
         "UPDATE whatsapp_conversas SET menu_estado = 'setor', menu_opcoes = ?, menu_tentativas_invalidas = 0 WHERE id = ?",
         (json.dumps(setores), conversa_id),
     )
+    config = obter_configuracao(conn, empresa_id)
+    online = setores_com_alguem_online(conn, empresa_id)
+    texto_menu = _texto_menu_setores(config, setores, online)
     try:
-        config = obter_configuracao(conn, empresa_id)
-        online = setores_com_alguem_online(conn, empresa_id)
-        enviar_texto(config, telefone, _texto_menu_setores(config, setores, online))
-    except ApiError:
-        pass
+        externo_id = enviar_texto(config, telefone, texto_menu)
+        status_msg, erro = "enviada", None
+    except ApiError as e:
+        externo_id, status_msg, erro = None, "falhou", e.mensagem
+    agora = _now_iso()
+    conn.execute(
+        """
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, status, erro, criado_em)
+        VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?)
+        """,
+        (conversa_id, texto_menu, externo_id, status_msg, erro, agora),
+    )
+    conn.execute(
+        "UPDATE whatsapp_conversas SET ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
+        (agora, texto_menu[:120], conversa_id),
+    )
 
 
 DIAS_PARA_ENCERRAR_CONVERSA_PARADA = 30
@@ -4228,11 +4242,20 @@ def _tentar_capturar_avaliacao(conn, empresa_id, conversa, telefone, texto, exte
     )
     # Agradecimento automático — melhor esforço, nunca impede a avaliação
     # de ser salva mesmo que o envio falhe (ex.: instância desconectada).
+    texto_agradecimento = "Muito obrigado pela sua avaliação! 🙏"
     try:
         config = obter_configuracao(conn, empresa_id)
-        enviar_texto(config, telefone, "Muito obrigado pela sua avaliação! 🙏")
-    except ApiError:
-        pass
+        externo_id = enviar_texto(config, telefone, texto_agradecimento)
+        status_msg, erro = "enviada", None
+    except ApiError as e:
+        externo_id, status_msg, erro = None, "falhou", e.mensagem
+    conn.execute(
+        """
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, status, erro, criado_em)
+        VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?)
+        """,
+        (conversa["id"], texto_agradecimento, externo_id, status_msg, erro, _now_iso()),
+    )
     return {"processado": True, "tipo": "avaliacao_recebida", "conversa_id": conversa["id"], "nota": nota}
 
 
