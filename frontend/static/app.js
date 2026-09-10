@@ -1228,7 +1228,14 @@
     const arquivada = item.dataset.wppArquivada === "1";
     const marcadas = JSON.parse(item.dataset.wppTags || "[]");
     const etiquetas = await obterEtiquetas();
+    const souAdmin = state.usuarioAtual && state.usuarioAtual.admin;
     abrirMenuContexto(e.clientX, e.clientY, [
+      // Atribuir direto pelo clique direito -- pedido do Clayton
+      // (2026-09-09): "nas fila e sem escolha, me deixar clicar com o
+      // direito e atribuir a conversa a alguém caso eu decidir". Só
+      // admin vê essa opção; usa o mesmo modal que já existe no botão
+      // "Encaminhar" de dentro da conversa.
+      ...(souAdmin ? [{ acao: "abrir-encaminhar", id, rotulo: "👤 Atribuir a..." }] : []),
       { acao: "fechar-conversa", id, rotulo: "✅ Encerrar atendimento" },
       { acao: "contexto-agendar", id, rotulo: "🕒 Agendar mensagem" },
       { acao: "contexto-lembrete", id, rotulo: "🔔 Abrir lembrete" },
