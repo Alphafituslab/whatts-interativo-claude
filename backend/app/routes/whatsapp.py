@@ -1540,6 +1540,21 @@ def enviar_mensagem(conversa_id):
     elif conversa["atribuida_usuario_id"] is None:
         whatsapp_service.atribuir_conversa(conn, conversa_id, usuario["id"], usuario["id"])
 
+    # Achado pelo Adrian (2026-09-10): "o chat bot mesmo depois de eu
+    # responder o cliente que fica preso na fila fica mandando mensagem
+    # pra eles". Um humano respondendo assume a conversa de vez -- se o
+    # menu automático (setor/atendente) ainda estava esperando o cliente
+    # digitar um número, a próxima mensagem dele continuava caindo no
+    # bot em vez de virar mensagem normal (o bot mandava "digite o
+    # número" por cima de quem já estava sendo atendido de verdade).
+    if conversa["menu_estado"]:
+        conn.execute(
+            "UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
+            (conversa_id,),
+        )
+        conversa = dict(conversa)
+        conversa["menu_estado"] = None
+
     # Citada precisa ser desta MESMA conversa: sem conferir, dava pra
     # citar por id uma mensagem de outro cliente e o trecho citado
     # apareceria aqui.
@@ -3670,6 +3685,14 @@ def enviar_anexo(conversa_id):
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
         raise ApiError(_recusa_atribuida(conversa, " Encaminhe para si mesmo antes de responder."), status=403, codigo="sem_permissao")
+    # Mesmo ajuste de enviar_mensagem: humano mandando anexo também
+    # assume de vez, desliga o menu automático que ainda estivesse
+    # esperando o cliente digitar um número (achado do Adrian, 2026-09-10).
+    if conversa["menu_estado"]:
+        conn.execute(
+            "UPDATE whatsapp_conversas SET menu_estado = NULL, menu_opcoes = NULL, menu_tentativas_invalidas = 0 WHERE id = ?",
+            (conversa_id,),
+        )
 
     arquivo = request.files.get("arquivo")
     if not arquivo or not arquivo.filename:
