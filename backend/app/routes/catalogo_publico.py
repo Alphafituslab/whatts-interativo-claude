@@ -197,6 +197,20 @@ def enviar_proposta(token):
         "Em breve alguém da nossa equipe entra em contato pra fechar os detalhes. Obrigado! 🙌"
     )
     if config and conversa:
+        # Achado numa varredura de segurança (2026-09-10): esta é a
+        # ÚNICA rota que manda mensagem de verdade pro WhatsApp SEM
+        # exigir login -- e era a única que não passava por
+        # verificar_ritmo_envio (toda outra rota de envio do sistema
+        # já passa). Sem isso, alguém com o link (ou script batendo
+        # nele repetidamente) podia forçar rajada de mensagens saindo
+        # do número da empresa -- exatamente o que arrisca o WhatsApp
+        # marcar o número como robô/spam. Melhor esforço: se o ritmo
+        # estiver alto, só pula o aviso pro cliente (a proposta em si
+        # já foi salva acima, isso não pode travar por causa disso).
+        try:
+            whatsapp_service.verificar_ritmo_envio(conn, link["empresa_id"], dict(config), telefone_destino=conversa["telefone"])
+        except ApiError:
+            return jsonify({"ok": True, "total": total}), 201
         try:
             externo_id = whatsapp_service.enviar_texto(dict(config), conversa["telefone"], texto)
         except Exception:
