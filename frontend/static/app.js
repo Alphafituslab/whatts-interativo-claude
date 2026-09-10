@@ -3553,7 +3553,7 @@
       </div>`;
     if (m.tipo === "imagem") return `
       <div class="wpp-bolha-midia-envolucro">
-        <a href="${urlImagemSegura(m.midia_url)}" target="_blank" rel="noopener" title="Ver em tamanho grande"><img class="wpp-bolha-imagem" src="${urlImagemSegura(m.midia_url)}" alt="Imagem anexada"></a>
+        <img class="wpp-bolha-imagem" src="${urlImagemSegura(m.midia_url)}" alt="Imagem anexada" style="cursor: zoom-in;" data-acao="ver-imagem-grande" data-url="${urlImagemSegura(m.midia_url)}" title="Ver em tamanho grande">
         <a class="wpp-bolha-baixar" href="${urlImagemSegura(m.midia_url)}" download title="Baixar imagem">⬇</a>
       </div>`;
     if (m.tipo === "video") return `
@@ -7452,6 +7452,15 @@
         if (proximo === "auto") document.documentElement.removeAttribute("data-tema");
         else document.documentElement.setAttribute("data-tema", proximo);
         localStorage.setItem("whatts_tema", proximo);
+        return;
+      }
+      case "ver-imagem-grande": {
+        const url = alvo.dataset.url;
+        abrirModal(`
+          <button type="button" class="botao-icone" data-acao="fechar-modal" title="Fechar (Esc)" style="position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.45); color:#fff;">✕</button>
+          <img src="${url}" alt="Imagem" style="display:block; max-width:92vw; max-height:88vh; border-radius:10px;">
+          <a href="${url}" target="_blank" rel="noopener" class="botao secundario pequeno" style="position:absolute; bottom:8px; right:8px;">Abrir em outra aba</a>
+        `, "modal-imagem-grande");
         return;
       }
       case "tentar-de-novo-sessao": return montarRota();
