@@ -3177,6 +3177,15 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         # constrangimento de um menu automático no meio de uma conversa
         # entre pessoas. Grupo entra direto como conversa normal.
         if not de_grupo:
+            # Achado pelo Clayton (2026-09-09): contato NOVO escrevendo
+            # fora do expediente não recebia o aviso -- esse caminho
+            # (conversa_nova) sempre pulava direto pro menu de setor e
+            # nunca chegava a chamar _avisar_fora_expediente_se_preciso
+            # (isso só acontecia pra conversa já existente, mais abaixo).
+            # Agora dispara os dois: o aviso de horário (se for o caso)
+            # e o menu de setor, igual já acontece pra quem já tem
+            # conversa em andamento.
+            _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone)
             _iniciar_menu_setor(conn, empresa_id, conversa["id"], telefone)
             return {"processado": True, "tipo": "menu_iniciado", "conversa_id": conversa["id"]}
         # Grupo: a mensagem já foi gravada acima. Sai aqui mesmo — sem
