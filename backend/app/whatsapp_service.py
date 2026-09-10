@@ -3337,11 +3337,29 @@ def _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone):
                 return
         except ValueError:
             pass
+    # Achado pelo Clayton (2026-09-09/10): a mensagem ia direto pro
+    # WhatsApp mas NUNCA era gravada em whatsapp_mensagens -- não dava
+    # pra saber, olhando a conversa, se o aviso realmente saiu ou nem
+    # tentou (parecia "não mandou", mesmo quando tinha mandado). Agora
+    # grava igual qualquer outro envio automático do sistema (mesmo
+    # padrão da pesquisa de satisfação em fechar_conversa).
+    agora = _now_iso()
     try:
-        enviar_texto(config, telefone, mensagem)
-    except ApiError:
-        pass
-    conn.execute("UPDATE whatsapp_conversas SET ultimo_aviso_expediente = ? WHERE id = ?", (_now_iso(), conversa["id"]))
+        externo_id = enviar_texto(config, telefone, mensagem)
+        status_msg, erro = "enviada", None
+    except ApiError as e:
+        externo_id, status_msg, erro = None, "falhou", e.mensagem
+    conn.execute(
+        """
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, status, erro, criado_em)
+        VALUES (?, 'saida', 'texto', ?, ?, ?, ?, ?)
+        """,
+        (conversa["id"], mensagem, externo_id, status_msg, erro, agora),
+    )
+    conn.execute(
+        "UPDATE whatsapp_conversas SET ultimo_aviso_expediente = ?, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
+        (agora, agora, mensagem[:120], conversa["id"]),
+    )
 
 
 MINUTOS_AVISO_FILA_SEM_ESCOLHA = 10
