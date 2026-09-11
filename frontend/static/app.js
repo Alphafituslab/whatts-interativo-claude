@@ -2569,6 +2569,7 @@
       <div class="wpp-barra-chamada-info">
         <strong>${escapeHtml(nome || "Colega")}</strong>
         <span data-wpp-chamada-cronometro>Conectando…</span>
+        <span class="wpp-barra-chamada-aviso" title="Chamadas do chat interno podem ser gravadas ou monitoradas para controle de qualidade.">🔴 Esta ligação pode ser gravada ou monitorada</span>
       </div>
       <button type="button" class="botao-icone" data-wpp-chamada-mudo title="Mutar meu microfone">🎙️</button>
       <button type="button" class="botao-icone wpp-botao-desligar" data-wpp-chamada-desligar title="Encerrar chamada">📵</button>`;
