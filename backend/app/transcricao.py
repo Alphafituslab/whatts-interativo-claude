@@ -16,11 +16,13 @@ import datetime
 import os
 import threading
 
-# Modelo pequeno de propósito. O "small" acerta um pouco mais, mas ocupa
-# perto de 1 GB de memória e o servidor tem 4 GB dividido com o resto do
-# sistema. O "base" com quantização int8 dá conta de português de
-# conversa gastando bem menos.
-MODELO = os.environ.get("WPP_MODELO_TRANSCRICAO", "base")
+# Servidor foi pro plano de 8 GB (2026-09-11) -- sobra espaço de sobra
+# pro "small", que acerta bem mais que o "base" (nomes próprios, termos
+# como "cúrcuma", concordância) -- pedido do Clayton: "transcrições mais
+# fidedignas sem erros". Custa ~2x mais tempo de CPU por áudio, mas
+# roda em segundo plano (transcrever_em_segundo_plano) sem travar a tela
+# de ninguém, então vale a troca.
+MODELO = os.environ.get("WPP_MODELO_TRANSCRICAO", "small")
 
 # Áudio muito longo trava um núcleo por tempo demais. Acima disto,
 # transcreve só o começo e avisa na tela.
@@ -139,8 +141,8 @@ def transcrever(caminho_audio: str) -> str:
         segmentos, _info = modelo.transcribe(
             caminho_audio,
             language="pt",
-            beam_size=1,          # mais rápido; a diferença de acerto é pequena
-            vad_filter=True,      # corta os silêncios, que é onde ele costuma inventar texto
+            beam_size=5,           # busca mais caminhos antes de decidir a frase -- mais fiel, custo de CPU pequeno
+            vad_filter=True,       # corta os silêncios, que é onde ele costuma inventar texto
             vad_parameters={"min_silence_duration_ms": 500},
         )
         partes, duracao = [], 0.0
