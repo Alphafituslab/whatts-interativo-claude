@@ -221,6 +221,7 @@ def obter_configuracao(conn, empresa_id: int):
             "menu_itens_ocultos": "[]",
             "notificacao_desktop_ativo": 1,
             "notificacao_desktop_usuarios_ocultos": "[]",
+            "limite_repeticao_mensagem": 5,
         }
     return dict(row)
 
@@ -228,7 +229,7 @@ def obter_configuracao(conn, empresa_id: int):
 def config_publica(config):
     d = dict(config)
     for campo, padrao in (("limite_envios_minuto", 20), ("limite_envios_hora", 250),
-                          ("limite_novos_contatos_hora", 20)):
+                          ("limite_novos_contatos_hora", 20), ("limite_repeticao_mensagem", 5)):
         d[campo] = int(config.get(campo) if config.get(campo) is not None else padrao)
     d["apikey_configurada"] = bool(d.get("evolution_apikey"))
     d["webhook_segredo_configurado"] = bool(d.get("webhook_segredo"))
@@ -317,6 +318,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     limite_envios_minuto = _limite("limite_envios_minuto", 20)
     limite_envios_hora = _limite("limite_envios_hora", 250)
     limite_novos_contatos_hora = _limite("limite_novos_contatos_hora", 20)
+    limite_repeticao_mensagem = _limite("limite_repeticao_mensagem", 5)
     # Quantos minutos esperar antes de jogar na fila de todos um cliente
     # que não escolheu setor nenhum no menu.
     if dados.get("minutos_liberar_sem_menu") not in (None, ""):
@@ -498,8 +500,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
-                                              catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
+                                              limite_repeticao_mensagem)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -544,6 +547,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             menu_itens_ocultos = excluded.menu_itens_ocultos,
             notificacao_desktop_ativo = excluded.notificacao_desktop_ativo,
             notificacao_desktop_usuarios_ocultos = excluded.notificacao_desktop_usuarios_ocultos,
+            limite_repeticao_mensagem = excluded.limite_repeticao_mensagem,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -557,7 +561,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_conversa_parada_ativo, aviso_conversa_parada_horas, aviso_conversa_parada_minutos_fechar,
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
-         catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos),
+         catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
+         limite_repeticao_mensagem),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -1215,14 +1220,22 @@ LIMITE_REPETICOES_MENSAGEM = 5
 JANELA_REPETICAO_MINUTOS = 60
 
 
-def verificar_repeticao_mensagem(conn, empresa_id: int, texto: str):
+def verificar_repeticao_mensagem(conn, empresa_id: int, texto: str, config=None):
     """Proteção anti-spam: manda a MESMA mensagem, com o texto idêntico,
     repetidas vezes é exatamente o padrão que aumenta o risco de o
     número ser marcado como robô e banido pelo WhatsApp (ver aviso no
-    topo do arquivo/README sobre o uso não-oficial). Depois de 5 envios
+    topo do arquivo/README sobre o uso não-oficial). Depois de N envios
     do mesmo texto numa janela de 1 hora, bloqueia — só libera de novo
     mudando o texto ou esperando a janela passar. Contado só dentro da
-    mesma empresa (o número dela é que corre risco de ban)."""
+    mesma empresa (o número dela é que corre risco de ban).
+
+    N é configurável em Configuração (limite_repeticao_mensagem, padrão
+    5) -- pedido do Clayton (2026-09-11), junto dos outros freios de
+    ritmo de envio. 0 desliga o freio, igual os outros."""
+    config = config or obter_configuracao(conn, empresa_id)
+    limite = int(config.get("limite_repeticao_mensagem") if config.get("limite_repeticao_mensagem") is not None else LIMITE_REPETICOES_MENSAGEM)
+    if not limite:
+        return
     desde = (datetime.datetime.utcnow() - datetime.timedelta(minutes=JANELA_REPETICAO_MINUTOS)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     linha = conn.execute(
         """
@@ -1233,9 +1246,9 @@ def verificar_repeticao_mensagem(conn, empresa_id: int, texto: str):
         """,
         (texto, desde, empresa_id),
     ).fetchone()
-    if linha["n"] >= LIMITE_REPETICOES_MENSAGEM:
+    if linha["n"] >= limite:
         raise ApiError(
-            f"Essa mesma mensagem já foi enviada {LIMITE_REPETICOES_MENSAGEM} vezes na última hora. "
+            f"Essa mesma mensagem já foi enviada {limite} vezes na última hora. "
             "Mude o texto ou espere cerca de 1 hora antes de enviar de novo — isso evita que o número "
             "seja identificado como robô pelo WhatsApp.",
             status=429, codigo="mensagem_repetida",

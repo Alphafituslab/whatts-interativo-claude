@@ -5693,6 +5693,11 @@
              <input type="number" name="limite_novos_contatos_hora" min="0" max="500" value="${config.limite_novos_contatos_hora ?? 20}">
              <span class="dica"><strong>O mais importante.</strong> Conta só quem nunca escreveu pra gente — é daí que vem denúncia.</span>
            </div>
+           <div class="campo">
+             <label>Mesma mensagem repetida</label>
+             <input type="number" name="limite_repeticao_mensagem" min="0" max="100" value="${config.limite_repeticao_mensagem ?? 5}">
+             <span class="dica">Depois de mandar o texto IDÊNTICO essa quantidade de vezes numa hora, bloqueia -- muda o texto ou espera passar.</span>
+           </div>
            <div class="campo" style="align-self:end;">
              <button type="submit" class="botao secundario">Salvar limites</button>
            </div>
@@ -9551,6 +9556,7 @@
             limite_envios_minuto: dados.get("limite_envios_minuto"),
             limite_envios_hora: dados.get("limite_envios_hora"),
             limite_novos_contatos_hora: dados.get("limite_novos_contatos_hora"),
+            limite_repeticao_mensagem: dados.get("limite_repeticao_mensagem"),
           },
         });
         definirFlash("ok", "Limites de envio salvos.");
