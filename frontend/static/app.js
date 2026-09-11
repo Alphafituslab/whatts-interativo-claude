@@ -1236,6 +1236,7 @@
       // admin vê essa opção; usa o mesmo modal que já existe no botão
       // "Encaminhar" de dentro da conversa.
       ...(souAdmin ? [{ acao: "abrir-encaminhar", id, rotulo: "👤 Atribuir a..." }] : []),
+      { acao: "marcar-nao-lida-whatsapp", id, rotulo: "📩 Marcar como não lida" },
       { acao: "fechar-conversa", id, rotulo: "✅ Encerrar atendimento" },
       { acao: "contexto-agendar", id, rotulo: "🕒 Agendar mensagem" },
       { acao: "contexto-lembrete", id, rotulo: "🔔 Abrir lembrete" },
@@ -1262,6 +1263,7 @@
       ? { acao: "reabrir-interno", id, rotulo: "↩️ Reabrir conversa" }
       : { acao: "fechar-interno", id, rotulo: "✅ Encerrar atendimento" };
     abrirMenuContexto(e.clientX, e.clientY, [
+      { acao: "marcar-nao-lida-interno", id, rotulo: "📩 Marcar como não lida" },
       itemEncerrar,
       ..._itensEtiquetaMenu(id, JSON.parse(item.dataset.wppTags || "[]"), etiquetas, true),
     ]);
@@ -8805,6 +8807,20 @@
         await chamarApi(`/whatsapp/conversas/${id}/arquivar`, { method: "POST", body: { arquivar: acao === "arquivar-conversa" } });
         definirFlash("ok", acao === "arquivar-conversa" ? "Conversa arquivada." : "Conversa desarquivada.");
         return renderWhatsapp(null);
+      }
+      case "marcar-nao-lida-whatsapp": {
+        const id = Number(alvo.dataset.id);
+        fecharMenuContexto();
+        await chamarApi(`/whatsapp/conversas/${id}/nao-lida`, { method: "POST" });
+        definirFlash("ok", "Marcada como não lida.");
+        return renderWhatsapp(null);
+      }
+      case "marcar-nao-lida-interno": {
+        const id = Number(alvo.dataset.id);
+        fecharMenuContexto();
+        await chamarApi(`/chat-interno/conversas/${id}/nao-lida`, { method: "POST" });
+        definirFlash("ok", "Marcada como não lida.");
+        return renderChatInterno(null);
       }
       case "excluir-conversa": {
         fecharMenuContexto();

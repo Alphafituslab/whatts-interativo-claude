@@ -2988,6 +2988,21 @@ def arquivar_conversa(conversa_id):
     return jsonify({"ok": True})
 
 
+@bp.post("/conversas/<int:conversa_id>/nao-lida")
+@requires_auth
+def marcar_nao_lida(conversa_id):
+    """Marca a conversa como não lida de novo -- pedido do Clayton
+    (2026-09-11): clique direito > "colocar como não lida", pra lembrar
+    de voltar nela depois sem precisar de lembrete/agendamento."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError("Só o responsável por esta conversa (ou um administrador) pode marcá-la como não lida.", status=403, codigo="sem_permissao")
+    conn.execute("UPDATE whatsapp_conversas SET nao_lidas = MAX(nao_lidas, 1) WHERE id = ?", (conversa_id,))
+    return jsonify({"ok": True})
+
+
 @bp.delete("/conversas/<int:conversa_id>")
 @requires_auth
 def excluir_conversa(conversa_id):

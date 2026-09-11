@@ -595,6 +595,22 @@ def encaminhar(conversa_id):
     return jsonify({"ok": True})
 
 
+@bp.post("/conversas/<int:conversa_id>/nao-lida")
+@requires_auth
+def marcar_nao_lida(conversa_id):
+    """Marca a conversa como não lida de novo pro lado de quem clicou --
+    pedido do Clayton (2026-09-11): clique direito > "colocar como não
+    lida", igual já existe pra conversa de cliente."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    campo = "nao_lidas_criador" if usuario["id"] == conversa["criado_por_id"] else "nao_lidas_participante"
+    conn.execute(f"UPDATE chat_interno_conversas SET {campo} = MAX({campo}, 1) WHERE id = ?", (conversa_id,))
+    return jsonify({"ok": True})
+
+
 @bp.post("/conversas/<int:conversa_id>/fechar")
 @requires_auth
 def fechar(conversa_id):
