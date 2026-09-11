@@ -158,13 +158,21 @@ def avaliar_conversa(conversa, padrao, excecoes, agora=None):
 SITUACOES_PENDENTES = {"atrasado", "agendado_vencido"}
 
 
-def listar(conn, empresa_id, usuario_id=None, setores=None, apenas_pendentes=False):
+def listar(conn, empresa_id, usuario_id=None, setores=None, apenas_pendentes=False, quem_ve=None):
     """Situação de follow-up das conversas abertas. usuario_id/setores
     aplicam a mesma régua de visibilidade do resto do sistema: cada um
     vê o que é dele, admin (usuario_id=None) vê tudo.
 
     setores é uma LISTA porque a mesma pessoa pode atender mais de um
-    setor do menu (ex.: Televendas e Financeiro)."""
+    setor do menu (ex.: Televendas e Financeiro).
+
+    quem_ve: quem está OLHANDO de verdade (sempre a pessoa logada,
+    mesmo quando ela é admin vendo "todo mundo" com usuario_id=None).
+    Usado só pra decidir se esconde um item já "avisado" (ver
+    followup_avisado_em) -- pedido do Clayton (2026-09-11): depois que
+    ELE avisa o responsável, o item some da visão DELE, mas continua
+    aparecendo normal pra quem é responsável de verdade (ainda é
+    trabalho da pessoa, não foi resolvido só por ter sido avisado)."""
     condicoes = ["ct.empresa_id = ?", "c.excluida_em IS NULL", "c.arquivada = 0", "c.status = 'aberta'"]
     params = [empresa_id]
     if usuario_id is not None:
@@ -200,6 +208,11 @@ def listar(conn, empresa_id, usuario_id=None, setores=None, apenas_pendentes=Fal
         if situacao is None:
             continue
         if apenas_pendentes and situacao["situacao"] not in SITUACOES_PENDENTES:
+            continue
+        # "Avisado" só esconde de quem NÃO é o responsável -- pra ele
+        # (o dono de verdade da conversa) o item nunca some sozinho,
+        # só quando ele resolver de verdade (agendar/adiar/encerrar).
+        if conversa.get("followup_avisado_em") and quem_ve is not None and quem_ve != conversa.get("atribuida_usuario_id"):
             continue
         situacao.update({
             "contato_nome": conversa.get("contato_nome") or conversa.get("telefone"),
@@ -310,9 +323,9 @@ def processar_avisos_automaticos(conn):
     return enviados
 
 
-def resumo(conn, empresa_id, usuario_id=None, setores=None):
+def resumo(conn, empresa_id, usuario_id=None, setores=None, quem_ve=None):
     """Números do sino: o que precisa de ação, o que está agendado."""
-    itens = listar(conn, empresa_id, usuario_id, setores)
+    itens = listar(conn, empresa_id, usuario_id, setores, quem_ve=quem_ve)
     hoje = _now().date()
 
     def _mesmo_dia(iso):

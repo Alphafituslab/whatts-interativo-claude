@@ -50,7 +50,8 @@ def _carregar_conversa(conn, conversa_id):
 def resumo():
     """Números do sino — chamado com frequência, então é só contagem."""
     usuario_id, setores = _escopo()
-    return jsonify(followup_service.resumo(get_db(), g.empresa_id, usuario_id, setores))
+    quem_ve = g.usuario_atual["id"]
+    return jsonify(followup_service.resumo(get_db(), g.empresa_id, usuario_id, setores, quem_ve=quem_ve))
 
 
 @bp.get("")
@@ -58,11 +59,29 @@ def resumo():
 def listar():
     usuario_id, setores = _escopo()
     apenas_pendentes = request.args.get("pendentes") == "1"
-    itens = followup_service.listar(get_db(), g.empresa_id, usuario_id, setores, apenas_pendentes)
+    quem_ve = g.usuario_atual["id"]
+    itens = followup_service.listar(get_db(), g.empresa_id, usuario_id, setores, apenas_pendentes, quem_ve=quem_ve)
     situacao = request.args.get("situacao")
     if situacao:
         itens = [i for i in itens if i["situacao"] == situacao]
     return jsonify(itens)
+
+
+@bp.put("/conversas/<int:conversa_id>/avisado")
+@requires_auth
+def marcar_avisado(conversa_id):
+    """Marca que já avisou o responsável (botão "🔔 Avisar" no painel de
+    Follow-up) -- pedido do Clayton (2026-09-11): depois de clicar,
+    some do follow-up de quem avisou (mas não do responsável, que
+    continua precisando resolver de verdade)."""
+    conn = get_db()
+    _carregar_conversa(conn, conversa_id)
+    conn.execute(
+        "UPDATE whatsapp_conversas SET followup_avisado_em = ? WHERE id = ?",
+        (whatsapp_service._now_iso(), conversa_id),
+    )
+    conn.commit()
+    return jsonify({"ok": True})
 
 
 @bp.put("/conversas/<int:conversa_id>/agendar")

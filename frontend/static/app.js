@@ -2171,8 +2171,9 @@
           <a class="botao pequeno" href="#/whatsapp/${i.conversa_id}" data-acao="fechar-followup">Abrir</a>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-agendar-contato" data-id="${i.conversa_id}">Agendar</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-adiar" data-id="${i.conversa_id}">Adiar</button>
+          <button type="button" class="botao secundario pequeno" data-acao="fechar-conversa" data-id="${i.conversa_id}" title="Sem resposta do cliente? Encerra o atendimento direto daqui.">✅ Encerrar</button>
           ${i.responsavel_id && i.responsavel_id !== state.usuarioAtual.id
-            ? `<button type="button" class="botao secundario pequeno" data-acao="avisar-atraso-followup"
+            ? `<button type="button" class="botao secundario pequeno" data-acao="avisar-atraso-followup" data-id="${i.conversa_id}"
                  data-usuario="${i.responsavel_id}" data-nome="${escapeHtml(i.responsavel_nome || "")}"
                  data-cliente="${escapeHtml(i.contato_nome || "")}" data-dias="${i.dias_parado || 0}" data-prazo="${i.prazo_dias || 0}"
                  title="Manda um lembrete no chat interno pra ${escapeHtml(i.responsavel_nome || "o responsável")}">🔔 Avisar</button>`
@@ -8315,17 +8316,21 @@
         const dias = alvo.dataset.dias;
         const prazo = alvo.dataset.prazo;
         const texto = `🔔 Lembrete de follow-up: *${cliente}* está há ${dias} dia(s) sem retorno (prazo combinado: ${prazo}d). Dá uma olhada quando puder!`;
+        const conversaId = Number(alvo.dataset.id);
         alvo.disabled = true;
         const rotuloOriginal = alvo.textContent;
         alvo.textContent = "Avisando…";
         try {
           await chamarApi("/chat-interno/conversas", { method: "POST", body: { participante_id: usuarioId, texto } });
-          alvo.textContent = "✓ Avisado";
+          await chamarApi(`/followup/conversas/${conversaId}/avisado`, { method: "PUT" });
         } catch (erro) {
           alvo.disabled = false;
           alvo.textContent = rotuloOriginal;
           throw erro;
         }
+        const item = alvo.closest(".followup-item");
+        if (item) item.remove();
+        atualizarContadorFollowup();
         return;
       }
       case "adiar-rapido": {
