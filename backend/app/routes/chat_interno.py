@@ -78,6 +78,32 @@ def listar_conversas():
     ))
 
 
+def _remetente_sistema_configurado(conn, empresa_id):
+    """Resolve o "Usuário do sistema" configurado em Configuração --
+    quem envia quando alguém escolhe "Como Assistente Seja Alpha" em vez
+    do próprio nome (ver como_sistema, abaixo). Sem essa opção
+    configurada, recusa com uma mensagem clara em vez de mandar mesmo
+    assim escondendo de quem parece o remetente."""
+    cfg = conn.execute(
+        "SELECT usuario_sistema_id FROM configuracoes_whatsapp WHERE empresa_id = ?", (empresa_id,)
+    ).fetchone()
+    usuario_sistema_id = cfg["usuario_sistema_id"] if cfg else None
+    if not usuario_sistema_id:
+        raise ApiError(
+            "Configure um \"Usuário do sistema\" em Configuração antes de enviar como Assistente.",
+            status=400, codigo="usuario_sistema_nao_configurado",
+        )
+    sistema = conn.execute(
+        "SELECT id FROM usuarios WHERE id = ? AND ativo = 1 AND empresa_id = ?", (usuario_sistema_id, empresa_id)
+    ).fetchone()
+    if sistema is None:
+        raise ApiError(
+            "O \"Usuário do sistema\" configurado está inativo. Ajuste em Configuração.",
+            status=400, codigo="usuario_sistema_inativo",
+        )
+    return sistema["id"]
+
+
 @bp.post("/conversas")
 @requires_auth
 def iniciar_conversa():
@@ -99,16 +125,24 @@ def iniciar_conversa():
     if participante is None:
         raise ApiError("Colaborador não encontrado ou inativo.", status=400)
 
-    conversa_id = chat_interno_service.buscar_conversa_existente(conn, usuario["id"], participante["id"])
+    # Pedido do Clayton (2026-09-11): "perguntar enviar como seu nome ou
+    # seja alpha assim o pessoal acha que é o assistente que está
+    # mandando também" -- quem clica escolhe, mas só pode se passar pelo
+    # "Usuário do sistema" já configurado (nunca por outro colega real).
+    remetente_id = _remetente_sistema_configurado(conn, usuario["empresa_id"]) if dados.get("como_sistema") else usuario["id"]
+    if int(participante_id) == remetente_id:
+        raise ApiError("Você não pode iniciar uma conversa interna consigo mesmo.", status=400)
+
+    conversa_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, participante["id"])
     if conversa_id:
         # Reabre só pra quem clicou -- se mandar texto junto, enviar_mensagem
         # já reabre pros dois lados (é o "o outro lado vê de novo quando
         # chamam ele" que o Clayton pediu).
-        chat_interno_service.reabrir_conversa(conn, conversa_id, usuario["id"])
+        chat_interno_service.reabrir_conversa(conn, conversa_id, remetente_id)
         if texto:
-            chat_interno_service.enviar_mensagem(conn, conversa_id, usuario["id"], texto)
+            chat_interno_service.enviar_mensagem(conn, conversa_id, remetente_id, texto)
     else:
-        conversa_id = chat_interno_service.iniciar_conversa(conn, usuario["id"], participante["id"], participante["setor"], texto)
+        conversa_id = chat_interno_service.iniciar_conversa(conn, remetente_id, participante["id"], participante["setor"], texto)
     return jsonify(chat_interno_service.carregar_conversa(conn, conversa_id)), 201
 
 

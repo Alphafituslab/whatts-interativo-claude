@@ -411,6 +411,12 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .wpp-conversa-item:hover { transform: translateX(2px); }
 .wpp-conversa-item:hover { background: var(--superficie-2); }
 .wpp-conversa-item.ativa { background: color-mix(in srgb, var(--primaria) 10%, transparent); border-left-color: var(--primaria); }
+/* Destaque de "não lida" -- pedido do Clayton (2026-09-11): o número
+   do badge sozinho não chamava atenção suficiente na lista; agora o
+   item ganha uma faixa e fundo leve, e o texto da prévia fica escuro e
+   em negrito (igual apps de mensagem tratam conversa não lida). */
+.wpp-conversa-item.wpp-conversa-nao-lida:not(.ativa) { background: color-mix(in srgb, var(--verde-whatsapp, #1fa855) 7%, transparent); border-left-color: var(--verde-whatsapp, #1fa855); }
+.wpp-conversa-item.wpp-conversa-nao-lida .wpp-conversa-preview { color: var(--texto); font-weight: 600; }
 
 .wpp-avatar {
   width: 36px; height: 36px; border-radius: 999px; flex-shrink: 0; display: flex; align-items: center;

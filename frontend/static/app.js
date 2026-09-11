@@ -2236,7 +2236,13 @@
         chamarApi(`/whatsapp/lembretes${q}`).catch(() => []),
         souAdmin ? chamarApi("/usuarios").catch(() => []) : Promise.resolve([]),
       ]);
-      const followups = itens.filter((i) => i.situacao !== "adiado");
+      // Pedido do Clayton (2026-09-11): "se estiver dentro do prazo nem
+      // aparecer pra mim, somente se estiver sem retorno ou atrasado
+      // com o periodo ja cadastrado do tempo" -- o painel de Follow-up
+      // deixa de listar quem ainda está em dia (em_dia) ou só chegando
+      // perto do prazo (proximo_do_vencimento): só mostra quem já
+      // estourou o prazo combinado de verdade.
+      const followups = itens.filter((i) => i.situacao === "atrasado" || i.situacao === "agendado_vencido");
       const tudo = [
         ...followups.map((x) => ({ tipo: "followup", dado: x, faixa: _faixaDoItem(x) })),
         ...agendadas.map((x) => ({ tipo: "agendada", dado: x, faixa: _faixaDoItem(x) })),
@@ -3484,7 +3490,7 @@
       // (o cliente escrevendo de novo, ou alguém clicando Reabrir).
       const naFila = c.status !== "fechada" && (c.eh_grupo ? !c.equipe_no_grupo : !c.atribuida_usuario_id);
       const slaEstourado = state.slaAlertasIds.has(c.id);
-      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : ""}>
+      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""} ${c.nao_lidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : ""}>
         ${htmlAvatarContato(c.contato_foto, c.contato_nome, c.telefone, 42)}
         <div class="wpp-conversa-info">
           <div class="wpp-conversa-linha1">
@@ -4707,7 +4713,7 @@
       // criador na frente -- parecia foto trocada (ex.: "Daiana →
       // Adrian" com a foto do Adrian ao lado do nome da Daiana).
       const outraFoto = souCriador ? c.participante_foto : c.criado_por_foto;
-      return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""}" href="#/chat-interno/${c.id}" data-wpp-interno-id="${c.id}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}'>
+      return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""} ${naoLidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/chat-interno/${c.id}" data-wpp-interno-id="${c.id}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}'>
         <span style="position:relative; flex-shrink:0;">
           ${htmlAvatarContato(outraFoto, outroNome, outroNome, 36)}
           <span class="wpp-online-bolinha ${outroOnline ? "wpp-online-sim" : "wpp-online-nao"}" title="${outroOnline ? "Online agora" : "Offline"}"></span>
@@ -5333,6 +5339,25 @@
       <div class="rodape-modal">
         <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
         <button type="button" class="botao" data-acao="fechar-conversa-com-resultado" data-id="${conversaId}">Confirmar encerramento</button>
+      </div>`);
+  }
+
+  // Pedido do Clayton (2026-09-11): quando ELE (ou qualquer atendente)
+  // clica em "Avisar" no Follow-up, escolher se quem recebe ve o nome
+  // de quem avisou ou o "Assistente Seja Alpha" -- pra parecer que foi
+  // o sistema que mandou, nao a pessoa. So funciona com o "Usuario do
+  // sistema" configurado em Configuracao (o backend recusa se nao tiver).
+  function modalEscolherRemetenteAviso(dados) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Como enviar o aviso?</h3>
+      <p class="texto-suave">Pra <strong>${escapeHtml(dados.cliente)}</strong>, ${escapeHtml(dados.dias)} dia(s) sem retorno.</p>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="avisar-followup-confirmar" data-modo="eu"
+          data-id="${dados.id}" data-usuario="${dados.usuario}" data-cliente="${escapeHtml(dados.cliente)}"
+          data-dias="${dados.dias}" data-prazo="${dados.prazo}">Com meu nome</button>
+        <button type="button" class="botao" data-acao="avisar-followup-confirmar" data-modo="sistema"
+          data-id="${dados.id}" data-usuario="${dados.usuario}" data-cliente="${escapeHtml(dados.cliente)}"
+          data-dias="${dados.dias}" data-prazo="${dados.prazo}">Como Assistente Seja Alpha</button>
       </div>`);
   }
 
@@ -8314,30 +8339,35 @@
         return;
       }
       case "avisar-atraso-followup": {
-        // Manda um lembrete direto no chat interno pro responsável --
-        // sem sair da tela de Follow-up. Reaproveita a mesma rota que
-        // "Nova conversa interna" usa (acha a conversa com essa pessoa
-        // se já existir, ou cria).
+        modalEscolherRemetenteAviso({
+          id: alvo.dataset.id, usuario: alvo.dataset.usuario, cliente: alvo.dataset.cliente || "um cliente",
+          dias: alvo.dataset.dias || 0, prazo: alvo.dataset.prazo || 0,
+        });
+        return;
+      }
+      case "avisar-followup-confirmar": {
         const usuarioId = Number(alvo.dataset.usuario);
         const cliente = alvo.dataset.cliente || "um cliente";
         const dias = alvo.dataset.dias;
         const prazo = alvo.dataset.prazo;
-        const texto = `🔔 Lembrete de follow-up: *${cliente}* está há ${dias} dia(s) sem retorno (prazo combinado: ${prazo}d). Dá uma olhada quando puder!`;
         const conversaId = Number(alvo.dataset.id);
-        alvo.disabled = true;
-        const rotuloOriginal = alvo.textContent;
-        alvo.textContent = "Avisando…";
+        const comoSistema = alvo.dataset.modo === "sistema";
+        fecharModais();
+        const botaoOriginal = document.querySelector(`[data-acao="avisar-atraso-followup"][data-id="${conversaId}"]`);
+        if (botaoOriginal) { botaoOriginal.disabled = true; botaoOriginal.textContent = "Avisando…"; }
+        const texto = `🔔 Lembrete de follow-up: *${cliente}* está há ${dias} dia(s) sem retorno (prazo combinado: ${prazo}d). Dá uma olhada quando puder!`;
         try {
-          await chamarApi("/chat-interno/conversas", { method: "POST", body: { participante_id: usuarioId, texto } });
+          await chamarApi("/chat-interno/conversas", { method: "POST", body: { participante_id: usuarioId, texto, como_sistema: comoSistema } });
           await chamarApi(`/followup/conversas/${conversaId}/avisado`, { method: "PUT" });
         } catch (erro) {
-          alvo.disabled = false;
-          alvo.textContent = rotuloOriginal;
-          throw erro;
+          if (botaoOriginal) { botaoOriginal.disabled = false; botaoOriginal.textContent = "🔔 Avisar"; }
+          definirFlash("erro", "Não deu pra avisar: " + erro.message);
+          return;
         }
-        const item = alvo.closest(".followup-item");
+        const item = botaoOriginal ? botaoOriginal.closest(".followup-item") : null;
         if (item) item.remove();
         atualizarContadorFollowup();
+        definirFlash("ok", "Aviso enviado.");
         return;
       }
       case "adiar-rapido": {
