@@ -354,6 +354,7 @@
           case "agendamentos": return renderAgendamentos();
           case "lembretes": return renderLembretes();
           case "dashboard": return renderDashboard();
+          case "vendas": return renderVendas();
           case "atividades": return renderAtividades();
           case "seguranca": return renderSeguranca();
           case "configuracao": return renderWhatsappConfiguracao();
@@ -377,6 +378,7 @@
     { rota: "#/agendamentos", chave: "agendamentos", label: "Agendamentos", icone: "🕒" },
     { rota: "#/lembretes", chave: "lembretes", label: "Lembretes", icone: "🔔" },
     { rota: "#/dashboard", chave: "dashboard", label: "Dashboard", icone: "📊", admin: true },
+    { rota: "#/vendas", chave: "vendas", label: "Vendas (CRM)", icone: "🧲" },
     { rota: "#/atividades", chave: "atividades", label: "Atividades", icone: "📋", admin: true },
     { rota: "#/seguranca", chave: "seguranca", label: "Segurança", icone: "🔒" },
     { rota: "#/configuracao", chave: "configuracao", label: "Configuração", icone: "⚙️", admin: true },
@@ -393,6 +395,7 @@
     { chave: "chat-interno", label: "Chat interno" },
     { chave: "agendamentos", label: "Agendamentos" },
     { chave: "lembretes", label: "Lembretes" },
+    { chave: "vendas", label: "Vendas (CRM)" },
     { chave: "seguranca", label: "Segurança" },
     { chave: "follow-up", label: "Follow-up" },
     { chave: "ligacoes", label: "Leads do Consulta Anvisa" },
@@ -4068,6 +4071,7 @@
           <button type="button" class="botao secundario pequeno ${(notas || []).length ? "wpp-icone-preenchido" : ""}" data-acao="abrir-notas" data-id="${conversa.id}" title="Só a equipe vê, nunca vai pro cliente">🗒️ Notas internas${(notas || []).length ? ` (${notas.length})` : ""}</button>
           <button type="button" class="botao secundario pequeno" data-acao="abrir-encaminhar" data-id="${conversa.id}">Encaminhar</button>
           ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno" data-acao="marcar-negociacao" data-id="${conversa.id}" title="Marca a venda como concluída sem encerrar o atendimento — pode marcar de novo quando o cliente fechar outra negociação depois">💰 Marcar negociação fechada</button>` : ""}
+          ${!conversa.eh_grupo ? `<button type="button" class="botao secundario pequeno" data-acao="abrir-criar-negocio-conversa" data-id="${conversa.id}" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" data-telefone="${escapeHtml(conversa.telefone || "")}" title="Cria um negócio no funil de Vendas ligado a esta conversa">🧲 Criar negócio</button>` : ""}
           ${!conversa.eh_grupo && state._catalogoPropostaAtivo ? `<button type="button" class="botao secundario pequeno" data-acao="enviar-catalogo-proposta" data-id="${conversa.id}" title="Manda um link pro cliente escolher item e quantidade — a proposta volta pronta pra esta conversa">🗂️ Enviar catálogo</button>` : ""}
           ${fechada
             ? `<button type="button" class="botao secundario pequeno" data-acao="reabrir-conversa" data-id="${conversa.id}">Reabrir</button>`
@@ -6431,6 +6435,199 @@
   }
 
   // =======================================================================
+  // VENDAS (CRM) — funil de negócios, pedido do Clayton (2026-09-11):
+  // "bora construir algo top... tudo monitorável por mim". O botão
+  // antigo "💰 Marcar negociação fechada" continua existindo e
+  // funcionando igual (ver case "marcar-negociacao") -- ele só passou a
+  // também alimentar este funil por baixo (ver backend,
+  // negocio_service.sincronizar_com_resultado).
+  // =======================================================================
+  function htmlCardNegocio(n) {
+    const atualizado = n.atualizado_em ? new Date(n.atualizado_em.endsWith("Z") ? n.atualizado_em : n.atualizado_em + "Z") : null;
+    const dias = atualizado ? Math.max(0, Math.floor((Date.now() - atualizado) / 86400000)) : 0;
+    return `<div class="vendas-card" draggable="true" data-negocio-id="${n.id}">
+      <div class="vendas-card-topo">
+        <strong>${escapeHtml(n.contato_nome || n.contato_telefone || "—")}</strong>
+        <button type="button" class="botao-icone" data-acao="editar-negocio" data-id="${n.id}" title="Editar">✏️</button>
+      </div>
+      ${n.titulo ? `<div class="texto-suave" style="font-size:11.5px;">${escapeHtml(n.titulo)}</div>` : ""}
+      <div class="vendas-card-rodape">
+        <span class="vendas-card-valor">${fmtMoeda(n.valor)}</span>
+        <span class="texto-suave" style="font-size:10.5px;">${dias}d</span>
+      </div>
+      <div class="texto-suave" style="font-size:10.5px;">${n.responsavel_nome ? "👤 " + escapeHtml(n.responsavel_nome) : "sem responsável"}${n.conversa_id ? ` · <a href="#/whatsapp/${n.conversa_id}">abrir conversa</a>` : ""}</div>
+      ${n.motivo_perda ? `<div class="texto-suave" style="font-size:10.5px;">Motivo: ${escapeHtml(n.motivo_perda)}</div>` : ""}
+    </div>`;
+  }
+
+  // Arrastar/soltar nativo (sem biblioteca) -- precisa ser religado
+  // depois de todo re-render, já que o innerHTML novo apaga os
+  // listeners dos cards antigos.
+  function _ativarDragDropVendas() {
+    document.querySelectorAll(".vendas-card").forEach((card) => {
+      card.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", card.dataset.negocioId);
+        card.classList.add("arrastando");
+      });
+      card.addEventListener("dragend", () => card.classList.remove("arrastando"));
+    });
+    document.querySelectorAll("[data-drop-estagio]").forEach((coluna) => {
+      coluna.addEventListener("dragover", (e) => { e.preventDefault(); coluna.classList.add("sobre"); });
+      coluna.addEventListener("dragleave", () => coluna.classList.remove("sobre"));
+      coluna.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        coluna.classList.remove("sobre");
+        const negocioId = Number(e.dataTransfer.getData("text/plain"));
+        const novoEstagio = coluna.dataset.dropEstagio;
+        const negocio = (state._negociosPorId || {})[negocioId];
+        if (!negocio || negocio.estagio === novoEstagio) return;
+        // Perdido sempre pergunta o motivo; ganho só pergunta o valor
+        // se o negócio ainda não tiver um (senão move direto).
+        if (novoEstagio === "perdido") { modalMotivoPerda(negocioId); return; }
+        if (novoEstagio === "ganho" && !negocio.valor) { modalFecharGanhoKanban(negocioId); return; }
+        try {
+          await chamarApi(`/negocios/${negocioId}/estagio`, { method: "PUT", body: { estagio: novoEstagio } });
+          renderVendas();
+        } catch (erro) {
+          definirFlash("erro", "Não deu pra mover: " + erro.message);
+        }
+      });
+    });
+  }
+
+  async function renderVendas() {
+    _carregandoSeTrocouDeTela("vendas");
+    const souAdmin = !!(state.usuarioAtual && state.usuarioAtual.admin);
+    const dePessoa = souAdmin ? (state.vendasResponsavel || "") : "";
+    const q = dePessoa ? `?responsavel_id=${dePessoa}` : "";
+    const [negocios, resumo, colegas] = await Promise.all([
+      chamarApi(`/negocios${q}`),
+      chamarApi(`/negocios/resumo${q}`),
+      souAdmin ? chamarApi("/usuarios").catch(() => []) : Promise.resolve([]),
+    ]);
+
+    state._negociosPorId = {};
+    const porEstagio = {};
+    negocios.forEach((n) => {
+      state._negociosPorId[n.id] = n;
+      (porEstagio[n.estagio] = porEstagio[n.estagio] || []).push(n);
+    });
+
+    const cartoes = [
+      { rotulo: "Taxa de conversão", valor: `${resumo.taxa_conversao}%`, icone: "🎯" },
+      { rotulo: "Ticket médio", valor: fmtMoeda(resumo.ticket_medio), icone: "💰" },
+      { rotulo: "Tempo médio até fechar", valor: `${resumo.tempo_medio_dias}d`, icone: "⏱️" },
+      { rotulo: "Ganhos", valor: resumo.ganhos.quantidade, icone: "✅" },
+    ].map((c) => `<div class="dash-cartao"><span class="dash-cartao-icone">${c.icone}</span><div><div class="dash-cartao-valor">${c.valor}</div><div class="dash-cartao-rotulo">${c.rotulo}</div></div></div>`).join("");
+
+    const seletor = souAdmin ? `
+      <div class="followup-quem">
+        <label>Ver de:</label>
+        <select data-acao-change="filtrar-vendas-usuario">
+          <option value="">Todo mundo</option>
+          ${colegas.filter((u) => u.ativo).map((u) => `<option value="${u.id}" ${String(dePessoa) === String(u.id) ? "selected" : ""}>${escapeHtml(u.nome)}</option>`).join("")}
+        </select>
+      </div>` : "";
+
+    const colunas = resumo.estagios.map((e) => {
+      const itens = porEstagio[e.chave] || [];
+      const valorTotal = itens.reduce((s, n) => s + (n.valor || 0), 0);
+      return `<div class="vendas-coluna">
+        <div class="vendas-coluna-cabecalho" style="border-top-color:${e.cor};">
+          <strong>${escapeHtml(e.nome)}</strong>
+          <span class="texto-suave">${itens.length} · ${fmtMoeda(valorTotal)}</span>
+        </div>
+        <div class="vendas-coluna-corpo" data-drop-estagio="${e.chave}">
+          ${itens.map(htmlCardNegocio).join("") || '<p class="texto-suave" style="padding:8px 4px;font-size:11.5px;">Nada aqui.</p>'}
+        </div>
+      </div>`;
+    }).join("");
+
+    renderShell(
+      `<div class="wpp-cabecalho-tela">
+         <h2 style="margin:0;">🧲 Vendas (CRM)</h2>
+         <button type="button" class="botao pequeno" data-acao="abrir-novo-negocio">+ Novo negócio</button>
+       </div>
+       ${seletor}
+       <div class="dash-cartoes">${cartoes}</div>
+       <div class="vendas-quadro">${colunas}</div>`,
+      "vendas"
+    );
+    _ativarDragDropVendas();
+  }
+
+  function modalNovoNegocio(contato, conversaId) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Novo negócio</h3>
+      <p class="texto-suave">${escapeHtml(contato.nome || contato.telefone)}</p>
+      <form data-form="criar-negocio" data-contato-id="${contato.id}" ${conversaId ? `data-conversa-id="${conversaId}"` : ""}>
+        <div class="campo"><label>Título (opcional)</label><input name="titulo" placeholder="Ex.: Pedido de reposição"></div>
+        <div class="campo"><label>Valor estimado (opcional)</label><input name="valor" type="number" step="0.01" min="0" placeholder="0,00"></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Criar negócio</button>
+        </div>
+      </form>`);
+  }
+
+  function htmlListaContatosNegocio(contatos) {
+    const semGrupo = (contatos || []).filter((c) => !c.eh_grupo);
+    if (!semGrupo.length) return '<p class="texto-suave">Nenhum contato encontrado.</p>';
+    return semGrupo.map((c) => `
+      <div class="wpp-contato-linha" data-acao="escolher-contato-negocio" data-id="${c.id}" data-nome="${escapeHtml(c.nome || "")}" data-telefone="${escapeHtml(c.telefone)}" style="cursor:pointer;">
+        ${htmlAvatarContato(c.foto_url, c.nome, c.telefone, 32)}
+        <div style="flex:1; min-width:0;"><strong>${escapeHtml(c.nome || c.telefone)}</strong>${c.nome ? `<div class="texto-suave">${escapeHtml(c.telefone)}</div>` : ""}</div>
+      </div>`).join("");
+  }
+
+  function modalEscolherContatoNegocio() {
+    abrirModal(`
+      <h3 style="margin-top:0;">Novo negócio</h3>
+      <p class="dica">Escolha o contato.</p>
+      <input type="search" data-acao-change="buscar-contatos-negocio" placeholder="Buscar por nome ou telefone…" class="wpp-busca-input" autofocus>
+      <div class="wpp-contatos-lista" data-vendas-lista-contatos style="margin-top:10px;"><p class="texto-suave">Digite pra buscar…</p></div>`);
+  }
+
+  function modalMotivoPerda(negocioId) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Marcar como perdido</h3>
+      <form data-form="confirmar-motivo-perda" data-negocio-id="${negocioId}">
+        <div class="campo"><label>Motivo (opcional)</label><textarea name="motivo_perda" rows="3" placeholder="Ex.: preço, escolheu concorrente, sumiu…"></textarea></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Marcar perdido</button>
+        </div>
+      </form>`);
+  }
+
+  function modalFecharGanhoKanban(negocioId) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Fechar como ganho</h3>
+      <form data-form="confirmar-fechar-ganho" data-negocio-id="${negocioId}">
+        <div class="campo"><label>Valor da venda</label><input name="valor" type="number" step="0.01" min="0" placeholder="0,00" autofocus></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Marcar ganho</button>
+        </div>
+      </form>`);
+  }
+
+  function modalEditarNegocio(n) {
+    abrirModal(`
+      <h3 style="margin-top:0;">Editar negócio</h3>
+      <p class="texto-suave">${escapeHtml(n.contato_nome || n.contato_telefone || "")}</p>
+      <form data-form="atualizar-negocio" data-negocio-id="${n.id}">
+        <div class="campo"><label>Título</label><input name="titulo" value="${escapeHtml(n.titulo || "")}"></div>
+        <div class="campo"><label>Valor</label><input name="valor" type="number" step="0.01" min="0" value="${n.valor !== null && n.valor !== undefined ? n.valor : ""}"></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="excluir-negocio" data-id="${n.id}" style="margin-right:auto; color:var(--vermelho);">🗑️ Excluir</button>
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Salvar</button>
+        </div>
+      </form>`);
+  }
+
+  // =======================================================================
   // SEGURANÇA — cada usuário ativa/desativa a própria verificação em
   // duas etapas (2FA/TOTP)
   // =======================================================================
@@ -8200,12 +8397,18 @@
         return modalNegociacoesFechadas(conversaId, negociacoes);
       }
       case "marcar-negociacao": {
-        if (!confirm("Marcar esta conversa como negociação fechada? Isso já entra na taxa de conversão do Dashboard.")) return;
         const conversaId = Number(alvo.dataset.id);
-        await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado: "venda" } });
-        fecharModais();
-        definirFlash("ok", "Negociação fechada marcada — já entra no Dashboard, sem encerrar o atendimento.");
-        return renderWhatsapp(conversaId);
+        abrirModal(`
+          <h3 style="margin-top:0;">Marcar negociação fechada</h3>
+          <p class="texto-suave">Isso já entra na taxa de conversão do Dashboard e no funil de Vendas — sem encerrar o atendimento.</p>
+          <form data-form="confirmar-negociacao-fechada" data-conversa-id="${conversaId}">
+            <div class="campo"><label>Valor da venda (opcional)</label><input name="valor" type="number" step="0.01" min="0" placeholder="0,00" autofocus></div>
+            <div class="rodape-modal">
+              <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+              <button type="submit" class="botao">Confirmar</button>
+            </div>
+          </form>`);
+        return;
       }
       case "desfazer-negociacao": {
         const conversaId = Number(alvo.dataset.id);
@@ -9066,6 +9269,46 @@
         state.followupUsuario = alvo.value || null;
         return carregarPainelFollowup();
       }
+      case "filtrar-vendas-usuario": {
+        state.vendasResponsavel = alvo.value || null;
+        return renderVendas();
+      }
+      case "abrir-novo-negocio": {
+        modalEscolherContatoNegocio();
+        return;
+      }
+      case "abrir-criar-negocio-conversa": {
+        modalNovoNegocio(
+          { id: Number(alvo.dataset.contatoId), nome: alvo.dataset.nome, telefone: alvo.dataset.telefone },
+          Number(alvo.dataset.id)
+        );
+        return;
+      }
+      case "buscar-contatos-negocio": {
+        const contatos = await chamarApi(`/whatsapp/contatos?q=${encodeURIComponent(alvo.value || "")}`).catch(() => []);
+        const lista = document.querySelector("[data-vendas-lista-contatos]");
+        if (lista) lista.innerHTML = htmlListaContatosNegocio(contatos);
+        return;
+      }
+      case "escolher-contato-negocio": {
+        const contato = { id: Number(alvo.dataset.id), nome: alvo.dataset.nome, telefone: alvo.dataset.telefone };
+        fecharModais();
+        modalNovoNegocio(contato);
+        return;
+      }
+      case "editar-negocio": {
+        const n = (state._negociosPorId || {})[Number(alvo.dataset.id)];
+        if (n) modalEditarNegocio(n);
+        return;
+      }
+      case "excluir-negocio": {
+        if (!confirm("Excluir este negócio? Não é possível desfazer.")) return;
+        const id = Number(alvo.dataset.id);
+        await chamarApi(`/negocios/${id}`, { method: "DELETE" });
+        fecharModais();
+        definirFlash("ok", "Negócio excluído.");
+        return renderVendas();
+      }
       case "renomear-catalogo": {
         const nome = alvo.value.trim();
         if (!nome) return renderWhatsappConfiguracao();
@@ -9438,6 +9681,48 @@
         await chamarApi(`/whatsapp/conversas/${conversaId}/resumo`, { method: "PUT", body: { resumo: dados.get("resumo") || "" } });
         fecharModais();
         definirFlash("ok", "Resumo salvo.");
+        return renderWhatsapp(conversaId);
+      }
+      case "criar-negocio": {
+        const contatoId = Number(form.dataset.contatoId);
+        const conversaId = form.dataset.conversaId ? Number(form.dataset.conversaId) : undefined;
+        await chamarApi("/negocios", { method: "POST", body: {
+          contato_id: contatoId, conversa_id: conversaId,
+          titulo: dados.get("titulo") || undefined, valor: dados.get("valor") || undefined,
+        } });
+        fecharModais();
+        definirFlash("ok", "Negócio criado.");
+        if (location.hash.startsWith("#/vendas")) return renderVendas();
+        return;
+      }
+      case "atualizar-negocio": {
+        const id = Number(form.dataset.negocioId);
+        await chamarApi(`/negocios/${id}`, { method: "PUT", body: {
+          titulo: dados.get("titulo") || "", valor: dados.get("valor") || undefined,
+        } });
+        fecharModais();
+        definirFlash("ok", "Negócio atualizado.");
+        return renderVendas();
+      }
+      case "confirmar-motivo-perda": {
+        const id = Number(form.dataset.negocioId);
+        await chamarApi(`/negocios/${id}/estagio`, { method: "PUT", body: { estagio: "perdido", motivo_perda: dados.get("motivo_perda") || undefined } });
+        fecharModais();
+        definirFlash("ok", "Negócio marcado como perdido.");
+        return renderVendas();
+      }
+      case "confirmar-fechar-ganho": {
+        const id = Number(form.dataset.negocioId);
+        await chamarApi(`/negocios/${id}/estagio`, { method: "PUT", body: { estagio: "ganho", valor: dados.get("valor") || undefined } });
+        fecharModais();
+        definirFlash("ok", "Negócio marcado como ganho.");
+        return renderVendas();
+      }
+      case "confirmar-negociacao-fechada": {
+        const conversaId = Number(form.dataset.conversaId);
+        await chamarApi(`/whatsapp/conversas/${conversaId}/resultado`, { method: "PUT", body: { resultado: "venda", valor: dados.get("valor") || undefined } });
+        fecharModais();
+        definirFlash("ok", "Negociação fechada marcada — já entra no Dashboard e no funil de Vendas, sem encerrar o atendimento.");
         return renderWhatsapp(conversaId);
       }
       case "agendar-mensagem": {

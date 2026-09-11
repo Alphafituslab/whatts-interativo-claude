@@ -96,6 +96,7 @@ SCHEMA_FILES = [
     "schema_081_notificacao_desktop.sql",
     "schema_082_followup_avisado.sql",
     "schema_083_limite_repeticao_mensagem.sql",
+    "schema_084_negocios.sql",
 ]
 
 

@@ -17,7 +17,7 @@ import secrets
 from flask import Blueprint, Response, g, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
-from .. import chat_interno_service, transcricao, whatsapp_service
+from .. import chat_interno_service, negocio_service, transcricao, whatsapp_service
 from ..context import ApiError, ForbiddenError, get_current_user, get_db, requires_admin, requires_auth
 
 bp = Blueprint("whatsapp", __name__, url_prefix="/api/v1/whatsapp")
@@ -2602,6 +2602,10 @@ def fechar_conversa(conversa_id):
     if resultado is None and conversa["resultado"]:
         resultado = conversa["resultado"]
     whatsapp_service.fechar_conversa(conn, conversa_id, resultado)
+    # Espelha o resultado no funil de vendas (CRM) -- move/cria o
+    # negócio correspondente como "Ganho"/"Perdido", sem mexer em nada
+    # do fluxo de cima (pedido do Clayton, 2026-09-11).
+    negocio_service.sincronizar_com_resultado(conn, g.empresa_id, conversa_id, resultado, usuario["id"])
     # Administrador encerrando o atendimento de OUTRA pessoa: libera o
     # dono na hora, pra a conversa ficar disponivel pra qualquer um do
     # setor pegar caso seja reaberta antes de o cliente escrever de novo
@@ -2629,6 +2633,14 @@ def marcar_resultado(conversa_id):
     resultado = dados.get("resultado")
     if resultado not in (None, "venda", "perdido"):
         raise ApiError("Resultado inválido — use 'venda', 'perdido' ou deixe em branco.", status=400)
+    valor = dados.get("valor")
+    if valor not in (None, ""):
+        try:
+            valor = float(valor)
+        except (TypeError, ValueError):
+            raise ApiError("Valor inválido.", status=400)
+    else:
+        valor = None
     conn = get_db()
     conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
     if not _pode_agir(usuario, conversa):
@@ -2651,6 +2663,9 @@ def marcar_resultado(conversa_id):
             "VALUES (?, ?, ?, ?, ?)",
             (conversa_id, conversa["contato_id"], usuario["id"], g.empresa_id, _now_iso()),
         )
+    # Espelha no funil de vendas (CRM) -- ver fechar_conversa acima pra
+    # mais contexto, é a mesma sincronização.
+    negocio_service.sincronizar_com_resultado(conn, g.empresa_id, conversa_id, resultado, usuario["id"], valor=valor)
     whatsapp_service.registrar_atividade(
         conn, usuario["id"], "resultado_marcado",
         f"{conversa['telefone']} ({resultado or 'sem marcação'})", conversa_id,

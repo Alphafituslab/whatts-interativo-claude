@@ -686,6 +686,31 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .dash-cartao-valor { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .dash-cartao-rotulo { font-size: 12px; color: var(--texto-suave); }
 
+/* Vendas (CRM) -- painel Kanban do funil, pedido do Clayton
+   (2026-09-11). Colunas em linha com rolagem horizontal (o corpo do
+   app já não rola na horizontal em nenhum outro lugar, então isolamos
+   a rolagem aqui dentro). */
+.vendas-quadro { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+.vendas-coluna {
+  background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio);
+  min-width: 240px; max-width: 240px; flex-shrink: 0; display: flex; flex-direction: column; max-height: 74vh;
+}
+.vendas-coluna-cabecalho {
+  padding: 10px 12px; border-top: 3px solid var(--borda); border-radius: var(--raio) var(--raio) 0 0;
+  display: flex; flex-direction: column; gap: 2px; font-size: 12.5px;
+}
+.vendas-coluna-corpo { padding: 8px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 60px; transition: background 0.12s ease; }
+.vendas-coluna-corpo.sobre { background: color-mix(in srgb, var(--primaria) 8%, transparent); }
+.vendas-card {
+  background: var(--fundo); border: 1px solid var(--borda); border-radius: var(--raio-peq); padding: 8px 10px;
+  cursor: grab; display: flex; flex-direction: column; gap: 4px;
+}
+.vendas-card.arrastando { opacity: 0.4; }
+.vendas-card-topo { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.vendas-card-topo strong { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vendas-card-rodape { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.vendas-card-valor { font-weight: 700; font-size: 12.5px; color: var(--primaria); }
+
 .dash-ranking { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .dash-ranking-item { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: var(--raio-peq); }
 .dash-ranking-item:hover { background: var(--superficie-2); }

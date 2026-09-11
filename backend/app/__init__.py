@@ -83,13 +83,14 @@ def create_app(test_config: dict = None) -> Flask:
         app.logger.exception("Erro não tratado")
         return jsonify({"erro": "erro_interno", "mensagem": "Erro interno do servidor."}), 500
 
-    from .routes import auth, catalogo, catalogo_publico, chamadas, chat_interno, downloads, envio_massa, followup, ligacoes, sistema, usuarios, whatsapp
+    from .routes import auth, catalogo, catalogo_publico, chamadas, chat_interno, downloads, envio_massa, followup, ligacoes, negocios, sistema, usuarios, whatsapp
     app.register_blueprint(auth.bp)
     app.register_blueprint(whatsapp.bp)
     app.register_blueprint(usuarios.bp)
     app.register_blueprint(sistema.bp)
     app.register_blueprint(chat_interno.bp)
     app.register_blueprint(followup.bp)
+    app.register_blueprint(negocios.bp)
     app.register_blueprint(downloads.bp)
     app.register_blueprint(ligacoes.bp)
     app.register_blueprint(envio_massa.bp)
