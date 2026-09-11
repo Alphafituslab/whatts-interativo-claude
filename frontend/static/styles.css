@@ -238,6 +238,7 @@ h1, h2, h3 { letter-spacing: -0.02em; font-weight: 800; }
 .selo.amarelo { background: color-mix(in srgb, var(--amarelo) 16%, transparent); color: var(--amarelo); }
 .selo.inativo { background: color-mix(in srgb, var(--texto-suave) 16%, transparent); color: var(--texto-suave); }
 .selo.bloqueado { background: color-mix(in srgb, var(--vermelho) 14%, transparent); color: var(--vermelho); }
+.selo.azul { background: color-mix(in srgb, #3b82f6 16%, transparent); color: #3b82f6; }
 .selo.amarelo::before { animation: pulso-suave 1.6s ease-in-out infinite; }
 @keyframes pulso-suave { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 

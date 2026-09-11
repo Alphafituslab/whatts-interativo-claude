@@ -64,10 +64,11 @@ def listar(conn, empresa_id, responsavel_id=None):
     precisar de mais nenhuma consulta por card."""
     query = (
         "SELECT n.*, ct.nome AS contato_nome, ct.telefone AS contato_telefone, ct.foto_url AS contato_foto, "
-        "u.nome AS responsavel_nome "
+        "u.nome AS responsavel_nome, c.origem_lead "
         "FROM whatsapp_negocios n "
         "JOIN whatsapp_contatos ct ON ct.id = n.contato_id "
         "LEFT JOIN usuarios u ON u.id = n.responsavel_usuario_id "
+        "LEFT JOIN whatsapp_conversas c ON c.id = n.conversa_id "
         "WHERE n.empresa_id = ?"
     )
     params = [empresa_id]

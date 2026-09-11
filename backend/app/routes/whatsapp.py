@@ -1424,6 +1424,11 @@ def iniciar_conversa():
                            status=409, codigo="conversa_atribuida", extra=_dados_do_dono(conversa))
     else:
         nova, _ = whatsapp_service.obter_ou_criar_conversa(conn, contato["id"])
+        # Atendente escreveu primeiro pra um contato que nunca tinha
+        # falado com a empresa -- é captação própria dele, não o cliente
+        # chegando sozinho (ver whatsapp_service._detectar_origem_lead,
+        # que cuida do caso inverso). Pedido do Clayton (2026-09-11).
+        conn.execute("UPDATE whatsapp_conversas SET origem_lead = 'captacao_propria' WHERE id = ?", (nova["id"],))
         conversa = _carregar_conversa(conn, g.empresa_id, nova["id"])
 
     whatsapp_service.verificar_repeticao_mensagem(conn, g.empresa_id, texto)
@@ -3049,6 +3054,13 @@ def resetar_dashboard():
     conn = get_db()
     whatsapp_service.resetar_dashboard(conn, g.empresa_id)
     return jsonify({"ok": True})
+
+
+@bp.get("/dashboard/origem-leads")
+@requires_admin
+def dashboard_origem_leads():
+    conn = get_db()
+    return jsonify(whatsapp_service.calcular_origem_leads(conn, g.empresa_id))
 
 
 @bp.get("/dashboard/mapa")

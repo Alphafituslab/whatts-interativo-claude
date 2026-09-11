@@ -1219,6 +1219,25 @@ def apagar_todos_dados_clientes(conn, empresa_id: int):
 LIMITE_REPETICOES_MENSAGEM = 5
 JANELA_REPETICAO_MINUTOS = 60
 
+# Origem do lead -- pedido do Clayton (2026-09-11): o botão "fale
+# conosco" da landing page abre o WhatsApp com esta mensagem já
+# preenchida. Quando a PRIMEIRA mensagem de um contato novo bate com
+# ela, a conversa nasce já marcada como vinda de tráfego pago -- sem
+# precisar de nenhum link com UTM nem número separado.
+FRASE_LANDING_PAGE = "olá, tenho interesse em terceirizar a produção dos meus produtos"
+
+
+def _detectar_origem_lead(texto):
+    """None quando não dá pra afirmar (aí quem chamou decide o padrão:
+    'organico' se foi o cliente que escreveu, 'captacao_propria' se foi
+    o atendente)."""
+    if not texto:
+        return None
+    normalizado = " ".join(texto.strip().lower().split())
+    if normalizado == FRASE_LANDING_PAGE:
+        return "trafego_pago"
+    return None
+
 
 def verificar_repeticao_mensagem(conn, empresa_id: int, texto: str, config=None):
     """Proteção anti-spam: manda a MESMA mensagem, com o texto idêntico,
@@ -2794,6 +2813,51 @@ def resetar_dashboard(conn, empresa_id: int):
 GAP_MAX_ATENDIMENTO_MIN = 6 * 60
 
 
+def calcular_origem_leads(conn, empresa_id: int):
+    """Quantidade de conversas por origem do lead (tráfego pago,
+    captação própria, chegou sozinho) e quantas delas viraram venda --
+    pedido do Clayton (2026-09-11): "podemos avaliar eles por
+    desempenho" olhando de onde vem o lead de cada atendente. Função à
+    parte de calcular_dashboard (que já é grande e sensível) de
+    propósito -- mais fácil de testar e não arrisca nada do resto."""
+    linhas = conn.execute(
+        """
+        SELECT c.origem_lead, c.atribuida_usuario_id, u.nome AS usuario_nome,
+               EXISTS(SELECT 1 FROM whatsapp_negociacoes_fechadas nf WHERE nf.conversa_id = c.id) AS fechou_venda
+        FROM whatsapp_conversas c
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id
+        WHERE ct.empresa_id = ? AND c.origem_lead IS NOT NULL AND c.excluida_em IS NULL
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+    totais = {chave: {"quantidade": 0, "vendas": 0} for chave in ("trafego_pago", "captacao_propria", "organico")}
+    por_usuario = {}
+    for l in linhas:
+        origem = l["origem_lead"]
+        if origem not in totais:
+            continue
+        totais[origem]["quantidade"] += 1
+        fechou = bool(l["fechou_venda"])
+        if fechou:
+            totais[origem]["vendas"] += 1
+        uid = l["atribuida_usuario_id"]
+        if uid:
+            linha_usuario = por_usuario.setdefault(uid, {
+                "usuario_id": uid, "usuario_nome": l["usuario_nome"],
+                "trafego_pago": 0, "captacao_propria": 0, "organico": 0, "vendas": 0,
+            })
+            linha_usuario[origem] += 1
+            if fechou:
+                linha_usuario["vendas"] += 1
+
+    for chave, dado in totais.items():
+        dado["taxa_conversao"] = round(dado["vendas"] / dado["quantidade"] * 100, 1) if dado["quantidade"] else 0
+
+    return {"totais": totais, "por_usuario": sorted(por_usuario.values(), key=lambda x: x["usuario_nome"] or "")}
+
+
 def calcular_dashboard(conn, empresa_id: int):
     config_dash = obter_configuracao(conn, empresa_id)
     reset_em = config_dash.get("dashboard_reset_em")
@@ -3171,6 +3235,9 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     # no histórico), mas em vez de cair direto na fila geral, dispara o
     # menu de setores pro cliente escolher.
     if conversa_nova:
+        if not de_grupo:
+            origem_lead = _detectar_origem_lead(texto) or "organico"
+            conn.execute("UPDATE whatsapp_conversas SET origem_lead = ? WHERE id = ?", (origem_lead, conversa["id"]))
         conn.execute(
             """
             INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em,
@@ -3274,6 +3341,16 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
             conn.execute("SELECT id, nome FROM usuarios WHERE id = ? AND ativo = 1", (dono_anterior_id,)).fetchone()
             if dono_anterior_id else None
         )
+        # O "Usuário do sistema" (ex.: Assistente Seja Alpha, usado nos
+        # avisos automáticos) não é uma pessoa de verdade -- se a
+        # conversa ficou atribuída a ele (ex.: admin usou "Atribuir a..."
+        # sem querer), o cliente NÃO pode ver essa oferta de "continuar
+        # com Assistente Seja Alpha". Trata como se não tivesse dono
+        # nenhum e cai direto no menu de setor normal. Pedido do Clayton
+        # (2026-09-11): "arrumar pra não aparecer o seja alpha no menu
+        # que envia ao cliente quando ele chama".
+        if atendente_anterior and atendente_anterior["id"] == config.get("usuario_sistema_id"):
+            atendente_anterior = None
         if atendente_anterior:
             _iniciar_retomar_atendimento(conn, empresa_id, conversa["id"], telefone, atendente_anterior)
             return {"processado": True, "tipo": "retomar_perguntado", "conversa_id": conversa["id"]}

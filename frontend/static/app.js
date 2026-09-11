@@ -2075,6 +2075,18 @@
   // FOLLOW-UP — painel lateral discreto: contador sempre visível, lista
   // só quando aberta (pra não pesar as telas nem roubar espaço).
   // ---------------------------------------------------------------
+  const ROTULO_ORIGEM_LEAD = {
+    trafego_pago: ["azul", "🌐 Tráfego pago", "Primeira mensagem bateu com a frase da landing page"],
+    captacao_propria: ["amarelo", "🎯 Captação própria", "Foi o atendente que escreveu primeiro pra este contato"],
+    organico: ["ativo", "💬 Chegou por conta própria", "O cliente escreveu primeiro, sem vir da landing page"],
+  };
+  function htmlSeloOrigemLead(origem) {
+    const dado = ROTULO_ORIGEM_LEAD[origem];
+    if (!dado) return "";
+    const [classe, rotulo, titulo] = dado;
+    return `<span class="selo ${classe}" title="${escapeHtml(titulo)}">${rotulo}</span>`;
+  }
+
   const ROTULO_SITUACAO = {
     agendado_vencido: ["🔴", "Retorno prometido e não cumprido"],
     atrasado: ["🔴", "Sem contato há tempo demais"],
@@ -4062,7 +4074,7 @@
           <div class="wpp-chat-nome"><span class="wpp-chat-nome-texto" title="${escapeHtml(nome)}">${escapeHtml(nome)}</span> <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Trocar o nome deste contato (só você vê)">✏️</button></div>
           <div class="texto-suave wpp-chat-telefone">${conversa.eh_grupo
             ? `👥 Grupo${conversa.membros_whatsapp ? ` · ${conversa.membros_whatsapp} participantes` : ""}`
-            : escapeHtml(_telefoneBonito(conversa.telefone))}${conversa.menu_setor && !conversa.eh_grupo ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
+            : escapeHtml(_telefoneBonito(conversa.telefone))}${conversa.menu_setor && !conversa.eh_grupo ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${!conversa.eh_grupo && conversa.origem_lead ? ` · ${htmlSeloOrigemLead(conversa.origem_lead)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
         </div>
         <div class="wpp-chat-acoes">
           <button type="button" class="botao-icone" data-acao="alternar-busca-mensagens" title="Buscar nesta conversa">🔍</button>
@@ -6306,9 +6318,10 @@
 
   async function renderDashboard() {
     _carregandoSeTrocouDeTela("dashboard");
-    const [painel, mapa] = await Promise.all([
+    const [painel, mapa, origemLeads] = await Promise.all([
       chamarApi("/whatsapp/dashboard"),
       chamarApi("/whatsapp/dashboard/mapa"),
+      chamarApi("/whatsapp/dashboard/origem-leads").catch(() => null),
     ]);
     const t = painel.totais;
 
@@ -6381,6 +6394,28 @@
         </tr>`).join("")
       : `<tr><td colspan="5" class="texto-suave">Nenhum contato ainda.</td></tr>`;
 
+    const rotuloOrigem = { trafego_pago: "🌐 Tráfego pago", captacao_propria: "🎯 Captação própria", organico: "💬 Chegou por conta própria" };
+    const cartoesOrigem = origemLeads
+      ? Object.entries(origemLeads.totais).map(([chave, d]) => `
+          <div class="dash-cartao">
+            <span class="dash-cartao-icone">${rotuloOrigem[chave].split(" ")[0]}</span>
+            <div>
+              <div class="dash-cartao-valor">${d.quantidade}</div>
+              <div class="dash-cartao-rotulo">${rotuloOrigem[chave].split(" ").slice(1).join(" ")} · ${d.taxa_conversao}% viram venda</div>
+            </div>
+          </div>`).join("")
+      : "";
+    const linhasOrigemUsuario = origemLeads && origemLeads.por_usuario.length
+      ? origemLeads.por_usuario.map((u) => `
+          <tr>
+            <td>${escapeHtml(u.usuario_nome || "—")}</td>
+            <td>${u.trafego_pago}</td>
+            <td>${u.captacao_propria}</td>
+            <td>${u.organico}</td>
+            <td>${u.vendas}</td>
+          </tr>`).join("")
+      : `<tr><td colspan="5" class="texto-suave">Nenhum lead com origem identificada ainda.</td></tr>`;
+
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Dashboard</h2>
@@ -6391,6 +6426,16 @@
        </div>
        ${t.dashboard_reset_em ? `<p class="dica" style="margin-top:-8px;">Contando desde ${fmtData(t.dashboard_reset_em)} — as conversas de antes continuam salvas, só não entram nesses números.</p>` : ""}
        <div class="dash-cartoes">${cartoes}</div>
+
+       ${origemLeads ? `<div class="cartao">
+         <h3 style="margin-top:0;">🧭 Origem dos leads</h3>
+         <p class="dica">Detectado automaticamente: tráfego pago é quando a primeira mensagem bate com a frase cadastrada da landing page; captação própria é quando o atendente escreveu primeiro; o resto é o cliente chegando por conta própria.</p>
+         <div class="dash-cartoes">${cartoesOrigem}</div>
+         <table style="margin-top:14px;">
+           <thead><tr><th>Usuário</th><th>🌐 Tráfego pago</th><th>🎯 Captação própria</th><th>💬 Conta própria</th><th>Vendas fechadas</th></tr></thead>
+           <tbody>${linhasOrigemUsuario}</tbody>
+         </table>
+       </div>` : ""}
 
        <div class="cartao">
          <h3 style="margin-top:0;">🗺️ De onde vêm os leads</h3>
@@ -6450,6 +6495,7 @@
         <strong>${escapeHtml(n.contato_nome || n.contato_telefone || "—")}</strong>
         <button type="button" class="botao-icone" data-acao="editar-negocio" data-id="${n.id}" title="Editar">✏️</button>
       </div>
+      ${n.origem_lead ? `<div>${htmlSeloOrigemLead(n.origem_lead)}</div>` : ""}
       ${n.titulo ? `<div class="texto-suave" style="font-size:11.5px;">${escapeHtml(n.titulo)}</div>` : ""}
       <div class="vendas-card-rodape">
         <span class="vendas-card-valor">${fmtMoeda(n.valor)}</span>
