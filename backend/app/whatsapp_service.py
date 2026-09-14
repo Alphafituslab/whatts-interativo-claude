@@ -3101,20 +3101,41 @@ def calcular_dashboard(conn, empresa_id: int):
     }
 
 
-def calcular_mapa_regioes(conn, empresa_id: int):
+def calcular_mapa_regioes(conn, empresa_id: int, origem_lead: str = None):
     """Agrega leads (contatos), atendimentos (conversas) e vendas por
     região/estado — descobertos automaticamente pelo DDD do telefone do
-    contato, sem precisar perguntar nada pra ele."""
-    linhas = conn.execute(
-        """
-        SELECT ct.id AS contato_id, ct.telefone,
-               c.id AS conversa_id, c.resultado
-        FROM whatsapp_contatos ct
-        LEFT JOIN whatsapp_conversas c ON c.contato_id = ct.id AND c.excluida_em IS NULL
-        WHERE ct.empresa_id = ?
-        """,
-        (empresa_id,),
-    ).fetchall()
+    contato, sem precisar perguntar nada pra ele.
+
+    origem_lead filtra pra só contar quem veio daquela origem (ex.:
+    "trafego_pago") -- pedido do Clayton (2026-09-14): "eu poder
+    visualizar somente os leeds proveniente da land page" no mapa por
+    região. Sem filtro, conta todo mundo (comportamento de sempre). Com
+    filtro, vira JOIN em vez de LEFT JOIN -- só entra quem tem pelo
+    menos uma conversa daquela origem; sem isso, um contato sem nenhuma
+    conversa de tráfego pago continuaria aparecendo como "lead" do jeito
+    que o LEFT JOIN original sempre fez."""
+    if origem_lead:
+        linhas = conn.execute(
+            """
+            SELECT ct.id AS contato_id, ct.telefone,
+                   c.id AS conversa_id, c.resultado
+            FROM whatsapp_contatos ct
+            JOIN whatsapp_conversas c ON c.contato_id = ct.id AND c.excluida_em IS NULL AND c.origem_lead = ?
+            WHERE ct.empresa_id = ?
+            """,
+            (origem_lead, empresa_id),
+        ).fetchall()
+    else:
+        linhas = conn.execute(
+            """
+            SELECT ct.id AS contato_id, ct.telefone,
+                   c.id AS conversa_id, c.resultado
+            FROM whatsapp_contatos ct
+            LEFT JOIN whatsapp_conversas c ON c.contato_id = ct.id AND c.excluida_em IS NULL
+            WHERE ct.empresa_id = ?
+            """,
+            (empresa_id,),
+        ).fetchall()
 
     por_regiao, por_estado = {}, {}
 

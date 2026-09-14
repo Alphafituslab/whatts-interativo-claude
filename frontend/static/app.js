@@ -6394,9 +6394,10 @@
 
   async function renderDashboard() {
     _carregandoSeTrocouDeTela("dashboard");
+    const mapaSoTrafego = !!state.mapaSoTrafegoPago;
     const [painel, mapa, origemLeads, historicoOrigem] = await Promise.all([
       chamarApi("/whatsapp/dashboard"),
-      chamarApi("/whatsapp/dashboard/mapa"),
+      chamarApi(`/whatsapp/dashboard/mapa${mapaSoTrafego ? "?origem_lead=trafego_pago" : ""}`),
       chamarApi("/whatsapp/dashboard/origem-leads").catch(() => null),
       chamarApi("/whatsapp/dashboard/origem-leads/historico?dias=180").catch(() => []),
     ]);
@@ -6532,8 +6533,14 @@
        </div>` : ""}
 
        <div class="cartao">
-         <h3 style="margin-top:0;">🗺️ De onde vêm os leads</h3>
-         <p class="dica">Região identificada automaticamente pelo DDD do telefone de cada contato — nenhum cliente precisa informar nada.</p>
+         <div class="wpp-cabecalho-tela" style="margin-bottom:0;">
+           <h3 style="margin:0;">🗺️ De onde vêm os leads</h3>
+           <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+             <input type="checkbox" data-acao-change="alternar-mapa-trafego-pago" ${mapaSoTrafego ? "checked" : ""}>
+             🌐 Só tráfego pago
+           </label>
+         </div>
+         <p class="dica">Região identificada automaticamente pelo DDD do telefone de cada contato — nenhum cliente precisa informar nada.${mapaSoTrafego ? " Mostrando só quem veio da landing page." : ""}</p>
          ${htmlMapaRegioes(mapa)}
          <div class="dash-graficos-linha">
            <div>
@@ -9415,6 +9422,10 @@
       }
       case "trocar-periodo-origem": {
         state.dashOrigemPeriodo = alvo.dataset.periodo;
+        return renderDashboard();
+      }
+      case "alternar-mapa-trafego-pago": {
+        state.mapaSoTrafegoPago = alvo.checked;
         return renderDashboard();
       }
       case "abrir-novo-negocio": {

@@ -3076,7 +3076,8 @@ def dashboard_origem_leads_historico():
 @requires_admin
 def dashboard_mapa():
     conn = get_db()
-    return jsonify(whatsapp_service.calcular_mapa_regioes(conn, g.empresa_id))
+    origem_lead = request.args.get("origem_lead") or None
+    return jsonify(whatsapp_service.calcular_mapa_regioes(conn, g.empresa_id, origem_lead=origem_lead))
 
 
 @bp.get("/dashboard/exportar")
