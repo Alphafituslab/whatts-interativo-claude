@@ -9526,7 +9526,13 @@
         const mensagem_ids = checks.map((c) => Number(c.dataset.mensagemId));
         await chamarApi("/whatsapp/numeros-monitorados/ocultar", { method: "POST", body: { mensagem_ids } });
         definirFlash("ok", `${mensagem_ids.length} mensagem(ns) removida(s) da tela de monitorados.`);
-        return renderWhatsappConfiguracao();
+        const scrollAntes = document.querySelector(".pagina")?.scrollTop;
+        await renderWhatsappConfiguracao();
+        if (scrollAntes !== undefined) {
+          const pagina = document.querySelector(".pagina");
+          if (pagina) pagina.scrollTop = scrollAntes;
+        }
+        return;
       }
       case "ver-leads-regiao": {
         const regiao = alvo.dataset.regiao;
