@@ -6315,6 +6315,60 @@
   }
   const CORES_REGIAO = { "Norte": "#22c55e", "Nordeste": "#f59e0b", "Centro-Oeste": "#eab308", "Sudeste": "#7c5cff", "Sul": "#0a8f74", "Não identificado": "#6b7280" };
 
+  // Agrupa o histórico diário (vem cru do backend, um dia por linha) em
+  // dia/semana/mês -- pedido do Clayton (2026-09-14): acompanhar leads
+  // de tráfego pago por período pra decidir investimento em campanha.
+  function _somaPorDia(historico) {
+    const porDia = {};
+    (historico || []).forEach((h) => {
+      if (h.origem !== "trafego_pago") return;
+      porDia[h.dia] = (porDia[h.dia] || 0) + h.quantidade;
+    });
+    return porDia;
+  }
+  function _bucketsDiarios(historico, dias) {
+    const porDia = _somaPorDia(historico);
+    const hoje = new Date();
+    const resultado = [];
+    for (let i = dias - 1; i >= 0; i--) {
+      const d = new Date(hoje); d.setDate(d.getDate() - i);
+      const chave = d.toISOString().slice(0, 10);
+      resultado.push({ label: d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }), valor: porDia[chave] || 0 });
+    }
+    return resultado;
+  }
+  function _bucketsSemanais(historico, semanas) {
+    const porDia = _somaPorDia(historico);
+    const hoje = new Date();
+    const resultado = [];
+    for (let i = semanas - 1; i >= 0; i--) {
+      const fim = new Date(hoje); fim.setDate(fim.getDate() - i * 7);
+      const inicio = new Date(fim); inicio.setDate(inicio.getDate() - 6);
+      let soma = 0;
+      for (let d = new Date(inicio); d <= fim; d.setDate(d.getDate() + 1)) {
+        soma += porDia[d.toISOString().slice(0, 10)] || 0;
+      }
+      resultado.push({
+        label: `${inicio.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}–${fim.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}`,
+        valor: soma,
+      });
+    }
+    return resultado;
+  }
+  function _bucketsMensais(historico, meses) {
+    const porDia = _somaPorDia(historico);
+    const porMes = {};
+    Object.entries(porDia).forEach(([dia, n]) => { const chave = dia.slice(0, 7); porMes[chave] = (porMes[chave] || 0) + n; });
+    const hoje = new Date();
+    const resultado = [];
+    for (let i = meses - 1; i >= 0; i--) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      const chave = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      resultado.push({ label: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }), valor: porMes[chave] || 0 });
+    }
+    return resultado;
+  }
+
   function htmlMapaRegioes(mapa) {
     const porRegiao = {};
     mapa.regioes.forEach((r) => { porRegiao[r.regiao] = r; });
@@ -6340,10 +6394,11 @@
 
   async function renderDashboard() {
     _carregandoSeTrocouDeTela("dashboard");
-    const [painel, mapa, origemLeads] = await Promise.all([
+    const [painel, mapa, origemLeads, historicoOrigem] = await Promise.all([
       chamarApi("/whatsapp/dashboard"),
       chamarApi("/whatsapp/dashboard/mapa"),
       chamarApi("/whatsapp/dashboard/origem-leads").catch(() => null),
+      chamarApi("/whatsapp/dashboard/origem-leads/historico?dias=180").catch(() => []),
     ]);
     const t = painel.totais;
 
@@ -6427,6 +6482,22 @@
             </div>
           </div>`).join("")
       : "";
+    const periodoOrigem = state.dashOrigemPeriodo || "dia";
+    const hojeStr = new Date().toISOString().slice(0, 10);
+    const trafegoHoje = _somaPorDia(historicoOrigem)[hojeStr] || 0;
+    const dadosGraficoOrigem = periodoOrigem === "semana" ? _bucketsSemanais(historicoOrigem, 10)
+      : periodoOrigem === "mes" ? _bucketsMensais(historicoOrigem, 6)
+      : _bucketsDiarios(historicoOrigem, 14);
+    const abasPeriodoOrigem = [{ c: "dia", l: "Por dia" }, { c: "semana", l: "Por semana" }, { c: "mes", l: "Por mês" }]
+      .map((a) => `<button type="button" class="botao ${periodoOrigem === a.c ? "" : "secundario"} pequeno" data-acao="trocar-periodo-origem" data-periodo="${a.c}">${a.l}</button>`)
+      .join("");
+    const graficoOrigemHtml = `
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-top:16px; flex-wrap:wrap;">
+        <div><strong style="font-size:22px;">${trafegoHoje}</strong> <span class="texto-suave">🌐 lead(s) de tráfego pago hoje</span></div>
+        <div style="display:flex; gap:6px;">${abasPeriodoOrigem}</div>
+      </div>
+      <div style="margin-top:10px;">${htmlBarrasHorizontais(dadosGraficoOrigem.map((d) => ({ label: d.label, valor: d.valor, cor: "#3b82f6" })))}</div>`;
+
     const linhasOrigemUsuario = origemLeads && origemLeads.por_usuario.length
       ? origemLeads.por_usuario.map((u) => `
           <tr>
@@ -6453,7 +6524,8 @@
          <h3 style="margin-top:0;">🧭 Origem dos leads</h3>
          <p class="dica">Detectado automaticamente: tráfego pago é quando a primeira mensagem bate com a frase cadastrada da landing page; captação própria é quando o atendente escreveu primeiro; o resto é o cliente chegando por conta própria.</p>
          <div class="dash-cartoes">${cartoesOrigem}</div>
-         <table style="margin-top:14px;">
+         ${graficoOrigemHtml}
+         <table style="margin-top:20px;">
            <thead><tr><th>Usuário</th><th>🌐 Tráfego pago</th><th>🎯 Captação própria</th><th>💬 Conta própria</th><th>Vendas fechadas</th></tr></thead>
            <tbody>${linhasOrigemUsuario}</tbody>
          </table>
@@ -9340,6 +9412,10 @@
       case "filtrar-vendas-usuario": {
         state.vendasResponsavel = alvo.value || null;
         return renderVendas();
+      }
+      case "trocar-periodo-origem": {
+        state.dashOrigemPeriodo = alvo.dataset.periodo;
+        return renderDashboard();
       }
       case "abrir-novo-negocio": {
         modalEscolherContatoNegocio();

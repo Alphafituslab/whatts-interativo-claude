@@ -3063,6 +3063,15 @@ def dashboard_origem_leads():
     return jsonify(whatsapp_service.calcular_origem_leads(conn, g.empresa_id))
 
 
+@bp.get("/dashboard/origem-leads/historico")
+@requires_admin
+def dashboard_origem_leads_historico():
+    conn = get_db()
+    dias = request.args.get("dias", 90, type=int)
+    dias = max(7, min(dias, 366))
+    return jsonify(whatsapp_service.historico_origem_leads(conn, g.empresa_id, dias=dias))
+
+
 @bp.get("/dashboard/mapa")
 @requires_admin
 def dashboard_mapa():

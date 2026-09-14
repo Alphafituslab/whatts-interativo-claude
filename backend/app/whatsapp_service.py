@@ -2820,6 +2820,11 @@ def calcular_origem_leads(conn, empresa_id: int):
     desempenho" olhando de onde vem o lead de cada atendente. Função à
     parte de calcular_dashboard (que já é grande e sensível) de
     propósito -- mais fácil de testar e não arrisca nada do resto."""
+    sistema_id = conn.execute(
+        "SELECT usuario_sistema_id FROM configuracoes_whatsapp WHERE empresa_id = ?", (empresa_id,)
+    ).fetchone()
+    sistema_id = sistema_id["usuario_sistema_id"] if sistema_id else None
+
     linhas = conn.execute(
         """
         SELECT c.origem_lead, c.atribuida_usuario_id, u.nome AS usuario_nome,
@@ -2843,7 +2848,7 @@ def calcular_origem_leads(conn, empresa_id: int):
         if fechou:
             totais[origem]["vendas"] += 1
         uid = l["atribuida_usuario_id"]
-        if uid:
+        if uid and uid != sistema_id:
             linha_usuario = por_usuario.setdefault(uid, {
                 "usuario_id": uid, "usuario_nome": l["usuario_nome"],
                 "trafego_pago": 0, "captacao_propria": 0, "organico": 0, "vendas": 0,
@@ -2856,6 +2861,29 @@ def calcular_origem_leads(conn, empresa_id: int):
         dado["taxa_conversao"] = round(dado["vendas"] / dado["quantidade"] * 100, 1) if dado["quantidade"] else 0
 
     return {"totais": totais, "por_usuario": sorted(por_usuario.values(), key=lambda x: x["usuario_nome"] or "")}
+
+
+def historico_origem_leads(conn, empresa_id: int, dias: int = 90):
+    """Contagem diária de conversas por origem do lead, nos últimos
+    `dias` dias -- pedido do Clayton (2026-09-14): acompanhar quantos
+    leads de tráfego pago chegam por dia/semana/mês, pra decidir se
+    aumenta ou diminui o investimento em campanha. O frontend agrupa
+    os dias em semana/mês sozinho -- é mais simples devolver por dia e
+    deixar a soma pra quem exibe do que manter três consultas parecidas.
+    """
+    desde = (datetime.datetime.utcnow() - datetime.timedelta(days=dias)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    linhas = conn.execute(
+        """
+        SELECT date(c.criado_em) AS dia, c.origem_lead AS origem, COUNT(*) AS quantidade
+        FROM whatsapp_conversas c
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        WHERE ct.empresa_id = ? AND c.origem_lead IS NOT NULL AND c.excluida_em IS NULL AND c.criado_em >= ?
+        GROUP BY dia, c.origem_lead
+        ORDER BY dia
+        """,
+        (empresa_id, desde),
+    ).fetchall()
+    return [dict(l) for l in linhas]
 
 
 def calcular_dashboard(conn, empresa_id: int):
@@ -2879,7 +2907,11 @@ def calcular_dashboard(conn, empresa_id: int):
         if c.get("atribuida_usuario_id"):
             paradas_por_usuario[c["atribuida_usuario_id"]] = paradas_por_usuario.get(c["atribuida_usuario_id"], 0) + 1
 
-    usuarios = conn.execute("SELECT * FROM usuarios WHERE empresa_id = ? ORDER BY nome", (empresa_id,)).fetchall()
+    sistema_id_dash = config_dash.get("usuario_sistema_id")
+    usuarios = conn.execute(
+        "SELECT * FROM usuarios WHERE empresa_id = ? AND id != ? ORDER BY nome",
+        (empresa_id, sistema_id_dash or 0),
+    ).fetchall()
     resultado_usuarios = []
 
     for u in usuarios:
