@@ -6090,17 +6090,24 @@
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao secundario">+ Adicionar número monitorado</button></div>
          </form>
          ${numerosMonitoradosHistorico.length ? `
-         <p class="dica" style="margin-top:16px;">Últimas mensagens nesses números:</p>
-         <div style="display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto;">
+         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+           <p class="dica" style="margin:0;">Últimas mensagens nesses números:</p>
+           <button type="button" class="botao secundario pequeno" data-acao="apagar-mensagens-monitoradas-selecionadas">🗑️ Apagar selecionadas</button>
+         </div>
+         <div style="display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto; margin-top:8px;">
            ${numerosMonitoradosHistorico.map((m) => `
-             <a href="#/whatsapp/${m.conversa_id}" style="display:block; text-decoration:none; color:inherit; background:var(--superficie-2); border-radius:8px; padding:8px 10px;">
-               <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
-                 <strong>${escapeHtml(m.contato_nome || m.telefone)}</strong>
-                 <span class="texto-suave" style="font-size:11px;">${fmtData(m.criado_em)}</span>
+             <div style="display:flex; gap:8px; align-items:flex-start; background:var(--superficie-2); border-radius:8px; padding:8px 10px;">
+               <input type="checkbox" data-monitorada-check data-mensagem-id="${m.id}" style="margin-top:4px;">
+               <div style="flex:1; min-width:0;">
+                 <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+                   <strong>${escapeHtml(m.contato_nome || m.telefone)}</strong>
+                   <span class="texto-suave" style="font-size:11px;">${fmtData(m.criado_em)}</span>
+                 </div>
+                 <div class="texto-suave" style="font-size:12px;">${m.direcao === "saida" ? `${escapeHtml(m.usuario_nome || "sistema")} enviou` : "recebido"}${m.tipo !== "texto" ? ` · ${({imagem:"📷 imagem",video:"🎥 vídeo",audio:"🎵 áudio",documento:"📄 documento"})[m.tipo] || m.tipo}` : ""}${m.excluida_em ? ` · <span style="color:var(--vermelho);">apagada${m.excluida_por_nome ? " por " + escapeHtml(m.excluida_por_nome) : ""}</span>` : ""}</div>
+                 ${m.texto ? `<div style="font-size:12.5px; margin-top:2px;">${escapeHtml(m.texto)}</div>` : ""}
+                 <a href="#/whatsapp/${m.conversa_id}" style="font-size:11.5px;">Abrir conversa →</a>
                </div>
-               <div class="texto-suave" style="font-size:12px;">${m.direcao === "saida" ? `${escapeHtml(m.usuario_nome || "sistema")} enviou` : "recebido"}${m.tipo !== "texto" ? ` · ${({imagem:"📷 imagem",video:"🎥 vídeo",audio:"🎵 áudio",documento:"📄 documento"})[m.tipo] || m.tipo}` : ""}${m.excluida_em ? ` · <span style="color:var(--vermelho);">apagada${m.excluida_por_nome ? " por " + escapeHtml(m.excluida_por_nome) : ""}</span>` : ""}</div>
-               ${m.texto ? `<div style="font-size:12.5px; margin-top:2px;">${escapeHtml(m.texto)}</div>` : ""}
-             </a>`).join("")}
+             </div>`).join("")}
          </div>` : ""}
        </div>
 
@@ -9494,6 +9501,14 @@
       case "ir-para-lead-regiao": {
         fecharModais();
         return navegarPara(`#/whatsapp/${alvo.dataset.conversaId}`);
+      }
+      case "apagar-mensagens-monitoradas-selecionadas": {
+        const checks = Array.from(document.querySelectorAll("[data-monitorada-check]:checked"));
+        if (!checks.length) { definirFlash("erro", "Selecione ao menos uma mensagem."); return; }
+        const mensagem_ids = checks.map((c) => Number(c.dataset.mensagemId));
+        await chamarApi("/whatsapp/numeros-monitorados/ocultar", { method: "POST", body: { mensagem_ids } });
+        definirFlash("ok", `${mensagem_ids.length} mensagem(ns) removida(s) da tela de monitorados.`);
+        return renderWhatsappConfiguracao();
       }
       case "ver-leads-regiao": {
         const regiao = alvo.dataset.regiao;

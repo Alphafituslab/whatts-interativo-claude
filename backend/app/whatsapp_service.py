@@ -2938,14 +2938,51 @@ def mensagens_numeros_monitorados(conn, empresa_id: int, desde: str = None, limi
         LEFT JOIN usuarios ua ON ua.id = m.usuario_id
         LEFT JOIN usuarios ue ON ue.id = m.excluida_por
         WHERE ct.empresa_id = ? AND ct.telefone IN ({marcadores})
+          AND m.id NOT IN (SELECT mensagem_id FROM whatsapp_mensagens_monitoradas_ocultas WHERE empresa_id = ?)
     """
-    params = [empresa_id, *numeros]
+    params = [empresa_id, *numeros, empresa_id]
     if desde:
         query += " AND m.criado_em > ?"
         params.append(desde)
     query += " ORDER BY m.criado_em DESC LIMIT ?"
     params.append(limite)
     return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def ocultar_mensagens_monitoradas(conn, empresa_id: int, mensagem_ids: list, usuario_id: int) -> int:
+    """Some com mensagens escolhidas da tela de números monitorados --
+    pedido do Clayton (2026-09-14): "apagar as mensagens... por seleção
+    e apagar para nao ficar ali sem ter necessidade". Confirmado que é
+    só limpar a TELA de monitoramento, a mensagem continua intacta na
+    conversa real (ele mesmo: "deve apagar so o numero monitorado e
+    apagar apenas as mensagens selecionadas"). O JOIN garante que só
+    marca oculta mensagem que realmente é da empresa de quem pediu."""
+    ids_validos = []
+    for item in mensagem_ids or []:
+        try:
+            ids_validos.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    if not ids_validos:
+        return 0
+    agora = _now_iso()
+    ocultadas = 0
+    for mensagem_id in ids_validos:
+        cur = conn.execute(
+            """
+            INSERT OR IGNORE INTO whatsapp_mensagens_monitoradas_ocultas
+                (empresa_id, mensagem_id, ocultada_em, ocultada_por_id)
+            SELECT ?, m.id, ?, ?
+            FROM whatsapp_mensagens m
+            JOIN whatsapp_conversas c ON c.id = m.conversa_id
+            JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+            WHERE m.id = ? AND ct.empresa_id = ?
+            """,
+            (empresa_id, agora, usuario_id, mensagem_id, empresa_id),
+        )
+        ocultadas += cur.rowcount
+    conn.commit()
+    return ocultadas
 
 
 def calcular_dashboard(conn, empresa_id: int):

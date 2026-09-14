@@ -3080,6 +3080,21 @@ def numeros_monitorados_mensagens():
     return jsonify(whatsapp_service.mensagens_numeros_monitorados(conn, g.empresa_id, desde=desde))
 
 
+@bp.post("/numeros-monitorados/ocultar")
+@requires_super_admin
+def numeros_monitorados_ocultar():
+    """Limpa mensagens escolhidas da TELA de monitoramento -- a
+    mensagem em si continua intacta na conversa real. Pedido do
+    Clayton (2026-09-14): "apagar as mensagens... por seleção... pra
+    nao ficar ali sem ter necessidade"."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    dados = request.get_json(silent=True) or {}
+    ids = dados.get("mensagem_ids") or []
+    ocultadas = whatsapp_service.ocultar_mensagens_monitoradas(conn, g.empresa_id, ids, usuario["id"])
+    return jsonify({"ocultadas": ocultadas})
+
+
 @bp.get("/dashboard/origem-leads/historico")
 @requires_admin
 def dashboard_origem_leads_historico():
