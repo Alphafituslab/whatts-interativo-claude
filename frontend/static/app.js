@@ -711,7 +711,14 @@
   document.addEventListener("change", async (e) => {
     const alvo = e.target.closest("[data-acao-change]");
     if (!alvo) return;
-    try { await tratarAcao(alvo.dataset.acaoChange, alvo, e); }
+    const scrollAntes = document.querySelector(".pagina")?.scrollTop;
+    try {
+      await tratarAcao(alvo.dataset.acaoChange, alvo, e);
+      if (scrollAntes !== undefined) {
+        const pagina = document.querySelector(".pagina");
+        if (pagina) pagina.scrollTop = scrollAntes;
+      }
+    }
     catch (erro) { definirFlash("erro", erro.message || "Ocorreu um erro."); montarRota(); }
   });
 
@@ -9555,11 +9562,7 @@
       }
       case "alternar-mapa-trafego-pago": {
         state.mapaSoTrafegoPago = alvo.checked;
-        const scrollAntes = document.querySelector(".pagina")?.scrollTop || 0;
-        await renderDashboard();
-        const pagina = document.querySelector(".pagina");
-        if (pagina) pagina.scrollTop = scrollAntes;
-        return;
+        return renderDashboard();
       }
       case "abrir-novo-negocio": {
         modalEscolherContatoNegocio();
