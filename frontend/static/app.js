@@ -6104,7 +6104,11 @@
                <option value="">Todos os números</option>
                ${config.numeros_monitorados.map((n) => `<option value="${escapeHtml(n.telefone)}" ${state.filtroNumeroMonitorado === n.telefone ? "selected" : ""}>${escapeHtml(n.nota || _telefoneBonito(n.telefone))}</option>`).join("")}
              </select>
-             ${numerosMonitoradosHistorico.length ? `<button type="button" class="botao secundario pequeno" data-acao="apagar-mensagens-monitoradas-selecionadas">🗑️ Apagar selecionadas</button>` : ""}
+             ${numerosMonitoradosHistorico.length ? `
+             <label style="display:flex; align-items:center; gap:4px; font-size:12.5px; cursor:pointer;">
+               <input type="checkbox" data-acao-change="alternar-todas-mensagens-monitoradas"> Selecionar todos
+             </label>
+             <button type="button" class="botao secundario pequeno" data-acao="apagar-mensagens-monitoradas-selecionadas">🗑️ Apagar selecionadas</button>` : ""}
            </div>
          </div>
          ${numerosMonitoradosHistorico.length ? `
@@ -9519,6 +9523,10 @@
       case "filtrar-numero-monitorado": {
         state.filtroNumeroMonitorado = alvo.value || null;
         return renderWhatsappConfiguracao();
+      }
+      case "alternar-todas-mensagens-monitoradas": {
+        document.querySelectorAll("[data-monitorada-check]").forEach((c) => { c.checked = alvo.checked; });
+        return;
       }
       case "apagar-mensagens-monitoradas-selecionadas": {
         const checks = Array.from(document.querySelectorAll("[data-monitorada-check]:checked"));
