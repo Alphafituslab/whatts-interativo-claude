@@ -3249,6 +3249,55 @@ def calcular_mapa_regioes(conn, empresa_id: int, origem_lead: str = None):
     return {"regioes": regioes, "estados": estados}
 
 
+def listar_leads_por_regiao(conn, empresa_id: int, regiao: str, origem_lead: str = None):
+    """Detalha quem entra na conta de uma região do mapa -- pedido do
+    Clayton (2026-09-14): clicar no card da região e ver nome/telefone
+    dos leads, com atalho direto pra conversa. Mesma regra de
+    região-pelo-DDD e mesmo filtro de origem que calcular_mapa_regioes
+    já usa, só que devolvendo a lista em vez do agregado."""
+    if origem_lead:
+        linhas = conn.execute(
+            """
+            SELECT ct.id AS contato_id, ct.nome, ct.telefone, ct.criado_em,
+                   MAX(c.id) AS conversa_id
+            FROM whatsapp_contatos ct
+            JOIN whatsapp_conversas c ON c.contato_id = ct.id AND c.excluida_em IS NULL AND c.origem_lead = ?
+            WHERE ct.empresa_id = ?
+            GROUP BY ct.id
+            """,
+            (origem_lead, empresa_id),
+        ).fetchall()
+    else:
+        linhas = conn.execute(
+            """
+            SELECT ct.id AS contato_id, ct.nome, ct.telefone, ct.criado_em,
+                   MAX(c.id) AS conversa_id
+            FROM whatsapp_contatos ct
+            LEFT JOIN whatsapp_conversas c ON c.contato_id = ct.id AND c.excluida_em IS NULL
+            WHERE ct.empresa_id = ?
+            GROUP BY ct.id
+            """,
+            (empresa_id,),
+        ).fetchall()
+
+    leads = []
+    for linha in linhas:
+        uf, r = regiao_do_telefone(linha["telefone"])
+        if not r:
+            r = "Não identificado"
+        if r != regiao:
+            continue
+        leads.append({
+            "contato_id": linha["contato_id"],
+            "nome": linha["nome"],
+            "telefone": linha["telefone"],
+            "conversa_id": linha["conversa_id"],
+            "criado_em": linha["criado_em"],
+        })
+    leads.sort(key=lambda x: x["criado_em"] or "", reverse=True)
+    return leads
+
+
 def _processar_mensagem_recebida(conn, config, dados: dict):
     empresa_id = config["empresa_id"]
     chave = dados.get("key") or {}

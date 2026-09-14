@@ -6444,7 +6444,7 @@
       const r = porRegiao[nome];
       if (!r || !r.leads) return `<div class="wpp-mapa-regiao wpp-mapa-regiao-vazia">${nome}<span class="texto-suave">sem leads ainda</span></div>`;
       const intensidade = Math.round(15 + (r.leads / maxLeads) * 65);
-      return `<div class="wpp-mapa-regiao" style="background:color-mix(in srgb, ${CORES_REGIAO[nome] || "var(--primaria)"} ${intensidade}%, var(--superficie-2));">
+      return `<div class="wpp-mapa-regiao" role="button" tabindex="0" data-acao="ver-leads-regiao" data-regiao="${escapeHtml(nome)}" style="cursor:pointer; background:color-mix(in srgb, ${CORES_REGIAO[nome] || "var(--primaria)"} ${intensidade}%, var(--superficie-2));" title="Ver leads desta região">
         <strong>${nome}</strong>
         <span class="wpp-mapa-regiao-numero">${r.leads}</span><span class="texto-suave" style="font-size:10px;">leads</span>
         <span class="texto-suave" style="font-size:11px;">${r.atendimentos} atendimentos${r.taxa_conversao !== null ? ` · ${r.taxa_conversao}% conversão` : ""}</span>
@@ -9491,6 +9491,34 @@
         state.dashOrigemPeriodo = alvo.dataset.periodo;
         return renderDashboard();
       }
+      case "ir-para-lead-regiao": {
+        fecharModais();
+        return navegarPara(`#/whatsapp/${alvo.dataset.conversaId}`);
+      }
+      case "ver-leads-regiao": {
+        const regiao = alvo.dataset.regiao;
+        const soTrafego = !!state.mapaSoTrafegoPago;
+        const leads = await chamarApi(`/whatsapp/dashboard/mapa/leads?regiao=${encodeURIComponent(regiao)}${soTrafego ? "&origem_lead=trafego_pago" : ""}`);
+        const linhasLeads = leads.length
+          ? leads.map((l) => `
+              <tr>
+                <td>${escapeHtml(l.nome || "Sem nome")}</td>
+                <td>${escapeHtml(l.telefone)}</td>
+                <td>${l.conversa_id ? `<button type="button" class="botao pequeno" data-acao="ir-para-lead-regiao" data-conversa-id="${l.conversa_id}">Abrir conversa</button>` : `<span class="texto-suave">sem conversa</span>`}</td>
+              </tr>`).join("")
+          : `<tr><td colspan="3" class="texto-suave">Nenhum lead encontrado.</td></tr>`;
+        abrirModal(`
+          <h3>📍 Leads — ${escapeHtml(regiao)}${soTrafego ? ' <span class="texto-suave" style="font-size:12px;">(só tráfego pago)</span>' : ""}</h3>
+          <div style="max-height:60vh; overflow:auto;">
+            <table class="tabela">
+              <thead><tr><th>Nome</th><th>Telefone</th><th></th></tr></thead>
+              <tbody>${linhasLeads}</tbody>
+            </table>
+          </div>
+          <div class="modal-acoes"><button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button></div>
+        `);
+        return;
+      }
       case "remover-numero-monitorado": {
         const idx = Number(alvo.dataset.index);
         const configAtual = await chamarApi("/whatsapp/configuracao");
@@ -9501,7 +9529,11 @@
       }
       case "alternar-mapa-trafego-pago": {
         state.mapaSoTrafegoPago = alvo.checked;
-        return renderDashboard();
+        const scrollAntes = document.querySelector(".pagina")?.scrollTop || 0;
+        await renderDashboard();
+        const pagina = document.querySelector(".pagina");
+        if (pagina) pagina.scrollTop = scrollAntes;
+        return;
       }
       case "abrir-novo-negocio": {
         modalEscolherContatoNegocio();

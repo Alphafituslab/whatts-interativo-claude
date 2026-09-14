@@ -3097,6 +3097,17 @@ def dashboard_mapa():
     return jsonify(whatsapp_service.calcular_mapa_regioes(conn, g.empresa_id, origem_lead=origem_lead))
 
 
+@bp.get("/dashboard/mapa/leads")
+@requires_admin
+def dashboard_mapa_leads():
+    conn = get_db()
+    regiao = request.args.get("regiao") or ""
+    origem_lead = request.args.get("origem_lead") or None
+    if not regiao:
+        raise ApiError("Informe a região.", status=400, codigo="regiao_obrigatoria")
+    return jsonify(whatsapp_service.listar_leads_por_regiao(conn, g.empresa_id, regiao, origem_lead=origem_lead))
+
+
 @bp.get("/dashboard/exportar")
 @requires_admin
 def exportar_dashboard():
