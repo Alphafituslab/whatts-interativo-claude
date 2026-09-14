@@ -1946,6 +1946,10 @@
     setInterval(atualizarContadorFollowup, 60000);
     _verificarNumerosMonitorados();
     setInterval(_verificarNumerosMonitorados, 30000);
+    // Proposta parada muda em dias, não em segundos -- checar a cada
+    // 5min já é de sobra e evita bater o banco toda hora à toa.
+    _verificarNegociosParados();
+    setInterval(_verificarNegociosParados, 300000);
     // Chamada de voz "tocando" -- 2,5s dá uma latência baixa o
     // suficiente pra parecer telefone de verdade sem martelar o
     // servidor. Roda em QUALQUER tela, igual o resto dos avisos.
@@ -2165,6 +2169,42 @@
         }
       });
       if (!document.querySelector(".fundo-modal")) montarRota();
+    } catch (e) { /* sem conexão agora -- tenta de novo no próximo ciclo */ }
+  }
+
+  // Alerta de proposta parada no funil de Vendas -- pedido do Clayton
+  // (2026-09-14). Cada um só vê (e é avisado d)os negócios que é
+  // responsável -- a rota /negocios/parados já aplica essa régua
+  // (admin vê de todo mundo, igual ao resto). Fica quieto se o
+  // Clayton desligar em Configuração (a rota devolve lista vazia).
+  async function _verificarNegociosParados() {
+    if (!state.usuarioAtual) return;
+    try {
+      const itens = await chamarApi("/negocios/parados");
+      if (!itens.length) return;
+      let vistos = {};
+      try { vistos = JSON.parse(localStorage.getItem("whatts_negocios_parados_vistos") || "{}"); } catch (e) { vistos = {}; }
+      // Só avisa de novo quando o negócio realmente mudou desde o
+      // último aviso (voltou a andar e ficou parado de novo) -- sem
+      // isso, ia repetir o mesmo aviso a cada checagem pra sempre.
+      const novos = itens.filter((n) => vistos[n.id] !== n.atualizado_em);
+      const primeiraVez = localStorage.getItem("whatts_negocios_parados_vistos") === null;
+      itens.forEach((n) => { vistos[n.id] = n.atualizado_em; });
+      localStorage.setItem("whatts_negocios_parados_vistos", JSON.stringify(vistos));
+      if (primeiraVez || !novos.length) return; // primeira checagem: só estabelece o marco, não dispara aviso retroativo dos que já estavam parados
+      novos.forEach((n) => {
+        tocarAvisoFollowup();
+        definirFlash("erro", `🧲 Proposta parada no funil: ${n.contato_nome || n.contato_telefone}${n.titulo ? " — " + n.titulo : ""}`);
+        if (window.Notification && Notification.permission === "granted") {
+          try {
+            new Notification("🧲 Proposta parada", {
+              body: `${n.contato_nome || n.contato_telefone}${n.titulo ? " — " + n.titulo : ""}`,
+              tag: `negocio-parado-${n.id}`,
+            });
+          } catch (e) { /* navegador pode recusar, não é crítico */ }
+        }
+      });
+      if (!document.querySelector(".fundo-modal") && location.hash.startsWith("#/vendas")) montarRota();
     } catch (e) { /* sem conexão agora -- tenta de novo no próximo ciclo */ }
   }
 
@@ -6034,6 +6074,14 @@
              <label>Ao prorrogar o lembrete, adiar quantos dias</label>
              <input type="number" name="dias_prorrogar_ligacao" min="1" max="90" value="${config.dias_prorrogar_ligacao ?? 3}">
            </div>
+           <div class="campo campo-checkbox">
+             <label><input type="checkbox" name="alerta_negocio_parado_ativo" ${config.alerta_negocio_parado_ativo ? "checked" : ""}>
+               Proposta parada no funil de Vendas — avisar quando um negócio fica dias sem mudar de estágio</label>
+           </div>
+           <div class="campo" style="max-width:220px;">
+             <label>Avisar depois de quantos dias parado</label>
+             <input type="number" name="alerta_negocio_parado_dias" min="1" max="90" value="${config.alerta_negocio_parado_dias ?? 3}">
+           </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
@@ -6680,10 +6728,11 @@
   // também alimentar este funil por baixo (ver backend,
   // negocio_service.sincronizar_com_resultado).
   // =======================================================================
-  function htmlCardNegocio(n) {
+  function htmlCardNegocio(n, diasAlerta) {
     const atualizado = n.atualizado_em ? new Date(n.atualizado_em.endsWith("Z") ? n.atualizado_em : n.atualizado_em + "Z") : null;
     const dias = atualizado ? Math.max(0, Math.floor((Date.now() - atualizado) / 86400000)) : 0;
-    return `<div class="vendas-card" draggable="true" data-negocio-id="${n.id}">
+    const parado = !!diasAlerta && !n.resultado && dias >= diasAlerta;
+    return `<div class="vendas-card ${parado ? "vendas-card-parado" : ""}" draggable="true" data-negocio-id="${n.id}">
       <div class="vendas-card-topo">
         <strong>${escapeHtml(n.contato_nome || n.contato_telefone || "—")}</strong>
         <button type="button" class="botao-icone" data-acao="editar-negocio" data-id="${n.id}" title="Editar">✏️</button>
@@ -6692,7 +6741,7 @@
       ${n.titulo ? `<div class="texto-suave" style="font-size:11.5px;">${escapeHtml(n.titulo)}</div>` : ""}
       <div class="vendas-card-rodape">
         <span class="vendas-card-valor">${fmtMoeda(n.valor)}</span>
-        <span class="texto-suave" style="font-size:10.5px;">${dias}d</span>
+        <span class="texto-suave" style="font-size:10.5px;">${parado ? `⚠️ ${dias}d parado` : `${dias}d`}</span>
       </div>
       <div class="texto-suave" style="font-size:10.5px;">${n.responsavel_nome ? "👤 " + escapeHtml(n.responsavel_nome) : "sem responsável"}${n.conversa_id ? ` · <a href="#/whatsapp/${n.conversa_id}">abrir conversa</a>` : ""}</div>
       ${n.motivo_perda ? `<div class="texto-suave" style="font-size:10.5px;">Motivo: ${escapeHtml(n.motivo_perda)}</div>` : ""}
@@ -6739,11 +6788,13 @@
     const souAdmin = !!(state.usuarioAtual && state.usuarioAtual.admin);
     const dePessoa = souAdmin ? (state.vendasResponsavel || "") : "";
     const q = dePessoa ? `?responsavel_id=${dePessoa}` : "";
-    const [negocios, resumo, colegas] = await Promise.all([
+    const [negocios, resumo, colegas, alertaParado] = await Promise.all([
       chamarApi(`/negocios${q}`),
       chamarApi(`/negocios/resumo${q}`),
       souAdmin ? chamarApi("/usuarios").catch(() => []) : Promise.resolve([]),
+      chamarApi("/negocios/alerta-parado-config").catch(() => ({ ativo: false, dias: 3 })),
     ]);
+    const diasAlerta = alertaParado.ativo ? (alertaParado.dias || 3) : 0;
 
     state._negociosPorId = {};
     const porEstagio = {};
@@ -6777,7 +6828,7 @@
           <span class="texto-suave">${itens.length} · ${fmtMoeda(valorTotal)}</span>
         </div>
         <div class="vendas-coluna-corpo" data-drop-estagio="${e.chave}">
-          ${itens.map(htmlCardNegocio).join("") || '<p class="texto-suave" style="padding:8px 4px;font-size:11.5px;">Nada aqui.</p>'}
+          ${itens.map((n) => htmlCardNegocio(n, diasAlerta)).join("") || '<p class="texto-suave" style="padding:8px 4px;font-size:11.5px;">Nada aqui.</p>'}
         </div>
       </div>`;
     }).join("");
@@ -10256,6 +10307,8 @@
             aviso_conversa_parada_max_prorrogacoes: Number(dados.get("aviso_conversa_parada_max_prorrogacoes") ?? 3),
             aviso_ligacoes_ativo: !!dados.get("aviso_ligacoes_ativo"),
             dias_prorrogar_ligacao: Number(dados.get("dias_prorrogar_ligacao")) || 3,
+            alerta_negocio_parado_ativo: !!dados.get("alerta_negocio_parado_ativo"),
+            alerta_negocio_parado_dias: Number(dados.get("alerta_negocio_parado_dias")) || 3,
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");

@@ -223,6 +223,8 @@ def obter_configuracao(conn, empresa_id: int):
             "notificacao_desktop_usuarios_ocultos": "[]",
             "limite_repeticao_mensagem": 5,
             "numeros_monitorados": "[]",
+            "alerta_negocio_parado_ativo": 0,
+            "alerta_negocio_parado_dias": 3,
         }
     return dict(row)
 
@@ -267,6 +269,8 @@ def config_publica(config):
         d["numeros_monitorados"] = json.loads(d.get("numeros_monitorados") or "[]")
     except (TypeError, ValueError):
         d["numeros_monitorados"] = []
+    d["alerta_negocio_parado_ativo"] = bool(d.get("alerta_negocio_parado_ativo"))
+    d["alerta_negocio_parado_dias"] = int(d.get("alerta_negocio_parado_dias") or 3)
     return d
 
 
@@ -506,6 +510,16 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         localizacao_lat = anterior.get("localizacao_lat")
         localizacao_lng = anterior.get("localizacao_lng")
 
+    if "alerta_negocio_parado_ativo" in dados or "alerta_negocio_parado_dias" in dados:
+        alerta_negocio_parado_ativo = 1 if dados.get("alerta_negocio_parado_ativo") else 0
+        try:
+            alerta_negocio_parado_dias = max(1, int(dados.get("alerta_negocio_parado_dias") or 3))
+        except (TypeError, ValueError):
+            alerta_negocio_parado_dias = 3
+    else:
+        alerta_negocio_parado_ativo = 1 if anterior.get("alerta_negocio_parado_ativo") else 0
+        alerta_negocio_parado_dias = anterior.get("alerta_negocio_parado_dias") or 3
+
     conn.execute(
         """
         INSERT INTO configuracoes_whatsapp (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome,
@@ -519,8 +533,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-                                              limite_repeticao_mensagem, numeros_monitorados)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -567,6 +581,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             notificacao_desktop_usuarios_ocultos = excluded.notificacao_desktop_usuarios_ocultos,
             limite_repeticao_mensagem = excluded.limite_repeticao_mensagem,
             numeros_monitorados = excluded.numeros_monitorados,
+            alerta_negocio_parado_ativo = excluded.alerta_negocio_parado_ativo,
+            alerta_negocio_parado_dias = excluded.alerta_negocio_parado_dias,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -581,7 +597,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-         limite_repeticao_mensagem, numeros_monitorados),
+         limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias),
     )
     return obter_configuracao(conn, empresa_id)
 

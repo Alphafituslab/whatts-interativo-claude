@@ -707,6 +707,7 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
   cursor: grab; display: flex; flex-direction: column; gap: 4px;
 }
 .vendas-card.arrastando { opacity: 0.4; }
+.vendas-card-parado { border-color: var(--vermelho); background: color-mix(in srgb, var(--vermelho) 6%, var(--fundo)); }
 .vendas-card-topo { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .vendas-card-topo strong { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vendas-card-rodape { display: flex; align-items: center; justify-content: space-between; gap: 6px; }

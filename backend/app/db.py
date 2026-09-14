@@ -100,6 +100,7 @@ SCHEMA_FILES = [
     "schema_085_origem_lead.sql",
     "schema_086_numeros_monitorados.sql",
     "schema_087_ocultar_mensagens_monitoradas.sql",
+    "schema_088_alerta_negocio_parado.sql",
 ]
 
 

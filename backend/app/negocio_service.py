@@ -99,6 +99,51 @@ def obter_aberto_por_conversa(conn, conversa_id):
     ).fetchone()
 
 
+def listar_parados(conn, empresa_id, responsavel_id=None):
+    """Negócios abertos (resultado IS NULL, ou seja ainda não virou
+    ganho/perdido) que estão há dias demais sem sair do estágio atual
+    -- pedido do Clayton (2026-09-14): quer ser avisado quando uma
+    proposta fica parada em vez de só ver o "Xd" passivo no card. Fica
+    desligado até ele ativar em Configuração; o prazo (dias) também é
+    configurável lá."""
+    from . import whatsapp_service
+    config = whatsapp_service.obter_configuracao(conn, empresa_id)
+    if not config.get("alerta_negocio_parado_ativo"):
+        return []
+    try:
+        dias = max(1, int(config.get("alerta_negocio_parado_dias") or 3))
+    except (TypeError, ValueError):
+        dias = 3
+    limite_iso = (_now() - datetime.timedelta(days=dias)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    query = (
+        "SELECT n.*, ct.nome AS contato_nome, ct.telefone AS contato_telefone, "
+        "u.nome AS responsavel_nome "
+        "FROM whatsapp_negocios n "
+        "JOIN whatsapp_contatos ct ON ct.id = n.contato_id "
+        "LEFT JOIN usuarios u ON u.id = n.responsavel_usuario_id "
+        "WHERE n.empresa_id = ? AND n.resultado IS NULL AND n.atualizado_em <= ?"
+    )
+    params = [empresa_id, limite_iso]
+    if responsavel_id:
+        query += " AND n.responsavel_usuario_id = ?"
+        params.append(responsavel_id)
+    query += " ORDER BY n.atualizado_em ASC"
+    return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def alerta_parado_config(conn, empresa_id):
+    """Só o ativo/dias do alerta de proposta parada -- rota separada da
+    configuração completa (que é @requires_admin) porque QUALQUER
+    usuário vê o Kanban de Vendas e precisa saber se/quando destacar um
+    card como parado, sem precisar de permissão de admin pra isso."""
+    from . import whatsapp_service
+    config = whatsapp_service.obter_configuracao(conn, empresa_id)
+    return {
+        "ativo": bool(config.get("alerta_negocio_parado_ativo")),
+        "dias": int(config.get("alerta_negocio_parado_dias") or 3),
+    }
+
+
 def criar(conn, empresa_id, contato_id, conversa_id, titulo, valor, responsavel_usuario_id, criado_por_id):
     agora = _now_iso()
     cur = conn.execute(

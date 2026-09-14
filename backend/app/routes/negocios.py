@@ -46,6 +46,23 @@ def resumo():
     return jsonify(negocio_service.funil_resumo(conn, g.empresa_id, _escopo()))
 
 
+@bp.get("/alerta-parado-config")
+@requires_auth
+def alerta_parado_config():
+    conn = get_db()
+    return jsonify(negocio_service.alerta_parado_config(conn, g.empresa_id))
+
+
+@bp.get("/parados")
+@requires_auth
+def parados():
+    """Alerta de proposta parada -- pedido do Clayton (2026-09-14).
+    Segue a mesma régua de escopo do resto (cada um vê os seus, admin
+    pode filtrar ou ver de todo mundo)."""
+    conn = get_db()
+    return jsonify(negocio_service.listar_parados(conn, g.empresa_id, _escopo()))
+
+
 @bp.get("/estagios")
 @requires_auth
 def estagios():
