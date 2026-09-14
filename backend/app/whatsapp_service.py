@@ -2894,6 +2894,7 @@ def calcular_dashboard(conn, empresa_id: int):
 
         duracoes_atendimento = []
         detalhes_atendimento = []
+        detalhes_respostas = []
         tempos_primeira_resposta = []
         tempos_resposta = []
 
@@ -2950,10 +2951,26 @@ def calcular_dashboard(conn, empresa_id: int):
                 for seguinte in msgs[i + 1:]:
                     if seguinte["direcao"] == "saida" and seguinte["usuario_id"] == uid:
                         delta = _diferenca_minutos(m["criado_em"], seguinte["criado_em"])
-                        tempos_resposta.append(delta)
-                        if not ja_registrou_primeira:
-                            tempos_primeira_resposta.append(delta)
-                            ja_registrou_primeira = True
+                        # > GAP_MAX_ATENDIMENTO_MIN (6h) não é demora de
+                        # atendimento de verdade -- é a conversa tendo
+                        # ficado dias parada e sendo retomada depois (o
+                        # mesmíssimo problema do "167h que eram 17min" já
+                        # resolvido para a duração da sessão, aqui
+                        # aplicado ao intervalo cliente->atendente
+                        # também). Pedido do Clayton (2026-09-14): "Pior
+                        # atendimento" não pode contar demora do CLIENTE
+                        # -- e isso inclui esse tipo de eco de conversa
+                        # reaberta dias depois, que não é demora de
+                        # ninguém.
+                        if delta <= GAP_MAX_ATENDIMENTO_MIN:
+                            tempos_resposta.append(delta)
+                            detalhes_respostas.append({
+                                "conversa_id": c["id"], "contato_id": c["contato_id"],
+                                "duracao_min": delta, "criado_em": m["criado_em"], "fim": seguinte["criado_em"],
+                            })
+                            if not ja_registrou_primeira:
+                                tempos_primeira_resposta.append(delta)
+                                ja_registrou_primeira = True
                         break
 
         avaliacoes = conn.execute(
@@ -2961,7 +2978,7 @@ def calcular_dashboard(conn, empresa_id: int):
         ).fetchall()
         notas = [a["nota"] for a in avaliacoes]
 
-        piores_atendimentos = sorted(detalhes_atendimento, key=lambda d: d["duracao_min"], reverse=True)[:5]
+        piores_atendimentos = sorted(detalhes_respostas, key=lambda d: d["duracao_min"], reverse=True)[:5]
         for d in piores_atendimentos:
             contato = conn.execute(
                 "SELECT nome, telefone FROM whatsapp_contatos WHERE id = ?", (d["contato_id"],)
@@ -2990,8 +3007,13 @@ def calcular_dashboard(conn, empresa_id: int):
             "pior_demora_min": max(tempos_resposta) if tempos_resposta else None,
             # Pedido do Clayton (2026-09-02): na coluna "Atendimento" da
             # tabela ele quer ver o PIOR caso, não a média/mediana -- é o
-            # que mostra o atendimento mais demorado de cada um.
-            "pior_atendimento_min": max(duracoes_atendimento) if duracoes_atendimento else None,
+            # que mostra o atendimento mais demorado de cada um. Pedido
+            # do Clayton (2026-09-14): esse pior caso não pode contar o
+            # tempo que o CLIENTE demorou a responder -- só o maior
+            # intervalo entre a mensagem dele e a resposta do atendente
+            # (mesma fonte de tempo_medio_resposta_min, só o máximo em
+            # vez da mediana).
+            "pior_atendimento_min": max(tempos_resposta) if tempos_resposta else None,
             "piores_atendimentos": piores_atendimentos,
         })
 

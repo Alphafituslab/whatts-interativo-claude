@@ -6486,9 +6486,9 @@
 
        <div class="cartao">
          <h3 style="margin-top:0;">Desempenho por usuário</h3>
-         <p class="dica">Tempo de 1ª resposta: da chegada da conversa até a primeira resposta. Tempo de resposta: tempo até responder cada mensagem do cliente. Pior atendimento: a conversa fechada que demorou mais (não é média) -- pra você ver o pior caso de cada um. Os três usam a <strong>mediana</strong> (valor típico do dia a dia), não a média simples — assim uma conversa que ficou dias parada não distorce sozinha o número de todo mundo. Avaliação: nota que o próprio cliente deu ao final do atendimento.</p>
+         <p class="dica">Tempo de 1ª resposta: da chegada da conversa até a primeira resposta. Tempo de resposta: tempo até responder cada mensagem do cliente. Pior atendimento: o MAIOR intervalo entre uma mensagem do cliente e a resposta do atendente (não é média, e não conta o tempo que o cliente levou pra escrever) -- pra você ver o pior caso de cada um. 1ª resposta e Tempo de resposta usam a <strong>mediana</strong> (valor típico do dia a dia), não a média simples — assim uma conversa que ficou dias parada não distorce sozinha o número de todo mundo. Avaliação: nota que o próprio cliente deu ao final do atendimento.</p>
          <table>
-           <thead><tr><th>Usuário</th><th>Conversas</th><th>Não lidas</th><th>Msgs enviadas</th><th>1ª resposta</th><th>Resposta média</th><th title="Atendimento mais demorado (pior caso, não é média)">Pior atendimento</th><th title="Conversas paradas agora, cliente esperando">Paradas agora</th><th>Avaliação</th></tr></thead>
+           <thead><tr><th>Usuário</th><th>Conversas</th><th>Não lidas</th><th>Msgs enviadas</th><th>1ª resposta</th><th>Resposta média</th><th title="Maior intervalo entre o cliente escrever e o atendente responder (pior caso, não é média, não conta demora do cliente)">Pior atendimento</th><th title="Conversas paradas agora, cliente esperando">Paradas agora</th><th>Avaliação</th></tr></thead>
            <tbody>${linhas}</tbody>
          </table>
        </div>
@@ -7497,7 +7497,7 @@
         const nome = alvo.dataset.nome || "";
         abrirModal(`
           <h3 style="margin-top:0;">🔍 Piores atendimentos — ${escapeHtml(nome)}</h3>
-          <p class="dica">Os atendimentos fechados que mais demoraram, do pior pro melhor. Clica num cliente pra abrir a conversa.</p>
+          <p class="dica">Os intervalos em que o cliente mais esperou pela resposta, do pior pro melhor (o tempo que o cliente levou pra escrever não conta). Clica num cliente pra abrir a conversa.</p>
           <div style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;">
             ${itens.length ? itens.map((it) => `
               <button type="button" data-acao="ir-para-atendimento" data-conversa-id="${it.conversa_id}" style="display:block; width:100%; text-align:left; text-decoration:none; color:inherit; background:none; border:1px solid var(--borda); border-radius:10px; padding:10px 12px; cursor:pointer; font:inherit;">
@@ -7505,7 +7505,7 @@
                   <strong>${escapeHtml(it.contato_nome || it.telefone || "—")}</strong>
                   <span class="selo bloqueado">${fmtMinutos(it.duracao_min)}</span>
                 </div>
-                <div class="texto-suave" style="font-size:12px; margin-top:2px;">${escapeHtml(it.telefone || "")} · começou em ${fmtData(it.criado_em)}</div>
+                <div class="texto-suave" style="font-size:12px; margin-top:2px;">${escapeHtml(it.telefone || "")} · cliente escreveu ${fmtData(it.criado_em)}</div>
               </button>`).join("") : `<p class="dica">Nenhum atendimento fechado ainda.</p>`}
           </div>
           <div class="rodape-modal"><button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button></div>`, "modal-largo");
