@@ -308,6 +308,15 @@
   // ---------------------------------------------------------------------
   // Roteador (hash simples)
   // ---------------------------------------------------------------------
+  function _urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const bruto = atob(base64);
+    const saida = new Uint8Array(bruto.length);
+    for (let i = 0; i < bruto.length; i++) saida[i] = bruto.charCodeAt(i);
+    return saida;
+  }
+
   function navegarPara(hash) {
     if (location.hash === hash) montarRota();
     else location.hash = hash;
@@ -610,6 +619,11 @@
                 <button class="botao secundario pequeno" style="width:100%; margin-top:8px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
                 <a class="botao secundario pequeno" href="/downloads/WhattsInbox-instalador.zip" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>
               </div>` : ""}
+            ${state._pushSuportado ? `
+            <button type="button" class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="alternar-push"
+              title="${state.pushInscrito ? "Este aparelho já recebe aviso de mensagem nova mesmo com o app fechado" : "Avisa de mensagem nova mesmo com o app fechado ou o celular travado"}">
+              ${state.pushInscrito ? "🔔 Notificações ativas" : "🔕 Ativar notificações no celular"}
+            </button>` : ""}
             <button class="botao secundario pequeno ${usuario && usuario.ausente ? "botao-ausente-ligado" : ""}" style="width:100%; margin-top:10px;" data-acao="alternar-ausente"
               title="${usuario && usuario.ausente ? "Você está marcado como ausente — clique pra voltar" : "Avise que você saiu (almoço, reunião). Some das listas de quem pode atender."}">
               ${usuario && usuario.ausente ? `🟡 Ausente${usuario.ausente_motivo ? " — " + escapeHtml(usuario.ausente_motivo) : ""} · voltar` : "🟡 Marcar ausência"}
@@ -7956,6 +7970,42 @@
         definirFlash("ok", "Conversa prorrogada.");
         return renderWhatsapp(id);
       }
+      case "alternar-push": {
+        try {
+          if (state.pushInscrito) {
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              await chamarApi("/push/desinscrever", { method: "POST", body: { endpoint: sub.endpoint } });
+              await sub.unsubscribe();
+            }
+            state.pushInscrito = false;
+            definirFlash("ok", "Notificações desativadas neste aparelho.");
+          } else {
+            const permissao = await Notification.requestPermission();
+            if (permissao !== "granted") {
+              definirFlash("erro", "Permissão de notificação negada pelo navegador.");
+              return montarRota();
+            }
+            const { chave, disponivel } = await chamarApi("/push/chave-publica");
+            if (!disponivel) {
+              definirFlash("erro", "Notificações push ainda não configuradas no servidor.");
+              return montarRota();
+            }
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: _urlBase64ToUint8Array(chave),
+            });
+            await chamarApi("/push/inscrever", { method: "POST", body: { subscription: sub.toJSON() } });
+            state.pushInscrito = true;
+            definirFlash("ok", "Notificações ativadas neste aparelho! Você vai receber avisos mesmo com o app fechado.");
+          }
+        } catch (erro) {
+          definirFlash("erro", "Não deu pra mexer nas notificações: " + (erro.message || "erro desconhecido"));
+        }
+        return montarRota();
+      }
       case "alternar-ausente": {
         const jaAusente = state.usuarioAtual && state.usuarioAtual.ausente;
         if (jaAusente) {
@@ -10521,6 +10571,21 @@
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     });
+  }
+  // Notificação push (avisar mesmo com o app fechado) -- pedido do
+  // Clayton (2026-09-14). Só oferece o botão em navegador que suporta
+  // de verdade (Safari de aba comum no iPhone não suporta -- só depois
+  // de "Adicionar à Tela de Início" -- e sem suporte o botão nem
+  // aparece, em vez de prometer algo que não vai funcionar).
+  state._pushSuportado = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  if (state._pushSuportado) {
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => {
+        state.pushInscrito = !!sub;
+        if (state.usuarioAtual) montarRota();
+      })
+      .catch(() => {});
   }
   window.addEventListener("beforeinstallprompt", (evento) => {
     evento.preventDefault();

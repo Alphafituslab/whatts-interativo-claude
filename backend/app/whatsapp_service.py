@@ -3606,6 +3606,18 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         return {"processado": True, "tipo": "menu_reiniciado_pos_encerramento", "conversa_id": conversa["id"]}
 
     _avisar_fora_expediente_se_preciso(conn, empresa_id, conversa, telefone)
+    if conversa["atribuida_usuario_id"]:
+        try:
+            from . import push_service
+            push_service.enviar_push(
+                conn, conversa["atribuida_usuario_id"],
+                titulo=f"💬 {contato['nome'] or contato['telefone']}",
+                corpo=preview[:120] or "Nova mensagem",
+                tag=f"conversa-{conversa['id']}",
+                url=f"/#/whatsapp/{conversa['id']}",
+            )
+        except Exception:
+            pass  # push é um extra -- nunca pode travar o recebimento da mensagem em si
     return {"processado": True, "tipo": "mensagem_recebida", "conversa_id": conversa["id"]}
 
 

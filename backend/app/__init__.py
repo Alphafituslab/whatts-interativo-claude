@@ -83,7 +83,7 @@ def create_app(test_config: dict = None) -> Flask:
         app.logger.exception("Erro não tratado")
         return jsonify({"erro": "erro_interno", "mensagem": "Erro interno do servidor."}), 500
 
-    from .routes import auth, catalogo, catalogo_publico, chamadas, chat_interno, downloads, envio_massa, followup, ligacoes, negocios, sistema, usuarios, whatsapp
+    from .routes import auth, catalogo, catalogo_publico, chamadas, chat_interno, downloads, envio_massa, followup, ligacoes, negocios, push, sistema, usuarios, whatsapp
     app.register_blueprint(auth.bp)
     app.register_blueprint(whatsapp.bp)
     app.register_blueprint(usuarios.bp)
@@ -97,6 +97,7 @@ def create_app(test_config: dict = None) -> Flask:
     app.register_blueprint(chamadas.bp)
     app.register_blueprint(catalogo.bp)
     app.register_blueprint(catalogo_publico.bp)
+    app.register_blueprint(push.bp)
 
     @app.get("/api/v1/saude")
     def saude():
