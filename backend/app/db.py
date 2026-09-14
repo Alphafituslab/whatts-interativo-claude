@@ -98,6 +98,7 @@ SCHEMA_FILES = [
     "schema_083_limite_repeticao_mensagem.sql",
     "schema_084_negocios.sql",
     "schema_085_origem_lead.sql",
+    "schema_086_numeros_monitorados.sql",
 ]
 
 

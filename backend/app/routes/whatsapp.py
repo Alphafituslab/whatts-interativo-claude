@@ -18,7 +18,7 @@ from flask import Blueprint, Response, g, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 from .. import chat_interno_service, negocio_service, transcricao, whatsapp_service
-from ..context import ApiError, ForbiddenError, get_current_user, get_db, requires_admin, requires_auth
+from ..context import ApiError, ForbiddenError, get_current_user, get_db, requires_admin, requires_auth, requires_super_admin
 
 bp = Blueprint("whatsapp", __name__, url_prefix="/api/v1/whatsapp")
 
@@ -264,6 +264,13 @@ def menu_visibilidade():
 def atualizar_configuracao():
     usuario = g.usuario_atual
     dados = request.get_json(silent=True) or {}
+    # Números monitorados é sensível de verdade (mostra conteúdo mesmo
+    # apagado) -- restrito a Master também pra SALVAR, não só pra ver.
+    # Sem isso, um admin comum (a quem a tela nem mostra essa seção)
+    # ainda conseguiria mudar a lista chamando a API direto. Pedido do
+    # Clayton (2026-09-14).
+    if "numeros_monitorados" in dados and not usuario.get("super_admin"):
+        raise ApiError("Só o admin Master pode configurar números monitorados.", status=403, codigo="sem_permissao")
     conn = get_db()
     nova = whatsapp_service.salvar_configuracao(conn, dados, usuario["id"], g.empresa_id)
     return jsonify(whatsapp_service.config_publica(nova))
@@ -3061,6 +3068,16 @@ def resetar_dashboard():
 def dashboard_origem_leads():
     conn = get_db()
     return jsonify(whatsapp_service.calcular_origem_leads(conn, g.empresa_id))
+
+
+@bp.get("/numeros-monitorados/mensagens")
+@requires_super_admin
+def numeros_monitorados_mensagens():
+    """Restrito a Master -- mesma régua já usada pra ver conteúdo
+    apagado do chat interno. Pedido do Clayton (2026-09-14)."""
+    conn = get_db()
+    desde = request.args.get("desde") or None
+    return jsonify(whatsapp_service.mensagens_numeros_monitorados(conn, g.empresa_id, desde=desde))
 
 
 @bp.get("/dashboard/origem-leads/historico")

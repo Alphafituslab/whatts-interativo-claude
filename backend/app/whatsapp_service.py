@@ -222,6 +222,7 @@ def obter_configuracao(conn, empresa_id: int):
             "notificacao_desktop_ativo": 1,
             "notificacao_desktop_usuarios_ocultos": "[]",
             "limite_repeticao_mensagem": 5,
+            "numeros_monitorados": "[]",
         }
     return dict(row)
 
@@ -262,6 +263,10 @@ def config_publica(config):
     except (TypeError, ValueError):
         d["notificacao_desktop_usuarios_ocultos"] = []
     d["expediente_janelas"] = json.loads(d["expediente_janelas"]) if d.get("expediente_janelas") else []
+    try:
+        d["numeros_monitorados"] = json.loads(d.get("numeros_monitorados") or "[]")
+    except (TypeError, ValueError):
+        d["numeros_monitorados"] = []
     return d
 
 
@@ -460,6 +465,19 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         anterior_menu = anterior.get("menu_itens_ocultos")
         menu_itens_ocultos = json.dumps(anterior_menu) if isinstance(anterior_menu, list) else (anterior.get("menu_itens_ocultos") or "[]")
 
+    # Números monitorados -- pedido do Clayton (2026-09-14): avisar
+    # quando houver atividade num número escolhido, mesmo apagada
+    # depois. Restrito a Master na rota (aqui só normaliza/grava).
+    if "numeros_monitorados" in dados:
+        brutos = dados.get("numeros_monitorados") or []
+        numeros_monitorados = json.dumps([
+            {"telefone": normalizar_telefone(str(item.get("telefone") or "")), "nota": (item.get("nota") or "").strip()}
+            for item in brutos if isinstance(item, dict) and item.get("telefone")
+        ])
+    else:
+        anterior_num = anterior.get("numeros_monitorados")
+        numeros_monitorados = json.dumps(anterior_num) if isinstance(anterior_num, list) else (anterior.get("numeros_monitorados") or "[]")
+
     # Chamar atenção mesmo minimizado (chamada de voz + "chamar
     # atenção" no chat interno) -- ligado por padrão; admin escolhe
     # quais usuários ficam de fora da lista (o resto do time recebe).
@@ -501,8 +519,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-                                              limite_repeticao_mensagem)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              limite_repeticao_mensagem, numeros_monitorados)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -548,6 +566,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             notificacao_desktop_ativo = excluded.notificacao_desktop_ativo,
             notificacao_desktop_usuarios_ocultos = excluded.notificacao_desktop_usuarios_ocultos,
             limite_repeticao_mensagem = excluded.limite_repeticao_mensagem,
+            numeros_monitorados = excluded.numeros_monitorados,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -562,7 +581,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-         limite_repeticao_mensagem),
+         limite_repeticao_mensagem, numeros_monitorados),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -2884,6 +2903,49 @@ def historico_origem_leads(conn, empresa_id: int, dias: int = 90):
         (empresa_id, desde),
     ).fetchall()
     return [dict(l) for l in linhas]
+
+
+def mensagens_numeros_monitorados(conn, empresa_id: int, desde: str = None, limite: int = 100):
+    """Atividade (qualquer mensagem, dos dois lados) nas conversas dos
+    números marcados como monitorados em Configuração -- pedido do
+    Clayton (2026-09-14): "quando houver uma conversa com esse número
+    eu posso monitorar... sinalizar quais conversas quero ser avisado".
+
+    De propósito NÃO filtra excluida_em -- é o ponto inteiro do pedido
+    ("mesmo ele excluindo... deixar saber o que foi enviado"), e a
+    conversa em si nunca foi privada: é uma conversa de cliente normal,
+    já visível pra qualquer admin em supervisão a qualquer momento (ver
+    a mesma régua em listar_mensagens). Isso só automatiza avisar
+    quando acontece, em vez de precisar abrir a conversa toda hora pra
+    conferir."""
+    config = obter_configuracao(conn, empresa_id)
+    try:
+        lista_monitorados = json.loads(config.get("numeros_monitorados") or "[]")
+    except (TypeError, ValueError):
+        lista_monitorados = []
+    numeros = [normalizar_telefone(n.get("telefone", "")) for n in lista_monitorados if isinstance(n, dict)]
+    numeros = [n for n in numeros if n]
+    if not numeros:
+        return []
+    marcadores = ",".join("?" for _ in numeros)
+    query = f"""
+        SELECT m.id, m.conversa_id, m.direcao, m.tipo, m.texto, m.midia_url, m.criado_em,
+               m.excluida_em, ue.nome AS excluida_por_nome, ua.nome AS usuario_nome,
+               ct.nome AS contato_nome, ct.telefone AS telefone
+        FROM whatsapp_mensagens m
+        JOIN whatsapp_conversas c ON c.id = m.conversa_id
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN usuarios ua ON ua.id = m.usuario_id
+        LEFT JOIN usuarios ue ON ue.id = m.excluida_por
+        WHERE ct.empresa_id = ? AND ct.telefone IN ({marcadores})
+    """
+    params = [empresa_id, *numeros]
+    if desde:
+        query += " AND m.criado_em > ?"
+        params.append(desde)
+    query += " ORDER BY m.criado_em DESC LIMIT ?"
+    params.append(limite)
+    return [dict(r) for r in conn.execute(query, params).fetchall()]
 
 
 def calcular_dashboard(conn, empresa_id: int):

@@ -1937,6 +1937,8 @@
     // evita consulta pesada a cada 4s.
     atualizarContadorFollowup();
     setInterval(atualizarContadorFollowup, 60000);
+    _verificarNumerosMonitorados();
+    setInterval(_verificarNumerosMonitorados, 30000);
     // Chamada de voz "tocando" -- 2,5s dá uma latência baixa o
     // suficiente pra parecer telefone de verdade sem martelar o
     // servidor. Roda em QUALQUER tela, igual o resto dos avisos.
@@ -2127,6 +2129,36 @@
       { hz: 660, inicio: 0.28, duracao: 0.14, volume: 0.12 },
       { hz: 660, inicio: 0.56, duracao: 0.24, volume: 0.12 },
     ]);
+  }
+
+  // Alerta de números monitorados -- pedido do Clayton (2026-09-14):
+  // avisar sempre que houver mensagem (mesmo apagada depois) num
+  // número marcado em Configuração. Só roda pra Master (a rota já
+  // recusa quem não é, então nem tenta se não for).
+  async function _verificarNumerosMonitorados() {
+    if (!state.usuarioAtual || !state.usuarioAtual.super_admin) return;
+    try {
+      const desde = localStorage.getItem("whatts_numeros_monitorados_ultimo") || "";
+      const itens = await chamarApi(`/whatsapp/numeros-monitorados/mensagens${desde ? `?desde=${encodeURIComponent(desde)}` : ""}`);
+      if (!itens.length) return;
+      // A lista vem da mais nova pra mais velha -- o primeiro item é o
+      // mais recente, guarda o instante dele pra não repetir aviso.
+      localStorage.setItem("whatts_numeros_monitorados_ultimo", itens[0].criado_em);
+      if (!desde) return; // primeira checagem da sessão: só estabelece o marco, não dispara aviso retroativo
+      itens.slice().reverse().forEach((m) => {
+        tocarAvisoFollowup();
+        definirFlash("erro", `📡 Atividade num número monitorado: ${m.contato_nome || m.telefone}${m.tipo !== "texto" ? ` (${m.tipo})` : ""}`);
+        if (window.Notification && Notification.permission === "granted") {
+          try {
+            new Notification("📡 Número monitorado", {
+              body: `${m.contato_nome || m.telefone}: ${m.texto || m.tipo}`,
+              tag: `numero-monitorado-${m.id}`,
+            });
+          } catch (e) { /* navegador pode recusar, não é crítico */ }
+        }
+      });
+      if (!document.querySelector(".fundo-modal")) montarRota();
+    } catch (e) { /* sem conexão agora -- tenta de novo no próximo ciclo */ }
   }
 
   async function atualizarContadorFollowup() {
@@ -5655,13 +5687,14 @@
     // a plataforma tem acesso — o servidor barra de qualquer jeito, aqui
     // é só pra não mostrar uma seção que daria erro ao usar.
     const ehSuperAdmin = !!state.usuarioAtual.super_admin;
-    const [{ config, webhookUrl }, setoresDetalhado, backups, catalogos, usuarios, feriados] = await Promise.all([
+    const [{ config, webhookUrl }, setoresDetalhado, backups, catalogos, usuarios, feriados, numerosMonitoradosHistorico] = await Promise.all([
       buscarConfigECriarWebhookUrl(),
       chamarApi("/usuarios/setores/detalhado"),
       ehSuperAdmin ? chamarApi("/sistema/backups") : Promise.resolve([]),
       chamarApi("/whatsapp/catalogos?todos=1").catch(() => []),
       chamarApi("/usuarios").catch(() => []),
       chamarApi("/whatsapp/feriados").catch(() => []),
+      ehSuperAdmin ? chamarApi("/whatsapp/numeros-monitorados/mensagens").catch(() => []) : Promise.resolve([]),
     ]);
     const setoresAtuais = setoresDetalhado.map((s) => s.nome);
 
@@ -6035,6 +6068,40 @@
            <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">Pode preencher uma ou as duas — quando a fase 2 entrar, dá pra escolher qual usar.</p>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
+       </div>
+
+       <div class="cartao">
+         <h3 style="margin-top:0;">📡 Números monitorados</h3>
+         <p class="dica">Escolha números de telefone pra ser avisado sempre que houver mensagem (texto, foto, vídeo) trocada com eles -- mesmo que a mensagem seja apagada depois, você continua vendo aqui embaixo. Só o Master vê esta seção e os avisos.</p>
+         ${(config.numeros_monitorados || []).length ? `
+         <ul style="list-style:none; padding:0; margin:0 0 14px; display:flex; flex-direction:column; gap:6px;">
+           ${config.numeros_monitorados.map((n, i) => `
+             <li style="display:flex; align-items:center; gap:8px; padding:7px 10px; background:var(--superficie-2); border-radius:8px;">
+               <strong>${escapeHtml(_telefoneBonito(n.telefone))}</strong>
+               <span style="flex:1;" class="texto-suave">${escapeHtml(n.nota || "")}</span>
+               <button type="button" class="botao-icone" data-acao="remover-numero-monitorado" data-index="${i}" title="Remover">🗑️</button>
+             </li>`).join("")}
+         </ul>` : ""}
+         <form data-form="adicionar-numero-monitorado">
+           <div style="display:flex; gap:10px;">
+             <div class="campo" style="flex:1;"><label>Telefone</label><input type="tel" name="telefone" placeholder="(11) 99999-8888" required></div>
+             <div class="campo" style="flex:2;"><label>Nota (opcional)</label><input type="text" name="nota" placeholder="Ex.: número pessoal do Fulano"></div>
+           </div>
+           <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao secundario">+ Adicionar número monitorado</button></div>
+         </form>
+         ${numerosMonitoradosHistorico.length ? `
+         <p class="dica" style="margin-top:16px;">Últimas mensagens nesses números:</p>
+         <div style="display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto;">
+           ${numerosMonitoradosHistorico.map((m) => `
+             <a href="#/whatsapp/${m.conversa_id}" style="display:block; text-decoration:none; color:inherit; background:var(--superficie-2); border-radius:8px; padding:8px 10px;">
+               <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+                 <strong>${escapeHtml(m.contato_nome || m.telefone)}</strong>
+                 <span class="texto-suave" style="font-size:11px;">${fmtData(m.criado_em)}</span>
+               </div>
+               <div class="texto-suave" style="font-size:12px;">${m.direcao === "saida" ? `${escapeHtml(m.usuario_nome || "sistema")} enviou` : "recebido"}${m.tipo !== "texto" ? ` · ${({imagem:"📷 imagem",video:"🎥 vídeo",audio:"🎵 áudio",documento:"📄 documento"})[m.tipo] || m.tipo}` : ""}${m.excluida_em ? ` · <span style="color:var(--vermelho);">apagada${m.excluida_por_nome ? " por " + escapeHtml(m.excluida_por_nome) : ""}</span>` : ""}</div>
+               ${m.texto ? `<div style="font-size:12.5px; margin-top:2px;">${escapeHtml(m.texto)}</div>` : ""}
+             </a>`).join("")}
+         </div>` : ""}
        </div>
 
        <div class="cartao">
@@ -9424,6 +9491,14 @@
         state.dashOrigemPeriodo = alvo.dataset.periodo;
         return renderDashboard();
       }
+      case "remover-numero-monitorado": {
+        const idx = Number(alvo.dataset.index);
+        const configAtual = await chamarApi("/whatsapp/configuracao");
+        const lista = (configAtual.numeros_monitorados || []).filter((_, i) => i !== idx);
+        await chamarApi("/whatsapp/configuracao", { method: "PUT", body: { numeros_monitorados: lista } });
+        definirFlash("ok", "Número removido da lista de monitorados.");
+        return renderWhatsappConfiguracao();
+      }
       case "alternar-mapa-trafego-pago": {
         state.mapaSoTrafegoPago = alvo.checked;
         return renderDashboard();
@@ -9837,6 +9912,16 @@
         fecharModais();
         definirFlash("ok", "Resumo salvo.");
         return renderWhatsapp(conversaId);
+      }
+      case "adicionar-numero-monitorado": {
+        const telefone = (dados.get("telefone") || "").trim();
+        const nota = (dados.get("nota") || "").trim();
+        if (!telefone) return;
+        const configAtual = await chamarApi("/whatsapp/configuracao");
+        const lista = [...(configAtual.numeros_monitorados || []), { telefone, nota }];
+        await chamarApi("/whatsapp/configuracao", { method: "PUT", body: { numeros_monitorados: lista } });
+        definirFlash("ok", "Número adicionado à lista de monitorados.");
+        return renderWhatsappConfiguracao();
       }
       case "criar-negocio": {
         const contatoId = Number(form.dataset.contatoId);
