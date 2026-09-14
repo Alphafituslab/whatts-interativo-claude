@@ -240,6 +240,27 @@
   // ainda não terminou só espera o mesmo resultado, em vez de disparar
   // o seu próprio.
   let _renovacaoEmAndamento = null;
+  // Uma tentativa isolada de renovar, com um refresh_token específico --
+  // extraído pra função própria pra poder tentar de novo com um token
+  // diferente sem duplicar a lógica (ver tentarRenovarToken abaixo).
+  async function _tentativaRenovacao(refreshToken) {
+    let resp;
+    try {
+      resp = await _fetchComLimite(API + "/auth/refresh", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+    } catch (e) {
+      return { resultado: null }; // não deu pra falar com o servidor -- não é a sessão que é inválida
+    }
+    if (!resp.ok) return { resultado: false };
+    try {
+      return { resultado: true, dados: await resp.json() };
+    } catch (e) {
+      return { resultado: null };
+    }
+  }
+
   async function tentarRenovarToken() {
     if (_renovacaoEmAndamento) return _renovacaoEmAndamento;
     _renovacaoEmAndamento = (async () => {
@@ -247,27 +268,28 @@
       // ANTES de qualquer tela abrir ("Restaurando sessão…") -- se
       // travasse sem limite, a tela nunca chegava a abrir de jeito
       // nenhum, o que parecia bem pior do que só um pedido lento.
-      let resp;
-      try {
-        resp = await _fetchComLimite(API + "/auth/refresh", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: state.refreshToken }),
-        });
-      } catch (e) {
-        // Não deu pra nem falar com o servidor -- internet instável, não
-        // é a sessão que é inválida. Pedido do Clayton (2026-09-09):
-        // "não desconectar ninguém em hipótese nenhuma" -- null avisa
-        // quem chamou pra NÃO deslogar por causa disso.
-        return null;
+      let { resultado, dados } = await _tentativaRenovacao(state.refreshToken);
+      if (resultado === false) {
+        // O servidor recusou -- mas antes de tratar como sessão
+        // inválida de verdade, um detalhe importante: cada refresh
+        // token só serve UMA vez (é assim que a rotação funciona). Com
+        // mais de uma aba/janela abertas, as duas podem tentar renovar
+        // quase juntas usando o MESMO token -- uma ganha e já escreve o
+        // token novo no localStorage, a outra chega um instante depois
+        // com o token já usado e leva a recusa. Isso não é uma sessão
+        // de verdade inválida, é só a outra aba tendo vencido a corrida.
+        // Achado pelo Clayton (2026-09-14): "meu whatts deslogou
+        // sozinho" com várias abas abertas ao mesmo tempo.
+        const tokenNoStorage = localStorage.getItem("whatts_refresh_token");
+        if (tokenNoStorage && tokenNoStorage !== state.refreshToken) {
+          ({ resultado, dados } = await _tentativaRenovacao(tokenNoStorage));
+        }
       }
-      try {
-        if (!resp.ok) return false; // servidor respondeu recusando de vez -- aí sim a sessão é inválida
-        const dados = await resp.json();
-        state.accessToken = dados.access_token;
-        state.refreshToken = dados.refresh_token;
-        localStorage.setItem("whatts_refresh_token", state.refreshToken);
-        return true;
-      } catch (e) { return null; }
+      if (resultado !== true) return resultado; // false = sessão inválida mesmo; null = sem conexão, não desloga
+      state.accessToken = dados.access_token;
+      state.refreshToken = dados.refresh_token;
+      localStorage.setItem("whatts_refresh_token", state.refreshToken);
+      return true;
     })();
     try {
       return await _renovacaoEmAndamento;
