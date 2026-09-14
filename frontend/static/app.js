@@ -5694,7 +5694,7 @@
       chamarApi("/whatsapp/catalogos?todos=1").catch(() => []),
       chamarApi("/usuarios").catch(() => []),
       chamarApi("/whatsapp/feriados").catch(() => []),
-      ehSuperAdmin ? chamarApi("/whatsapp/numeros-monitorados/mensagens").catch(() => []) : Promise.resolve([]),
+      ehSuperAdmin ? chamarApi(`/whatsapp/numeros-monitorados/mensagens${state.filtroNumeroMonitorado ? `?telefone=${encodeURIComponent(state.filtroNumeroMonitorado)}` : ""}`).catch(() => []) : Promise.resolve([]),
     ]);
     const setoresAtuais = setoresDetalhado.map((s) => s.nome);
 
@@ -6089,11 +6089,18 @@
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao secundario">+ Adicionar número monitorado</button></div>
          </form>
-         ${numerosMonitoradosHistorico.length ? `
-         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+         ${(config.numeros_monitorados || []).length ? `
+         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap;">
            <p class="dica" style="margin:0;">Últimas mensagens nesses números:</p>
-           <button type="button" class="botao secundario pequeno" data-acao="apagar-mensagens-monitoradas-selecionadas">🗑️ Apagar selecionadas</button>
+           <div style="display:flex; gap:8px; align-items:center;">
+             <select data-acao-change="filtrar-numero-monitorado" style="font-size:12.5px;">
+               <option value="">Todos os números</option>
+               ${config.numeros_monitorados.map((n) => `<option value="${escapeHtml(n.telefone)}" ${state.filtroNumeroMonitorado === n.telefone ? "selected" : ""}>${escapeHtml(n.nota || _telefoneBonito(n.telefone))}</option>`).join("")}
+             </select>
+             ${numerosMonitoradosHistorico.length ? `<button type="button" class="botao secundario pequeno" data-acao="apagar-mensagens-monitoradas-selecionadas">🗑️ Apagar selecionadas</button>` : ""}
+           </div>
          </div>
+         ${numerosMonitoradosHistorico.length ? `
          <div style="display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto; margin-top:8px;">
            ${numerosMonitoradosHistorico.map((m) => `
              <div style="display:flex; gap:8px; align-items:flex-start; background:var(--superficie-2); border-radius:8px; padding:8px 10px;">
@@ -6108,7 +6115,7 @@
                  <a href="#/whatsapp/${m.conversa_id}" style="font-size:11.5px;">Abrir conversa →</a>
                </div>
              </div>`).join("")}
-         </div>` : ""}
+         </div>` : `<p class="dica" style="margin-top:8px;">Nenhuma mensagem${state.filtroNumeroMonitorado ? " desse número" : ""} ainda.</p>`}` : ""}
        </div>
 
        <div class="cartao">
@@ -9501,6 +9508,10 @@
       case "ir-para-lead-regiao": {
         fecharModais();
         return navegarPara(`#/whatsapp/${alvo.dataset.conversaId}`);
+      }
+      case "filtrar-numero-monitorado": {
+        state.filtroNumeroMonitorado = alvo.value || null;
+        return renderWhatsappConfiguracao();
       }
       case "apagar-mensagens-monitoradas-selecionadas": {
         const checks = Array.from(document.querySelectorAll("[data-monitorada-check]:checked"));

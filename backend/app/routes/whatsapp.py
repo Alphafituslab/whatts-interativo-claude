@@ -3077,7 +3077,8 @@ def numeros_monitorados_mensagens():
     apagado do chat interno. Pedido do Clayton (2026-09-14)."""
     conn = get_db()
     desde = request.args.get("desde") or None
-    return jsonify(whatsapp_service.mensagens_numeros_monitorados(conn, g.empresa_id, desde=desde))
+    telefone = request.args.get("telefone") or None
+    return jsonify(whatsapp_service.mensagens_numeros_monitorados(conn, g.empresa_id, desde=desde, telefone=telefone))
 
 
 @bp.post("/numeros-monitorados/ocultar")

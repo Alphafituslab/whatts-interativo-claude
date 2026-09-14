@@ -2905,7 +2905,7 @@ def historico_origem_leads(conn, empresa_id: int, dias: int = 90):
     return [dict(l) for l in linhas]
 
 
-def mensagens_numeros_monitorados(conn, empresa_id: int, desde: str = None, limite: int = 100):
+def mensagens_numeros_monitorados(conn, empresa_id: int, desde: str = None, limite: int = 100, telefone: str = None):
     """Atividade (qualquer mensagem, dos dois lados) nas conversas dos
     números marcados como monitorados em Configuração -- pedido do
     Clayton (2026-09-14): "quando houver uma conversa com esse número
@@ -2917,7 +2917,12 @@ def mensagens_numeros_monitorados(conn, empresa_id: int, desde: str = None, limi
     já visível pra qualquer admin em supervisão a qualquer momento (ver
     a mesma régua em listar_mensagens). Isso só automatiza avisar
     quando acontece, em vez de precisar abrir a conversa toda hora pra
-    conferir."""
+    conferir.
+
+    telefone (opcional) filtra pra só um dos números monitorados --
+    pedido do Clayton (2026-09-14): "ter a opçao de filtrar por usuario
+    que desejar as conversar monitoradas", já que com vários números
+    cadastrados a lista mistura todo mundo."""
     config = obter_configuracao(conn, empresa_id)
     try:
         lista_monitorados = json.loads(config.get("numeros_monitorados") or "[]")
@@ -2925,6 +2930,9 @@ def mensagens_numeros_monitorados(conn, empresa_id: int, desde: str = None, limi
         lista_monitorados = []
     numeros = [normalizar_telefone(n.get("telefone", "")) for n in lista_monitorados if isinstance(n, dict)]
     numeros = [n for n in numeros if n]
+    if telefone:
+        telefone_normalizado = normalizar_telefone(telefone)
+        numeros = [n for n in numeros if n == telefone_normalizado]
     if not numeros:
         return []
     marcadores = ",".join("?" for _ in numeros)
