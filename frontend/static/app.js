@@ -6629,17 +6629,6 @@
         <td>${htmlEstrelas(u.media_avaliacao)}${u.total_avaliacoes ? ` <span class="texto-suave">(${u.total_avaliacoes})</span>` : ""}</td>
       </tr>`).join("");
 
-    const comentarios = painel.avaliacoes_recentes.length
-      ? painel.avaliacoes_recentes.map((a) => `
-          <div class="dash-comentario">
-            <div class="dash-comentario-cabecalho">
-              ${htmlEstrelas(a.nota)}
-              <span class="texto-suave">${escapeHtml(a.contato_nome || a.telefone)} → ${escapeHtml(a.usuario_nome || "—")} · ${fmtData(a.criado_em)}</span>
-            </div>
-            ${a.comentario ? `<p class="dash-comentario-texto">"${escapeHtml(a.comentario)}"</p>` : ""}
-          </div>`).join("")
-      : `<p class="texto-suave">Nenhum comentário de cliente ainda.</p>`;
-
     const donutRegioes = htmlDonut(mapa.regioes.map((r) => ({ label: r.regiao, valor: r.leads, cor: CORES_REGIAO[r.regiao] || "#6b7280" })));
     const barrasAtendimentos = mapa.regioes.length
       ? htmlBarrasHorizontais(mapa.regioes.map((r) => ({ label: r.regiao, valor: r.atendimentos, cor: CORES_REGIAO[r.regiao] })))
@@ -6757,10 +6746,7 @@
          </table>
        </div>
 
-       <div class="cartao">
-         <h3 style="margin-top:0;">💬 Comentários recentes dos clientes</h3>
-         ${comentarios}
-       </div>`,
+`,
       "dashboard"
     );
   }
