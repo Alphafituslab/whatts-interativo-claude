@@ -2539,10 +2539,21 @@ def salvar_contato_manual(conn, empresa_id: int, telefone_bruto: str, nome: str 
         conn.execute("UPDATE whatsapp_contatos SET nome = ?, nome_editado = 1, atualizado_em = ? WHERE id = ?",
                      (nome, agora, row["id"]))
         return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (row["id"],)).fetchone())
-    cur = conn.execute(
-        "INSERT INTO whatsapp_contatos (empresa_id, telefone, nome, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)",
-        (empresa_id, telefone, nome, agora, agora),
-    )
+    try:
+        cur = conn.execute(
+            "INSERT INTO whatsapp_contatos (empresa_id, telefone, nome, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)",
+            (empresa_id, telefone, nome, agora, agora),
+        )
+    except sqlite3.IntegrityError:
+        # Duas pessoas cadastrando o mesmo número ao mesmo tempo (raro,
+        # mas o UNIQUE(empresa_id, telefone) do banco existe justamente
+        # pra isso -- Clayton 2026-09-14: "ao cadastrar um contato nao
+        # deixar duplicar, verificar pelo numero"). Alguém já criou entre
+        # o SELECT acima e este INSERT; reaproveita em vez de quebrar.
+        row2 = conn.execute("SELECT id FROM whatsapp_contatos WHERE empresa_id = ? AND telefone = ?", (empresa_id, telefone)).fetchone()
+        conn.execute("UPDATE whatsapp_contatos SET nome = ?, nome_editado = 1, atualizado_em = ? WHERE id = ?",
+                     (nome, agora, row2["id"]))
+        return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (row2["id"],)).fetchone())
     return dict(conn.execute("SELECT * FROM whatsapp_contatos WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
