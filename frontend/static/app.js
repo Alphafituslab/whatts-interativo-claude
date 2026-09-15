@@ -554,7 +554,8 @@
       .map((it) => {
         let extra = "";
         if (it.chave === "whatsapp") {
-          extra = '<span class="wpp-badge-sla" data-wpp-sla-badge hidden title="Conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado"></span>'
+          extra = '<span class="wpp-badge-sla wpp-badge-sla-proximo" data-wpp-sla-proximo-badge hidden title="Conversas perto de estourar o tempo combinado"></span>'
+                + '<span class="wpp-badge-sla" data-wpp-sla-badge hidden title="Conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado"></span>'
                 + '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-nao-lidas-badge hidden title="Mensagens novas que você ainda não leu"></span>';
         } else if (it.chave === "chat-interno") {
           extra = '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-chat-interno-nao-lidas-badge hidden title="Mensagens novas de colegas que você ainda não leu"></span>';
@@ -1947,7 +1948,8 @@
     atualizarBadgeSla();
     atualizarBadgesNaoLidos();
     verificarVersaoServidor();
-    timerStatusGlobal = setInterval(() => { atualizarBolinhaStatusGlobal(); verificarVersaoServidor(); atualizarBadgeSla(); }, 8000);
+    atualizarBadgeSlaProximo();
+    timerStatusGlobal = setInterval(() => { atualizarBolinhaStatusGlobal(); verificarVersaoServidor(); atualizarBadgeSla(); atualizarBadgeSlaProximo(); }, 8000);
     // Mais rápido que o resto — é o que avisa "chegou mensagem nova",
     // roda em qualquer tela (não só Conversas/Chat interno), pra piscar
     // o menu lateral mesmo se a pessoa estiver, por exemplo, no Dashboard.
@@ -2560,6 +2562,22 @@
       badge.title = alertas.length === 1
         ? "1 conversa parada: o cliente falou e ninguém respondeu dentro do tempo combinado"
         : `${alertas.length} conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado`;
+    } catch (e) { /* próxima tentativa corrige */ }
+  }
+
+  // Aviso ANTES de estourar o SLA -- pedido do Clayton (2026-09-14):
+  // "SLA com alerta antes de estourar, não só depois".
+  async function atualizarBadgeSlaProximo() {
+    const badge = document.querySelector("[data-wpp-sla-proximo-badge]");
+    if (!badge) return;
+    try {
+      const alertas = await chamarApi("/whatsapp/sla-proximo");
+      state.slaProximoIds = new Set(alertas.map((c) => c.id));
+      badge.hidden = alertas.length === 0;
+      badge.textContent = "⏳ " + (alertas.length > 99 ? "99+" : String(alertas.length));
+      badge.title = alertas.length === 1
+        ? "1 conversa perto de estourar o tempo combinado"
+        : `${alertas.length} conversas perto de estourar o tempo combinado`;
     } catch (e) { /* próxima tentativa corrige */ }
   }
 
@@ -3620,7 +3638,8 @@
       // (o cliente escrevendo de novo, ou alguém clicando Reabrir).
       const naFila = c.status !== "fechada" && (c.eh_grupo ? !c.equipe_no_grupo : !c.atribuida_usuario_id);
       const slaEstourado = state.slaAlertasIds.has(c.id);
-      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""} ${c.nao_lidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : ""}>
+      const slaProximo = !slaEstourado && (state.slaProximoIds || new Set()).has(c.id);
+      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""} ${slaProximo ? "wpp-conversa-sla-proximo" : ""} ${c.nao_lidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : (slaProximo ? 'title="Perto de estourar o tempo combinado"' : "")}>
         ${htmlAvatarContato(c.contato_foto, c.contato_nome, c.telefone, 42)}
         <div class="wpp-conversa-info">
           <div class="wpp-conversa-linha1">
@@ -5988,6 +6007,10 @@
            </div>
            <div class="campo"><label>Alertar conversa parada após (minutos)</label>
              <input type="number" name="sla_minutos_alerta" min="1" value="${config.sla_minutos_alerta || 15}" style="max-width:120px;">
+           </div>
+           <div class="campo"><label>Avisar quantos minutos ANTES de estourar</label>
+             <input type="number" name="sla_minutos_pre_alerta" min="1" value="${config.sla_minutos_pre_alerta || 5}" style="max-width:120px;">
+             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">A conversa entra no aviso amarelo (⏳) esse tanto de minutos antes de virar o alerta vermelho (⏱) de "estourou".</p>
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
@@ -10402,6 +10425,7 @@
             expediente_janelas: _janelasDoFormulario(dados),
             expediente_mensagem: dados.get("expediente_mensagem") || "",
             sla_minutos_alerta: Number(dados.get("sla_minutos_alerta")) || 15,
+            sla_minutos_pre_alerta: Number(dados.get("sla_minutos_pre_alerta")) || 5,
           },
         });
         definirFlash("ok", "Horário de funcionamento salvo.");

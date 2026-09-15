@@ -202,6 +202,7 @@ def obter_configuracao(conn, empresa_id: int):
             "expediente_ativo": 0, "expediente_janelas": None, "expediente_mensagem": None,
             "saudacao_mensagem": None,
             "sla_minutos_alerta": 15,
+            "sla_minutos_pre_alerta": 5,
             "dashboard_reset_em": None,
             "logo_url": None,
             "assinar_mensagens": 0,
@@ -233,7 +234,8 @@ def obter_configuracao(conn, empresa_id: int):
 def config_publica(config):
     d = dict(config)
     for campo, padrao in (("limite_envios_minuto", 20), ("limite_envios_hora", 250),
-                          ("limite_novos_contatos_hora", 20), ("limite_repeticao_mensagem", 5)):
+                          ("limite_novos_contatos_hora", 20), ("limite_repeticao_mensagem", 5),
+                          ("sla_minutos_pre_alerta", 5)):
         d[campo] = int(config.get(campo) if config.get(campo) is not None else padrao)
     d["apikey_configurada"] = bool(d.get("evolution_apikey"))
     d["webhook_segredo_configurado"] = bool(d.get("webhook_segredo"))
@@ -313,6 +315,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     else:
         expediente_mensagem = anterior.get("expediente_mensagem")
     sla_minutos_alerta = int(dados["sla_minutos_alerta"]) if dados.get("sla_minutos_alerta") else (anterior.get("sla_minutos_alerta") or 15)
+    sla_minutos_pre_alerta = int(dados["sla_minutos_pre_alerta"]) if dados.get("sla_minutos_pre_alerta") else (anterior.get("sla_minutos_pre_alerta") or 5)
 
     # Limites de ritmo de envio. 0 desliga o limite — deliberado: numa
     # emergência é melhor conseguir desligar pela tela do que ter que
@@ -531,7 +534,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         """
         INSERT INTO configuracoes_whatsapp (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome,
                                               webhook_segredo, webhook_base_url, expediente_ativo, expediente_janelas,
-                                              expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
+                                              expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, sla_minutos_pre_alerta, minutos_liberar_sem_menu, status_conexao, atualizado_em, atualizado_por,
                                               limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
                                               localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
                                               followup_dias_aviso_automatico, usuario_sistema_id, aviso_fila_sem_escolha_ativo,
@@ -542,7 +545,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
                                               limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
                                               modelo_cobranca_atraso)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -555,6 +558,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             expediente_mensagem = excluded.expediente_mensagem,
             saudacao_mensagem = excluded.saudacao_mensagem,
             sla_minutos_alerta = excluded.sla_minutos_alerta,
+            sla_minutos_pre_alerta = excluded.sla_minutos_pre_alerta,
             limite_envios_minuto = excluded.limite_envios_minuto,
             limite_envios_hora = excluded.limite_envios_hora,
             limite_novos_contatos_hora = excluded.limite_novos_contatos_hora,
@@ -596,7 +600,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             atualizado_por = excluded.atualizado_por
         """,
         (empresa_id, ativo, evolution_url, evolution_apikey, instancia_nome, webhook_segredo, webhook_base_url,
-         expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta,
+         expediente_ativo, expediente_janelas, expediente_mensagem, saudacao_mensagem, sla_minutos_alerta, sla_minutos_pre_alerta,
          minutos_sem_menu, empresa_id, _now_iso(), usuario_id,
          limite_envios_minuto, limite_envios_hora, limite_novos_contatos_hora, assinar_mensagens,
          localizacao_nome, localizacao_endereco, localizacao_lat, localizacao_lng,
@@ -4858,6 +4862,47 @@ def tags_por_conversa(conn, conversa_ids: list, usuario_id: int):
 # ============================================================
 # ALERTA DE SLA — conversa parada há tempo demais sem resposta nossa
 # ============================================================
+def listar_conversas_sla_proximo(conn, empresa_id: int, usuario_id=None, setor=None):
+    """Conversas que ainda não estouraram o SLA mas estão entrando na
+    janela de aviso antecipado -- pedido do Clayton (2026-09-14): "SLA
+    com alerta ANTES de estourar, não só depois". Mesma régua de
+    listar_conversas_sla_estourado, só que numa janela de tempo mais
+    cedo (configurável em Configuração, "avisar X minutos antes")."""
+    config = obter_configuracao(conn, empresa_id)
+    limite_min = config.get("sla_minutos_alerta") or 15
+    pre_min = config.get("sla_minutos_pre_alerta") or 5
+    agora = datetime.datetime.utcnow()
+    limite_estourado = (agora - datetime.timedelta(minutes=limite_min)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    limite_proximo = (agora - datetime.timedelta(minutes=max(0, limite_min - pre_min))).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    condicoes = [
+        "ct.empresa_id = ?",
+        "c.status = 'aberta'", "c.excluida_em IS NULL", "c.arquivada = 0",
+        "c.ultima_mensagem_em IS NOT NULL",
+        "c.ultima_mensagem_em < ?", "c.ultima_mensagem_em >= ?",
+        "(c.atribuida_usuario_id IS NULL OR (SELECT m.direcao FROM whatsapp_mensagens m "
+        "WHERE m.conversa_id = c.id ORDER BY m.criado_em DESC, m.id DESC LIMIT 1) = 'entrada')",
+        "(c.sem_pendencia_em IS NULL OR c.sem_pendencia_em < c.ultima_mensagem_em)",
+    ]
+    params = [empresa_id, limite_proximo, limite_estourado]
+    if usuario_id:
+        condicoes.append(
+            "(c.atribuida_usuario_id = ? OR (c.atribuida_usuario_id IS NULL AND c.menu_setor IS NOT NULL AND c.menu_setor = ?))"
+        )
+        params.extend([usuario_id, setor])
+    where = "WHERE " + " AND ".join(condicoes)
+    rows = conn.execute(
+        f"""
+        SELECT c.*, ct.telefone, ct.nome AS contato_nome, u.nome AS atribuida_usuario_nome
+        FROM whatsapp_conversas c
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        LEFT JOIN usuarios u ON u.id = c.atribuida_usuario_id
+        {where} ORDER BY c.ultima_mensagem_em
+        """,
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def listar_conversas_sla_estourado(conn, empresa_id: int, usuario_id=None, setor=None):
     config = obter_configuracao(conn, empresa_id)
     limite_min = config.get("sla_minutos_alerta") or 15

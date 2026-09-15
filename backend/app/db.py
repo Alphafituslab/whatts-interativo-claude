@@ -104,6 +104,7 @@ SCHEMA_FILES = [
     "schema_089_push_subscricoes.sql",
     "schema_090_modelo_cobranca_atraso.sql",
     "schema_091_cobrancas_atraso.sql",
+    "schema_092_sla_pre_alerta.sql",
 ]
 
 

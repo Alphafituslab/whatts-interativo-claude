@@ -293,6 +293,8 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 }
 .wpp-badge-sla[hidden] { display: none; }
 .wpp-conversa-item.wpp-conversa-sla { border-left-color: var(--vermelho); }
+.wpp-badge-sla-proximo { background: #d99a1f; }
+.wpp-conversa-item.wpp-conversa-sla-proximo { border-left-color: #d99a1f; }
 
 .wpp-status-linha { display: flex; align-items: center; gap: 7px; padding: 0 6px 16px; font-size: 12px; font-weight: 600; color: var(--texto-suave); }
 .wpp-status-bolinha { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; background: var(--texto-suave); }

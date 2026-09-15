@@ -1111,6 +1111,21 @@ def sla_alertas():
     return jsonify([_conversa_para_json(r) for r in rows])
 
 
+@bp.get("/sla-proximo")
+@requires_auth
+def sla_proximo():
+    """Conversas que ainda não estouraram mas estão perto -- pedido do
+    Clayton (2026-09-14): alerta ANTES de estourar."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    rows = whatsapp_service.listar_conversas_sla_proximo(
+        conn, g.empresa_id,
+        None if usuario["admin"] else usuario["id"],
+        None if usuario["admin"] else usuario["setor"],
+    )
+    return jsonify([_conversa_para_json(r) for r in rows])
+
+
 @bp.get("/contatos")
 @requires_auth
 def listar_contatos():
