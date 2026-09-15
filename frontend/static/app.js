@@ -6096,6 +6096,12 @@
              <label>Avisar depois de quantos dias parado</label>
              <input type="number" name="alerta_negocio_parado_dias" min="1" max="90" value="${config.alerta_negocio_parado_dias ?? 3}">
            </div>
+           <hr style="border:none; border-top:1px solid var(--borda); margin:16px 0;">
+           <div class="campo">
+             <label>Frase ao cobrar explicação de atraso (no 🔍 "pior atendimento" do Dashboard)</label>
+             <textarea name="modelo_cobranca_atraso" rows="3" placeholder="Poderia dar uma atenção ao atendimento de *{cliente}*? Já faz {tempo} sem interação -- pode me contar o que houve?">${escapeHtml(config.modelo_cobranca_atraso || "")}</textarea>
+             <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">Sai do chat interno, assinado pelo "Usuário do sistema" configurado ali em cima. Use <code>{cliente}</code> e <code>{tempo}</code> onde quiser que entrem o nome do cliente e o tempo parado.</p>
+           </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
@@ -6594,7 +6600,7 @@
         <td>${fmtMinutos(u.tempo_medio_primeira_resposta_min)}</td>
         <td>${fmtMinutos(u.tempo_medio_resposta_min)}</td>
         <td>${u.piores_atendimentos && u.piores_atendimentos.length
-          ? `<button type="button" class="botao-link" data-acao="ver-piores-atendimentos" data-usuario='${escapeHtml(JSON.stringify(u.piores_atendimentos))}' data-nome="${escapeHtml(u.nome)}" style="text-decoration:underline; cursor:pointer; background:none; border:none; padding:0; color:inherit; font:inherit;" title="Ver quais atendimentos foram esses">${fmtMinutos(u.pior_atendimento_min)} 🔍</button>`
+          ? `<button type="button" class="botao-link" data-acao="ver-piores-atendimentos" data-usuario='${escapeHtml(JSON.stringify(u.piores_atendimentos))}' data-nome="${escapeHtml(u.nome)}" data-usuario-id="${u.id}" style="text-decoration:underline; cursor:pointer; background:none; border:none; padding:0; color:inherit; font:inherit;" title="Ver quais atendimentos foram esses">${fmtMinutos(u.pior_atendimento_min)} 🔍</button>`
           : fmtMinutos(u.pior_atendimento_min)}</td>
         <td>${u.paradas_agora > 0 ? `<span class="selo bloqueado piscando">${u.paradas_agora}</span>` : "—"}</td>
         <td>${htmlEstrelas(u.media_avaliacao)}${u.total_avaliacoes ? ` <span class="texto-suave">(${u.total_avaliacoes})</span>` : ""}</td>
@@ -7731,18 +7737,27 @@
         let itens = [];
         try { itens = JSON.parse(alvo.dataset.usuario || "[]"); } catch (e) { itens = []; }
         const nome = alvo.dataset.nome || "";
+        const usuarioId = alvo.dataset.usuarioId || "";
         abrirModal(`
           <h3 style="margin-top:0;">🔍 Piores atendimentos — ${escapeHtml(nome)}</h3>
-          <p class="dica">Os intervalos em que o cliente mais esperou pela resposta, do pior pro melhor (o tempo que o cliente levou pra escrever não conta). Clica num cliente pra abrir a conversa.</p>
+          <p class="dica">Os intervalos em que o cliente mais esperou pela resposta, do pior pro melhor (o tempo que o cliente levou pra escrever não conta). Clica no cliente pra abrir a conversa, ou manda cobrar uma explicação de ${escapeHtml(nome)} pelo chat interno.</p>
           <div style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;">
-            ${itens.length ? itens.map((it) => `
-              <button type="button" data-acao="ir-para-atendimento" data-conversa-id="${it.conversa_id}" style="display:block; width:100%; text-align:left; text-decoration:none; color:inherit; background:none; border:1px solid var(--borda); border-radius:10px; padding:10px 12px; cursor:pointer; font:inherit;">
-                <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
-                  <strong>${escapeHtml(it.contato_nome || it.telefone || "—")}</strong>
-                  <span class="selo bloqueado">${fmtMinutos(it.duracao_min)}</span>
-                </div>
-                <div class="texto-suave" style="font-size:12px; margin-top:2px;">${escapeHtml(it.telefone || "")} · cliente escreveu ${fmtData(it.criado_em)}</div>
-              </button>`).join("") : `<p class="dica">Nenhum atendimento fechado ainda.</p>`}
+            ${itens.length ? itens.map((it, i) => `
+              <div style="display:flex; align-items:stretch; gap:6px; border:1px solid var(--borda); border-radius:10px; overflow:hidden;">
+                <button type="button" data-acao="ir-para-atendimento" data-conversa-id="${it.conversa_id}" style="flex:1; min-width:0; display:block; text-align:left; text-decoration:none; color:inherit; background:none; border:none; padding:10px 12px; cursor:pointer; font:inherit;">
+                  <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+                    <strong>${escapeHtml(it.contato_nome || it.telefone || "—")}</strong>
+                    <span class="selo bloqueado">${fmtMinutos(it.duracao_min)}</span>
+                  </div>
+                  <div class="texto-suave" style="font-size:12px; margin-top:2px;">${escapeHtml(it.telefone || "")} · cliente escreveu ${fmtData(it.criado_em)}</div>
+                </button>
+                <button type="button" class="botao secundario pequeno" data-acao="cobrar-explicacao-atraso" data-indice="${i}"
+                  data-usuario-id="${usuarioId}" data-conversa-id="${it.conversa_id}" data-duracao="${it.duracao_min ?? ""}"
+                  data-contato="${escapeHtml(it.contato_nome || "")}" data-telefone="${escapeHtml(it.telefone || "")}"
+                  style="white-space:nowrap; align-self:center; margin-right:8px;" title="Manda uma mensagem no chat interno, saindo como o Assistente, cobrando explicação sobre esse atraso">
+                  📨 Cobrar
+                </button>
+              </div>`).join("") : `<p class="dica">Nenhum atendimento fechado ainda.</p>`}
           </div>
           <div class="rodape-modal"><button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button></div>`, "modal-largo");
         return;
@@ -7750,6 +7765,25 @@
       case "ir-para-atendimento": {
         fecharModais();
         return navegarPara(`#/whatsapp/${alvo.dataset.conversaId}`);
+      }
+      case "cobrar-explicacao-atraso": {
+        try {
+          await chamarApi("/whatsapp/dashboard/cobrar-atraso", {
+            method: "POST",
+            body: {
+              usuario_id: Number(alvo.dataset.usuarioId),
+              conversa_id: Number(alvo.dataset.conversaId),
+              contato_nome: alvo.dataset.contato || null,
+              telefone: alvo.dataset.telefone || null,
+              duracao_min: alvo.dataset.duracao ? Number(alvo.dataset.duracao) : null,
+            },
+          });
+          alvo.disabled = true;
+          alvo.textContent = "✅ Enviado";
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não deu pra enviar.");
+        }
+        return;
       }
       case "ordenar-ligacoes-aceitacao": {
         if (!state._ligacoesFiltro) state._ligacoesFiltro = { aceitacao: "", soFechadas: false, ordenar: false };
@@ -10359,6 +10393,7 @@
             dias_prorrogar_ligacao: Number(dados.get("dias_prorrogar_ligacao")) || 3,
             alerta_negocio_parado_ativo: !!dados.get("alerta_negocio_parado_ativo"),
             alerta_negocio_parado_dias: Number(dados.get("alerta_negocio_parado_dias")) || 3,
+            modelo_cobranca_atraso: (dados.get("modelo_cobranca_atraso") || "").trim(),
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");

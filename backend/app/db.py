@@ -102,6 +102,7 @@ SCHEMA_FILES = [
     "schema_087_ocultar_mensagens_monitoradas.sql",
     "schema_088_alerta_negocio_parado.sql",
     "schema_089_push_subscricoes.sql",
+    "schema_090_modelo_cobranca_atraso.sql",
 ]
 
 

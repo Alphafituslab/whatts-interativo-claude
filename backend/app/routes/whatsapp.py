@@ -3053,6 +3053,25 @@ def dashboard():
     return jsonify(whatsapp_service.calcular_dashboard(conn, g.empresa_id))
 
 
+@bp.post("/dashboard/cobrar-atraso")
+@requires_admin
+def dashboard_cobrar_atraso():
+    """Ao clicar na lupa do "pior atendimento" e ver os clientes com
+    atraso, cobrar explicação do atendente pelo chat interno -- pedido
+    do Clayton (2026-09-14)."""
+    conn = get_db()
+    dados = request.get_json(silent=True) or {}
+    usuario_id = dados.get("usuario_id")
+    conversa_id = dados.get("conversa_id")
+    if not usuario_id or not conversa_id:
+        raise ApiError("Informe usuario_id e conversa_id.", status=400)
+    texto = whatsapp_service.cobrar_explicacao_pior_atendimento(
+        conn, g.empresa_id, int(usuario_id), int(conversa_id),
+        dados.get("contato_nome"), dados.get("telefone"), dados.get("duracao_min"),
+    )
+    return jsonify({"ok": True, "texto": texto})
+
+
 @bp.post("/dashboard/resetar")
 @requires_admin
 def resetar_dashboard():

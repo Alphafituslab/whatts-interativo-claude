@@ -225,6 +225,7 @@ def obter_configuracao(conn, empresa_id: int):
             "numeros_monitorados": "[]",
             "alerta_negocio_parado_ativo": 0,
             "alerta_negocio_parado_dias": 3,
+            "modelo_cobranca_atraso": None,
         }
     return dict(row)
 
@@ -271,6 +272,7 @@ def config_publica(config):
         d["numeros_monitorados"] = []
     d["alerta_negocio_parado_ativo"] = bool(d.get("alerta_negocio_parado_ativo"))
     d["alerta_negocio_parado_dias"] = int(d.get("alerta_negocio_parado_dias") or 3)
+    d["modelo_cobranca_atraso"] = d.get("modelo_cobranca_atraso") or 'Poderia dar uma atenção ao atendimento de *{cliente}*? Já faz {tempo} sem interação -- pode me contar o que houve?'
     return d
 
 
@@ -510,6 +512,11 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         localizacao_lat = anterior.get("localizacao_lat")
         localizacao_lng = anterior.get("localizacao_lng")
 
+    if "modelo_cobranca_atraso" in dados:
+        modelo_cobranca_atraso = (dados.get("modelo_cobranca_atraso") or "").strip() or None
+    else:
+        modelo_cobranca_atraso = anterior.get("modelo_cobranca_atraso")
+
     if "alerta_negocio_parado_ativo" in dados or "alerta_negocio_parado_dias" in dados:
         alerta_negocio_parado_ativo = 1 if dados.get("alerta_negocio_parado_ativo") else 0
         try:
@@ -533,8 +540,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-                                              limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
+                                              modelo_cobranca_atraso)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -583,6 +591,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             numeros_monitorados = excluded.numeros_monitorados,
             alerta_negocio_parado_ativo = excluded.alerta_negocio_parado_ativo,
             alerta_negocio_parado_dias = excluded.alerta_negocio_parado_dias,
+            modelo_cobranca_atraso = excluded.modelo_cobranca_atraso,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -597,7 +606,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-         limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias),
+         limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
+         modelo_cobranca_atraso),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -3868,6 +3878,67 @@ def manter_usuarios_sistema_online(conn):
         "WHERE id IN (SELECT usuario_sistema_id FROM configuracoes_whatsapp WHERE usuario_sistema_id IS NOT NULL)",
         (agora,),
     )
+
+
+def _fmt_minutos_texto(v):
+    """Mesma lógica do fmtMinutos() do frontend, em Python -- usado no
+    placeholder {tempo} da cobrança de explicação."""
+    if v is None:
+        return "—"
+    total = round(v)
+    if total < 60:
+        return f"{total}min"
+    h, m = divmod(total, 60)
+    return f"{h}h {m}min" if m else f"{h}h"
+
+
+def cobrar_explicacao_pior_atendimento(conn, empresa_id: int, usuario_atendente_id: int, conversa_id: int,
+                                        contato_nome: str, telefone: str, duracao_min):
+    """Ao clicar na lupa do "pior atendimento" no Dashboard e ver os
+    clientes com atraso, o admin pode cobrar explicação do atendente
+    direto pelo chat interno -- pedido do Clayton (2026-09-14): "deve
+    sair com o nome do assistente perguntando sobre o atraso". Usa o
+    mesmo "Usuário do sistema" que já manda os outros avisos
+    automáticos (SLA, conversa parada etc.), e a frase é a que o
+    Clayton configurou em Configuração (com valor padrão se ele nunca
+    mexeu)."""
+    from . import chat_interno_service, followup_service
+
+    remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
+    if remetente_id is None:
+        raise ApiError(
+            'Configure um "Usuário do sistema" em Configuração antes de usar isso.',
+            status=400, codigo="sem_usuario_sistema",
+        )
+    atendente = conn.execute(
+        "SELECT id, setor FROM usuarios WHERE id = ? AND empresa_id = ? AND ativo = 1",
+        (usuario_atendente_id, empresa_id),
+    ).fetchone()
+    if atendente is None:
+        raise ApiError("Atendente não encontrado.", status=404, codigo="nao_encontrado")
+    conversa = conn.execute(
+        "SELECT c.id FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+        "WHERE c.id = ? AND ct.empresa_id = ?", (conversa_id, empresa_id),
+    ).fetchone()
+    if conversa is None:
+        raise ApiError("Conversa não encontrada.", status=404, codigo="nao_encontrado")
+
+    config = obter_configuracao(conn, empresa_id)
+    modelo = config.get("modelo_cobranca_atraso") or (
+        "Poderia dar uma atenção ao atendimento de *{cliente}*? Já faz {tempo} sem interação -- "
+        "pode me contar o que houve?"
+    )
+    texto = modelo.replace("{cliente}", contato_nome or telefone or "cliente").replace(
+        "{tempo}", _fmt_minutos_texto(duracao_min)
+    )
+
+    conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, atendente["id"])
+    if conversa_interna_id:
+        chat_interno_service.reabrir_conversa(conn, conversa_interna_id)
+        chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
+    else:
+        chat_interno_service.iniciar_conversa(conn, remetente_id, atendente["id"], atendente["setor"], texto)
+    return texto
 
 
 def avisar_conversa_parada_se_preciso(conn):
