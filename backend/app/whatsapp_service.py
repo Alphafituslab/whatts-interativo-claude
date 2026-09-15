@@ -3938,7 +3938,43 @@ def cobrar_explicacao_pior_atendimento(conn, empresa_id: int, usuario_atendente_
         chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
     else:
         chat_interno_service.iniciar_conversa(conn, remetente_id, atendente["id"], atendente["setor"], texto)
+
+    # Registro de quando foi cobrado -- pedido do Clayton (2026-09-14):
+    # "quando eu for enviar de novo devera ter ao lado a data do ultimo
+    # envio" -- pra não mandar cobrança repetida sem saber que já
+    # cobrou essa mesma conversa antes.
+    conn.execute(
+        "INSERT INTO whatsapp_cobrancas_atraso (empresa_id, usuario_atendente_id, conversa_id, texto, criado_em, criado_por_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (empresa_id, usuario_atendente_id, conversa_id, texto, _now_iso(), remetente_id),
+    )
+    conn.commit()
     return texto
+
+
+def listar_cobrancas_atraso(conn, empresa_id: int, usuario_atendente_id: int):
+    """Última data em que cada conversa desse atendente já foi cobrada
+    -- pra mostrar ao lado do botão "Cobrar" no Dashboard."""
+    linhas = conn.execute(
+        "SELECT conversa_id, MAX(criado_em) AS ultima_em FROM whatsapp_cobrancas_atraso "
+        "WHERE empresa_id = ? AND usuario_atendente_id = ? GROUP BY conversa_id",
+        (empresa_id, usuario_atendente_id),
+    ).fetchall()
+    return {str(r["conversa_id"]): r["ultima_em"] for r in linhas}
+
+
+def obter_conversa_interna_sistema(conn, empresa_id: int, usuario_atendente_id: int):
+    """A conversa de chat interno entre o Assistente e esse atendente,
+    se já existir -- pedido do Clayton (2026-09-14): "preciso ver o que
+    o assistente enviou pra ele". Master já pode espiar qualquer
+    conversa de chat interno (ver _pode_visualizar em routes/chat_interno.py);
+    isso só devolve o ID pra abrir direto, sem precisar caçar na aba
+    "Todas"."""
+    from . import chat_interno_service, followup_service
+    remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
+    if remetente_id is None:
+        return None
+    return chat_interno_service.buscar_conversa_existente(conn, remetente_id, usuario_atendente_id)
 
 
 def avisar_conversa_parada_se_preciso(conn):

@@ -14,7 +14,7 @@ import os
 import re
 import secrets
 
-from flask import Blueprint, Response, g, jsonify, request, send_from_directory
+from flask import Blueprint, Response, g, jsonify, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 from .. import chat_interno_service, negocio_service, transcricao, whatsapp_service
@@ -3072,6 +3072,24 @@ def dashboard_cobrar_atraso():
     return jsonify({"ok": True, "texto": texto})
 
 
+@bp.get("/dashboard/cobrancas-atraso")
+@requires_admin
+def dashboard_cobrancas_atraso():
+    usuario_id = request.args.get("usuario_id", type=int)
+    if not usuario_id:
+        raise ApiError("Informe usuario_id.", status=400)
+    conn = get_db()
+    return jsonify(whatsapp_service.listar_cobrancas_atraso(conn, g.empresa_id, usuario_id))
+
+
+@bp.get("/dashboard/conversa-sistema/<int:usuario_id>")
+@requires_admin
+def dashboard_conversa_sistema(usuario_id):
+    conn = get_db()
+    conversa_id = whatsapp_service.obter_conversa_interna_sistema(conn, g.empresa_id, usuario_id)
+    return jsonify({"conversa_id": conversa_id})
+
+
 @bp.post("/dashboard/resetar")
 @requires_admin
 def resetar_dashboard():
@@ -3166,6 +3184,145 @@ def exportar_dashboard():
         conteudo, mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename=dashboard_{_now_iso()[:10]}.csv"},
     )
+
+
+# Pedido do Clayton (2026-09-14): "exportar relatórios (PDF/Excel) do
+# Dashboard -- pra prestar conta pro sócio/contador sem precisar print
+# de tela". O CSV acima já existia; Excel/PDF de verdade (com cores,
+# largura de coluna, cabeçalho) seguem o mesmo padrão já usado em
+# /ligacoes/exportar.xlsx e .pdf.
+@bp.get("/dashboard/exportar.xlsx")
+@requires_admin
+def exportar_dashboard_xlsx():
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    conn = get_db()
+    painel = whatsapp_service.calcular_dashboard(conn, g.empresa_id)
+    t = painel["totais"]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+    ws.append(["Dashboard Seja Alpha", _now_iso()[:10]])
+    ws["A1"].font = Font(bold=True, size=14)
+    ws.append([])
+    resumo_linhas = [
+        ("Na fila", t["fila"]), ("Conversas abertas", t["abertas"]), ("Conversas fechadas", t["fechadas"]),
+        ("Mensagens hoje", t["mensagens_hoje"]), ("Paradas agora", t["paradas_agora"]),
+        ("Avaliação média geral", round(t["media_avaliacao_geral"], 2) if t["media_avaliacao_geral"] is not None else "—"),
+    ]
+    for rotulo, valor in resumo_linhas:
+        ws.append([rotulo, valor])
+
+    ws2 = wb.create_sheet("Desempenho por usuário")
+    cabecalho = [
+        "Usuário", "Email", "Conversas atribuídas", "Conversas abertas", "Conversas fechadas",
+        "Não lidas pendentes", "Mensagens enviadas", "Tempo médio 1ª resposta (min)",
+        "Tempo médio resposta (min)", "Pior atendimento (min)", "Avaliação média", "Total avaliações",
+    ]
+    ws2.append(cabecalho)
+    for cel in ws2[1]:
+        cel.font = Font(bold=True, color="FFFFFF")
+        cel.fill = PatternFill("solid", fgColor="0A7D67")
+    for u in painel["usuarios"]:
+        ws2.append([
+            u["nome"], u["email"], u["conversas_atribuidas"], u["conversas_abertas"], u["conversas_fechadas"],
+            u["nao_lidas_pendentes"], u["mensagens_enviadas"], u["tempo_medio_primeira_resposta_min"],
+            u["tempo_medio_resposta_min"], u["pior_atendimento_min"], u["media_avaliacao"], u["total_avaliacoes"],
+        ])
+    larguras2 = [20, 28, 12, 12, 12, 12, 12, 14, 14, 14, 12, 12]
+    for i, largura in enumerate(larguras2, start=1):
+        ws2.column_dimensions[ws2.cell(row=1, column=i).column_letter].width = largura
+    ws2.freeze_panes = "A2"
+
+    if painel["ranking_fechadas"]:
+        ws3 = wb.create_sheet("Ranking de vendas")
+        ws3.append(["Usuário", "Conversas fechadas", "Tempo médio atendimento (min)", "Avaliação média"])
+        for cel in ws3[1]:
+            cel.font = Font(bold=True, color="FFFFFF")
+            cel.fill = PatternFill("solid", fgColor="0A7D67")
+        for r in painel["ranking_fechadas"]:
+            ws3.append([r["nome"], r["conversas_fechadas"], r["tempo_medio_atendimento_min"], r["media_avaliacao"]])
+        for i, largura in enumerate([24, 18, 22, 14], start=1):
+            ws3.column_dimensions[ws3.cell(row=1, column=i).column_letter].width = largura
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer, as_attachment=True, download_name=f"dashboard_{_now_iso()[:10]}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@bp.get("/dashboard/exportar.pdf")
+@requires_admin
+def exportar_dashboard_pdf():
+    from fpdf import FPDF
+
+    conn = get_db()
+    painel = whatsapp_service.calcular_dashboard(conn, g.empresa_id)
+    t = painel["totais"]
+
+    def _lat1(texto):
+        # Fonte padrão (Helvetica) só cobre Latin-1 -- troca emoji/etc
+        # por "?" em vez de quebrar a exportação inteira.
+        return str(texto if texto is not None else "—").encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Dashboard - Seja Alpha", ln=1)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, _lat1(f"Gerado em {_now_iso()[:10]}"), ln=1)
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 8, "Resumo", ln=1)
+    pdf.set_font("Helvetica", "", 9)
+    resumo_linhas = [
+        ("Na fila", t["fila"]), ("Conversas abertas", t["abertas"]), ("Conversas fechadas", t["fechadas"]),
+        ("Mensagens hoje", t["mensagens_hoje"]), ("Paradas agora", t["paradas_agora"]),
+        ("Avaliação média geral", round(t["media_avaliacao_geral"], 2) if t["media_avaliacao_geral"] is not None else "—"),
+    ]
+    for rotulo, valor in resumo_linhas:
+        pdf.cell(60, 6, _lat1(rotulo), border=0)
+        pdf.cell(0, 6, _lat1(valor), border=0, ln=1)
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 8, "Desempenho por usuário", ln=1)
+    colunas = [
+        ("nome", "Usuário", 34), ("conversas_atribuidas", "Atribuídas", 20), ("conversas_abertas", "Abertas", 18),
+        ("conversas_fechadas", "Fechadas", 18), ("mensagens_enviadas", "Msgs", 16),
+        ("tempo_medio_primeira_resposta_min", "1ª resp.", 20), ("tempo_medio_resposta_min", "Resp. média", 22),
+        ("pior_atendimento_min", "Pior atend.", 22), ("media_avaliacao", "Avaliação", 20),
+    ]
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(10, 125, 103)
+    pdf.set_text_color(255, 255, 255)
+    for _, rotulo, largura in colunas:
+        pdf.cell(largura, 7, _lat1(rotulo), border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", 8)
+    for u in painel["usuarios"]:
+        for campo, _, largura in colunas:
+            valor = u.get(campo)
+            if campo == "media_avaliacao" and valor is not None:
+                valor = f"{valor:.1f}"
+            texto = _lat1(valor)
+            if len(texto) > int(largura / 1.7):
+                texto = texto[: max(3, int(largura / 1.7) - 1)] + "..."
+            pdf.cell(largura, 6, texto, border=1)
+        pdf.ln()
+
+    saida = bytes(pdf.output())
+    buffer = io.BytesIO(saida)
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name=f"dashboard_{_now_iso()[:10]}.pdf", mimetype="application/pdf")
 
 
 # ============================================================

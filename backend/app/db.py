@@ -103,6 +103,7 @@ SCHEMA_FILES = [
     "schema_088_alerta_negocio_parado.sql",
     "schema_089_push_subscricoes.sql",
     "schema_090_modelo_cobranca_atraso.sql",
+    "schema_091_cobrancas_atraso.sql",
 ]
 
 

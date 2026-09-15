@@ -6673,8 +6673,10 @@
     renderShell(
       `<div class="wpp-cabecalho-tela">
          <h2 style="margin:0;">Dashboard</h2>
-         <div style="display:flex; gap:8px;">
-           <a class="botao secundario pequeno" href="${API}/whatsapp/dashboard/exportar" data-acao="exportar-dashboard">⬇ Exportar CSV</a>
+         <div style="display:flex; gap:8px; flex-wrap:wrap;">
+           <button type="button" class="botao secundario pequeno" data-acao="exportar-dashboard-xlsx">⬇ Exportar Excel</button>
+           <button type="button" class="botao secundario pequeno" data-acao="exportar-dashboard-pdf">⬇ Exportar PDF</button>
+           <a class="botao secundario pequeno" href="${API}/whatsapp/dashboard/exportar" data-acao="exportar-dashboard">⬇ CSV</a>
            <button type="button" class="botao secundario pequeno" data-acao="resetar-dashboard">↺ Resetar contadores</button>
          </div>
        </div>
@@ -7738,10 +7740,18 @@
         try { itens = JSON.parse(alvo.dataset.usuario || "[]"); } catch (e) { itens = []; }
         const nome = alvo.dataset.nome || "";
         const usuarioId = alvo.dataset.usuarioId || "";
+        const [cobrancas, conversaSistema] = await Promise.all([
+          chamarApi(`/whatsapp/dashboard/cobrancas-atraso?usuario_id=${usuarioId}`).catch(() => ({})),
+          chamarApi(`/whatsapp/dashboard/conversa-sistema/${usuarioId}`).catch(() => ({ conversa_id: null })),
+        ]);
+        const linkVerConversa = conversaSistema.conversa_id
+          ? `<button type="button" class="botao-link" data-acao="ver-conversa-sistema" data-conversa-id="${conversaSistema.conversa_id}" style="text-decoration:underline; cursor:pointer; background:none; border:none; padding:0; color:inherit; font:inherit; font-size:12.5px;">👁️ Ver o que o Assistente já mandou pra ${escapeHtml(nome)}</button>`
+          : "";
         abrirModal(`
           <h3 style="margin-top:0;">🔍 Piores atendimentos — ${escapeHtml(nome)}</h3>
           <p class="dica">Os intervalos em que o cliente mais esperou pela resposta, do pior pro melhor (o tempo que o cliente levou pra escrever não conta). Clica no cliente pra abrir a conversa, ou manda cobrar uma explicação de ${escapeHtml(nome)} pelo chat interno.</p>
-          <div style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;">
+          ${linkVerConversa ? `<p style="margin:-6px 0 10px;">${linkVerConversa}</p>` : ""}
+          <div style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;" data-lista-piores-atendimentos>
             ${itens.length ? itens.map((it, i) => `
               <div style="display:flex; align-items:stretch; gap:6px; border:1px solid var(--borda); border-radius:10px; overflow:hidden;">
                 <button type="button" data-acao="ir-para-atendimento" data-conversa-id="${it.conversa_id}" style="flex:1; min-width:0; display:block; text-align:left; text-decoration:none; color:inherit; background:none; border:none; padding:10px 12px; cursor:pointer; font:inherit;">
@@ -7751,12 +7761,15 @@
                   </div>
                   <div class="texto-suave" style="font-size:12px; margin-top:2px;">${escapeHtml(it.telefone || "")} · cliente escreveu ${fmtData(it.criado_em)}</div>
                 </button>
-                <button type="button" class="botao secundario pequeno" data-acao="cobrar-explicacao-atraso" data-indice="${i}"
-                  data-usuario-id="${usuarioId}" data-conversa-id="${it.conversa_id}" data-duracao="${it.duracao_min ?? ""}"
-                  data-contato="${escapeHtml(it.contato_nome || "")}" data-telefone="${escapeHtml(it.telefone || "")}"
-                  style="white-space:nowrap; align-self:center; margin-right:8px;" title="Manda uma mensagem no chat interno, saindo como o Assistente, cobrando explicação sobre esse atraso">
-                  📨 Cobrar
-                </button>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:2px; padding-right:8px;">
+                  <button type="button" class="botao secundario pequeno" data-acao="cobrar-explicacao-atraso" data-indice="${i}"
+                    data-usuario-id="${usuarioId}" data-conversa-id="${it.conversa_id}" data-duracao="${it.duracao_min ?? ""}"
+                    data-contato="${escapeHtml(it.contato_nome || "")}" data-telefone="${escapeHtml(it.telefone || "")}"
+                    style="white-space:nowrap;" title="Manda uma mensagem no chat interno, saindo como o Assistente, cobrando explicação sobre esse atraso">
+                    📨 Cobrar
+                  </button>
+                  <span class="texto-suave" style="font-size:10.5px;" data-cobrado-em="${it.conversa_id}">${cobrancas[it.conversa_id] ? `Cobrado em ${fmtData(cobrancas[it.conversa_id])}` : ""}</span>
+                </div>
               </div>`).join("") : `<p class="dica">Nenhum atendimento fechado ainda.</p>`}
           </div>
           <div class="rodape-modal"><button type="button" class="botao secundario" data-acao="fechar-modal">Fechar</button></div>`, "modal-largo");
@@ -7765,6 +7778,10 @@
       case "ir-para-atendimento": {
         fecharModais();
         return navegarPara(`#/whatsapp/${alvo.dataset.conversaId}`);
+      }
+      case "ver-conversa-sistema": {
+        fecharModais();
+        return navegarPara(`#/chat-interno/${alvo.dataset.conversaId}`);
       }
       case "cobrar-explicacao-atraso": {
         try {
@@ -7778,6 +7795,8 @@
               duracao_min: alvo.dataset.duracao ? Number(alvo.dataset.duracao) : null,
             },
           });
+          const rotulo = document.querySelector(`[data-cobrado-em="${alvo.dataset.conversaId}"]`);
+          if (rotulo) rotulo.textContent = `Cobrado em ${fmtData(new Date().toISOString())}`;
           alvo.disabled = true;
           alvo.textContent = "✅ Enviado";
         } catch (erro) {
@@ -7811,6 +7830,22 @@
           return;
         }
         return renderLigacoes();
+      }
+      case "exportar-dashboard-xlsx": {
+        try {
+          await _baixarArquivoAutenticado("/whatsapp/dashboard/exportar.xlsx", `dashboard_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        } catch (e) {
+          definirFlash("erro", e.message || "Não consegui exportar.");
+        }
+        return;
+      }
+      case "exportar-dashboard-pdf": {
+        try {
+          await _baixarArquivoAutenticado("/whatsapp/dashboard/exportar.pdf", `dashboard_${new Date().toISOString().slice(0, 10)}.pdf`);
+        } catch (e) {
+          definirFlash("erro", e.message || "Não consegui exportar.");
+        }
+        return;
       }
       case "exportar-ligacoes-xlsx": {
         try {
