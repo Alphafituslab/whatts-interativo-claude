@@ -1888,6 +1888,43 @@ def marcar_sem_pendencia(conversa_id):
     return jsonify({"ok": True, "sem_pendencia": True})
 
 
+@bp.put("/conversas/<int:conversa_id>/nao-finalizar")
+@requires_auth
+def alternar_nao_finalizar(conversa_id):
+    """"Não encerrar este cliente" -- pedido do Clayton (2026-09-16):
+    setor com atendimento contínuo por natureza (ex.: Faturamento) pode
+    marcar a conversa como exceção permanente, fora do "pior
+    atendimento" e do alerta de SLA."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    ativo = bool((request.get_json(silent=True) or {}).get("ativo"))
+    whatsapp_service.marcar_nao_finalizar(conn, g.empresa_id, conversa_id, usuario["id"], ativo)
+    whatsapp_service.registrar_atividade(
+        conn, usuario["id"], "nao_finalizar_ativado" if ativo else "nao_finalizar_desativado",
+        conversa["telefone"], conversa_id,
+    )
+    return jsonify({"ok": True, "nao_finalizar_ativo": ativo})
+
+
+@bp.get("/setores-nao-finalizar")
+@requires_auth
+def obter_setores_nao_finalizar():
+    """Quais setores tem a opção "Não encerrar" liberada -- qualquer
+    usuário logado pode consultar (é só pra decidir se mostra a opção
+    no menu de botão direito; quem realmente barra é a validação em
+    marcar_nao_finalizar)."""
+    conn = get_db()
+    config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    try:
+        setores = json.loads(config.get("setores_nao_finalizar") or "[]")
+    except (TypeError, ValueError):
+        setores = []
+    return jsonify(setores)
+
+
 @bp.post("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>/encaminhar")
 @requires_auth
 def encaminhar_mensagem(conversa_id, mensagem_id):

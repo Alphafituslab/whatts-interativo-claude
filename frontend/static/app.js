@@ -1267,6 +1267,17 @@
     ]);
   });
 
+  // Setores liberados pra marcar "Não encerrar" -- pedido do Clayton
+  // (2026-09-16). Cache simples (igual obterEtiquetas): a lista quase
+  // nunca muda, e cada clique com o direito não pode esperar rede.
+  async function obterSetoresNaoFinalizar() {
+    if (!state._setoresNaoFinalizarCache) {
+      try { state._setoresNaoFinalizarCache = await chamarApi("/whatsapp/setores-nao-finalizar"); }
+      catch (e) { state._setoresNaoFinalizarCache = []; }
+    }
+    return state._setoresNaoFinalizarCache;
+  }
+
   document.addEventListener("contextmenu", async (e) => {
     const item = e.target.closest("[data-wpp-conversa-id]");
     if (!item) return;
@@ -1276,6 +1287,10 @@
     const marcadas = JSON.parse(item.dataset.wppTags || "[]");
     const etiquetas = await obterEtiquetas();
     const souAdmin = state.usuarioAtual && state.usuarioAtual.admin;
+    const setorConversa = item.dataset.wppSetor || "";
+    const naoFinalizarAtivo = item.dataset.wppNaoFinalizar === "1";
+    const setoresLiberados = await obterSetoresNaoFinalizar();
+    const podeNaoFinalizar = setorConversa && setoresLiberados.includes(setorConversa);
     abrirMenuContexto(e.clientX, e.clientY, [
       // Atribuir direto pelo clique direito -- pedido do Clayton
       // (2026-09-09): "nas fila e sem escolha, me deixar clicar com o
@@ -1288,6 +1303,16 @@
       { acao: "contexto-agendar", id, rotulo: "🕒 Agendar mensagem" },
       { acao: "contexto-lembrete", id, rotulo: "🔔 Abrir lembrete" },
       { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id, rotulo: arquivada ? "📤 Desarquivar" : "🗄️ Arquivar" },
+      // "Não encerrar" -- pedido do Clayton (2026-09-16): setor com
+      // atendimento contínuo por natureza (ex.: Faturamento) pode
+      // marcar a conversa como exceção permanente -- não conta pra SLA
+      // nem pro "pior atendimento" do Dashboard. Só aparece se o setor
+      // dessa conversa foi liberado em Configuração.
+      ...(podeNaoFinalizar ? [{
+        acao: "alternar-nao-finalizar", id,
+        rotulo: naoFinalizarAtivo ? "✅ Voltar a cobrar resposta normalmente" : "🚫 Não encerrar este cliente",
+        dados: { ativo: naoFinalizarAtivo ? "0" : "1" },
+      }] : []),
       { acao: "excluir-conversa", id, rotulo: "🗑️ Excluir conversa" },
       ..._itensEtiquetaMenu(id, marcadas, etiquetas),
     ]);
@@ -3639,7 +3664,7 @@
       const naFila = c.status !== "fechada" && (c.eh_grupo ? !c.equipe_no_grupo : !c.atribuida_usuario_id);
       const slaEstourado = state.slaAlertasIds.has(c.id);
       const slaProximo = !slaEstourado && (state.slaProximoIds || new Set()).has(c.id);
-      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""} ${slaProximo ? "wpp-conversa-sla-proximo" : ""} ${c.nao_lidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : (slaProximo ? 'title="Perto de estourar o tempo combinado"' : "")}>
+      return `<a class="wpp-conversa-item ${c.id === conversaAtivaId ? "ativa" : ""} ${slaEstourado ? "wpp-conversa-sla" : ""} ${slaProximo ? "wpp-conversa-sla-proximo" : ""} ${c.nao_lidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/whatsapp/${c.id}" data-wpp-conversa-id="${c.id}" data-wpp-arquivada="${c.arquivada ? "1" : "0"}" data-wpp-setor="${escapeHtml(c.menu_setor || "")}" data-wpp-nao-finalizar="${c.nao_finalizar_ativo ? "1" : "0"}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' ${slaEstourado ? 'title="Sem resposta há tempo demais"' : (slaProximo ? 'title="Perto de estourar o tempo combinado"' : "")}>
         ${htmlAvatarContato(c.contato_foto, c.contato_nome, c.telefone, 42)}
         <div class="wpp-conversa-info">
           <div class="wpp-conversa-linha1">
@@ -3668,6 +3693,7 @@
             // faz sentido só na aba Arquivadas (é onde arquivada_por_nome
             // vem preenchido; nas outras abas o campo nem é buscado).
             if (c.arquivada && c.arquivada_por_nome) partes.push(`📦 Arquivada por ${escapeHtml(c.arquivada_por_nome)}`);
+            if (c.nao_finalizar_ativo) partes.push('<span title="Não conta pra SLA nem pro pior atendimento -- atendimento contínuo por natureza">🚫 Não encerra</span>');
             // O setor aparece sempre, em qualquer aba — não só em "Todas"/"Fila" — é informação útil pra qualquer atendente ver de cara.
             // Só em conversa de uma pessoa: esse 🏷️ é o setor que o
             // CLIENTE escolheu no menu, e grupo não passa por menu.
@@ -6151,6 +6177,18 @@
              <label>Frase ao cobrar explicação de atraso (no 🔍 "pior atendimento" do Dashboard)</label>
              <textarea name="modelo_cobranca_atraso" rows="3" placeholder="Poderia dar uma atenção ao atendimento de *{cliente}*? Já faz {tempo} sem interação -- pode me contar o que houve?">${escapeHtml(config.modelo_cobranca_atraso || "")}</textarea>
              <p class="texto-suave" style="font-size:11.5px; margin:4px 0 0;">Sai do chat interno, assinado pelo "Usuário do sistema" configurado ali em cima. Use <code>{cliente}</code> e <code>{tempo}</code> onde quiser que entrem o nome do cliente e o tempo parado.</p>
+           </div>
+           <hr style="border:none; border-top:1px solid var(--borda); margin:16px 0;">
+           <div class="campo">
+             <label>Setores que podem marcar "🚫 Não encerrar" numa conversa (botão direito)</label>
+             <p class="texto-suave" style="font-size:11.5px; margin:2px 0 6px;">Pra clientes que por natureza sempre vão ter atendimento contínuo (ex.: Faturamento). A conversa marcada sai do alerta de SLA e não conta como "pior atendimento" no Dashboard.</p>
+             <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:4px;">
+               ${setoresAtuais.map((nome) => `
+                 <label style="display:flex; align-items:center; gap:5px; font-weight:400;">
+                   <input type="checkbox" name="setores_nao_finalizar" value="${escapeHtml(nome)}" ${(config.setores_nao_finalizar || []).includes(nome) ? "checked" : ""}>
+                   ${escapeHtml(nome)}
+                 </label>`).join("")}
+             </div>
            </div>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
@@ -9519,6 +9557,20 @@
         definirFlash("ok", "Conversa excluída.");
         return renderWhatsapp(null);
       }
+      case "alternar-nao-finalizar": {
+        fecharMenuContexto();
+        const id = Number(alvo.dataset.id);
+        const ativo = alvo.dataset.ativo === "1";
+        try {
+          await chamarApi(`/whatsapp/conversas/${id}/nao-finalizar`, { method: "PUT", body: { ativo } });
+          definirFlash("ok", ativo
+            ? "Marcado: essa conversa não conta mais pra SLA nem pro pior atendimento."
+            : "Desmarcado: voltou a contar normalmente.");
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não deu pra mexer nisso.");
+        }
+        return renderWhatsapp(id);
+      }
       case "contexto-agendar": fecharMenuContexto(); modalAgendar(Number(alvo.dataset.id)); return;
       case "contexto-lembrete": fecharMenuContexto(); modalLembrete(Number(alvo.dataset.id)); return;
       case "abrir-resumo": {
@@ -10485,6 +10537,7 @@
             alerta_negocio_parado_ativo: !!dados.get("alerta_negocio_parado_ativo"),
             alerta_negocio_parado_dias: Number(dados.get("alerta_negocio_parado_dias")) || 3,
             modelo_cobranca_atraso: (dados.get("modelo_cobranca_atraso") || "").trim(),
+            setores_nao_finalizar: dados.getAll("setores_nao_finalizar"),
           },
         });
         definirFlash("ok", "Avisos automáticos salvos.");

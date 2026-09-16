@@ -106,6 +106,8 @@ SCHEMA_FILES = [
     "schema_091_cobrancas_atraso.sql",
     "schema_092_sla_pre_alerta.sql",
     "schema_093_contato_compartilhado.sql",
+    "schema_094_nao_finalizar.sql",
+    "schema_094_nao_finalizar.sql",
 ]
 
 

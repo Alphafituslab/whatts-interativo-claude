@@ -227,6 +227,7 @@ def obter_configuracao(conn, empresa_id: int):
             "alerta_negocio_parado_ativo": 0,
             "alerta_negocio_parado_dias": 3,
             "modelo_cobranca_atraso": None,
+            "setores_nao_finalizar": "[]",
         }
     return dict(row)
 
@@ -275,6 +276,10 @@ def config_publica(config):
     d["alerta_negocio_parado_ativo"] = bool(d.get("alerta_negocio_parado_ativo"))
     d["alerta_negocio_parado_dias"] = int(d.get("alerta_negocio_parado_dias") or 3)
     d["modelo_cobranca_atraso"] = d.get("modelo_cobranca_atraso") or 'Poderia dar uma atenção ao atendimento de *{cliente}*? Já faz {tempo} sem interação -- pode me contar o que houve?'
+    try:
+        d["setores_nao_finalizar"] = json.loads(d.get("setores_nao_finalizar") or "[]")
+    except (TypeError, ValueError):
+        d["setores_nao_finalizar"] = []
     return d
 
 
@@ -515,6 +520,11 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
         localizacao_lat = anterior.get("localizacao_lat")
         localizacao_lng = anterior.get("localizacao_lng")
 
+    if "setores_nao_finalizar" in dados:
+        setores_nao_finalizar = json.dumps([s2 for s2 in (dados.get("setores_nao_finalizar") or []) if s2])
+    else:
+        setores_nao_finalizar = anterior.get("setores_nao_finalizar")
+
     if "modelo_cobranca_atraso" in dados:
         modelo_cobranca_atraso = (dados.get("modelo_cobranca_atraso") or "").strip() or None
     else:
@@ -544,8 +554,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
                                               limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
-                                              modelo_cobranca_atraso)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              modelo_cobranca_atraso, setores_nao_finalizar)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -596,6 +606,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             alerta_negocio_parado_ativo = excluded.alerta_negocio_parado_ativo,
             alerta_negocio_parado_dias = excluded.alerta_negocio_parado_dias,
             modelo_cobranca_atraso = excluded.modelo_cobranca_atraso,
+            setores_nao_finalizar = excluded.setores_nao_finalizar,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -611,7 +622,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
          limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
-         modelo_cobranca_atraso),
+         modelo_cobranca_atraso, setores_nao_finalizar),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -3109,6 +3120,8 @@ def calcular_dashboard(conn, empresa_id: int):
         tempos_resposta = []
 
         for c in conversas:
+            if c["nao_finalizar_ativo"]:
+                continue
             # usuario_id junto: sem isso, mensagem automática do MENU/BOT
             # (usuario_id NULL -- "Digite apenas o número correspondente",
             # pesquisa de satisfação, "você foi direcionado para...")
@@ -4899,6 +4912,37 @@ def tags_por_conversa(conn, conversa_ids: list, usuario_id: int):
 # ============================================================
 # ALERTA DE SLA — conversa parada há tempo demais sem resposta nossa
 # ============================================================
+def marcar_nao_finalizar(conn, empresa_id: int, conversa_id: int, usuario_id: int, ativo: bool):
+    """"Não encerrar este cliente" -- pedido do Clayton (2026-09-16):
+    setores onde o atendimento é continuo por natureza (ele deu
+    Faturamento de exemplo) podem marcar uma conversa como exceção
+    permanente: não conta como "pior atendimento" no Dashboard nem
+    dispara alerta de SLA/conversa parada, porque o intervalo longo ali
+    é proposital, não negligência. Só marca se o setor da conversa
+    estiver na lista que o admin liberou em Configuração."""
+    conversa = conn.execute(
+        "SELECT c.id, c.menu_setor FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
+        "WHERE c.id = ? AND ct.empresa_id = ?", (conversa_id, empresa_id),
+    ).fetchone()
+    if conversa is None:
+        raise ApiError("Conversa não encontrada.", status=404, codigo="nao_encontrado")
+    if ativo:
+        config = obter_configuracao(conn, empresa_id)
+        try:
+            setores_liberados = json.loads(config.get("setores_nao_finalizar") or "[]")
+        except (TypeError, ValueError):
+            setores_liberados = []
+        if not conversa["menu_setor"] or conversa["menu_setor"] not in setores_liberados:
+            raise ApiError(
+                f"O setor \"{conversa['menu_setor'] or '—'}\" não tem essa opção liberada em Configuração.",
+                status=403, codigo="setor_nao_liberado",
+            )
+    conn.execute(
+        "UPDATE whatsapp_conversas SET nao_finalizar_ativo = ?, nao_finalizar_em = ?, nao_finalizar_por = ? WHERE id = ?",
+        (1 if ativo else 0, _now_iso() if ativo else None, usuario_id if ativo else None, conversa_id),
+    )
+
+
 def listar_conversas_sla_proximo(conn, empresa_id: int, usuario_id=None, setor=None):
     """Conversas que ainda não estouraram o SLA mas estão entrando na
     janela de aviso antecipado -- pedido do Clayton (2026-09-14): "SLA
@@ -4919,6 +4963,7 @@ def listar_conversas_sla_proximo(conn, empresa_id: int, usuario_id=None, setor=N
         "(c.atribuida_usuario_id IS NULL OR (SELECT m.direcao FROM whatsapp_mensagens m "
         "WHERE m.conversa_id = c.id ORDER BY m.criado_em DESC, m.id DESC LIMIT 1) = 'entrada')",
         "(c.sem_pendencia_em IS NULL OR c.sem_pendencia_em < c.ultima_mensagem_em)",
+        "c.nao_finalizar_ativo = 0",
     ]
     params = [empresa_id, limite_proximo, limite_estourado]
     if usuario_id:
@@ -4955,6 +5000,7 @@ def listar_conversas_sla_estourado(conn, empresa_id: int, usuario_id=None, setor
         # que faz a marca se desfazer sozinha quando o cliente fala de
         # novo — aí é pendência nova, e o alerta volta a valer.
         "(c.sem_pendencia_em IS NULL OR c.sem_pendencia_em < c.ultima_mensagem_em)",
+        "c.nao_finalizar_ativo = 0",
     ]
     params = [empresa_id, limite]
     if usuario_id:
