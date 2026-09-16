@@ -4205,7 +4205,7 @@
           <button type="button" class="wpp-avatar-atualizar" data-acao="atualizar-foto-contato" data-id="${conversa.id}" title="Atualizar foto do contato">🔄</button>
         </span>
         <div class="wpp-chat-identidade">
-          <div class="wpp-chat-nome"><span class="wpp-chat-nome-texto" title="${escapeHtml(nome)}">${escapeHtml(nome)}</span> <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Trocar o nome deste contato (só você vê)">✏️</button></div>
+          <div class="wpp-chat-nome"><span class="wpp-chat-nome-texto" title="${escapeHtml(nome)}">${escapeHtml(nome)}</span> <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="renomear-contato" data-contato-id="${conversa.contato_id}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Trocar o nome deste contato (só você vê)">✏️</button> <button type="button" class="botao-icone" style="width:20px; height:20px; font-size:11px; vertical-align:middle;" data-acao="salvar-contato-oficial" data-telefone="${escapeHtml(conversa.telefone || "")}" data-nome="${escapeHtml(conversa.contato_nome || "")}" title="Salvar nome oficial deste contato -- todo mundo vê, nunca duplica pelo número">💾</button></div>
           <div class="texto-suave wpp-chat-telefone">${conversa.eh_grupo
             ? `👥 Grupo${conversa.membros_whatsapp ? ` · ${conversa.membros_whatsapp} participantes` : ""}`
             : escapeHtml(_telefoneBonito(conversa.telefone))}${conversa.menu_setor && !conversa.eh_grupo ? ` · 🏷️ ${escapeHtml(conversa.menu_setor)}` : ""}${!conversa.eh_grupo && conversa.origem_lead ? ` · ${htmlSeloOrigemLead(conversa.origem_lead)}` : ""}${emSupervisao ? ` · 👁️ supervisionando <span class="wpp-mini-bolinha ${conversa.atribuida_usuario_online ? "wpp-online-sim" : "wpp-online-nao"}" title="${conversa.atribuida_usuario_online ? "Online agora" : "Offline"}"></span> (não marca como lida para ${escapeHtml(conversa.atribuida_usuario_nome || "o responsável")})` : ""}</div>
@@ -5721,6 +5721,19 @@
       <p class="dica">Esse nome é <strong>só seu</strong> — os outros atendentes continuam vendo o nome original. Deixe em branco pra voltar ao nome de cadastro.</p>
       <form data-form="renomear-contato" data-contato-id="${contatoId}">
         <div class="campo"><label>Nome</label><input name="nome" value="${escapeHtml(nomeAtual)}" autofocus></div>
+        <div class="rodape-modal">
+          <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+          <button type="submit" class="botao">Salvar</button>
+        </div>
+      </form>`);
+  }
+
+  function modalSalvarContatoOficial(telefone, nomeAtual) {
+    abrirModal(`
+      <h3 style="margin-top:0;">💾 Salvar contato</h3>
+      <p class="dica">Esse nome fica salvo pra <strong>todo mundo</strong> ver -- diferente do "✏️" que é só seu. Se esse número já tiver um contato salvo, só atualiza o nome; nunca cria um cadastro duplicado.</p>
+      <form data-form="salvar-contato-oficial" data-telefone="${escapeHtml(telefone)}">
+        <div class="campo"><label>Nome</label><input name="nome" value="${escapeHtml(nomeAtual)}" autofocus required></div>
         <div class="rodape-modal">
           <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
           <button type="submit" class="botao">Salvar</button>
@@ -9570,6 +9583,10 @@
         modalRenomearContato(Number(alvo.dataset.contatoId), alvo.dataset.nome);
         return;
       }
+      case "salvar-contato-oficial": {
+        modalSalvarContatoOficial(alvo.dataset.telefone || "", alvo.dataset.nome || "");
+        return;
+      }
       case "resetar-dashboard": {
         if (!confirm("Zerar os contadores do Dashboard? As conversas e mensagens continuam salvas normalmente — só os números voltam a contar a partir de agora.")) return;
         await chamarApi("/whatsapp/dashboard/resetar", { method: "POST" });
@@ -10314,6 +10331,15 @@
         await chamarApi(`/whatsapp/contatos/${contatoId}/apelido`, { method: "PUT", body: { apelido: dados.get("nome") || "" } });
         fecharModais();
         definirFlash("ok", dados.get("nome") ? "Nome salvo (só você vê)." : "Voltou ao nome de cadastro.");
+        return renderWhatsapp(Number(location.hash.split("/")[2]) || null);
+      }
+      case "salvar-contato-oficial": {
+        const telefone = form.dataset.telefone;
+        const nomeOficial = (dados.get("nome") || "").trim();
+        if (!nomeOficial) { definirFlash("erro", "Informe um nome."); return; }
+        await chamarApi("/whatsapp/contatos", { method: "POST", body: { telefone, nome: nomeOficial } });
+        fecharModais();
+        definirFlash("ok", "Contato salvo -- todo mundo já vê esse nome.");
         return renderWhatsapp(Number(location.hash.split("/")[2]) || null);
       }
       case "definir-apelido-interno": {
