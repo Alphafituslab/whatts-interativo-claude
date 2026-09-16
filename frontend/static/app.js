@@ -5671,6 +5671,7 @@
 
   function htmlSecaoConexao(config, webhookUrl) {
     const [seloClasse, seloTexto] = SELO_STATUS_CONEXAO[config.status_conexao] || ["inativo", config.status_conexao];
+    const mostrarQr = state._tentandoConectarAgora && config.status_conexao === "aguardando_qrcode" && config.qrcode_base64;
     return `
        <h3 style="margin-top:0;">Conexão <span class="selo ${seloClasse}">${seloTexto}</span></h3>
        ${webhookUrl ? `
@@ -5686,7 +5687,7 @@
            : `<button class="botao perigo" data-acao="desconectar-whatsapp">Desconectar</button>`}
        </div>
 
-       ${config.status_conexao === "aguardando_qrcode" && config.qrcode_base64 ? `
+       ${mostrarQr ? `
          <div class="wpp-qrcode-wrap" data-wpp-qr-area>
            <div class="wpp-qrcode-moldura">
              <img class="wpp-qrcode" src="data:image/png;base64,${config.qrcode_base64}" alt="QR Code de pareamento do WhatsApp">
