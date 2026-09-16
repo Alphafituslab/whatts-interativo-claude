@@ -293,6 +293,9 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 }
 .wpp-badge-sla[hidden] { display: none; }
 .wpp-conversa-item.wpp-conversa-sla { border-left-color: var(--vermelho); }
+.wpp-bolha-contato-card { background: var(--superficie-2); border: 1px solid var(--borda); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; min-width: 200px; }
+.wpp-bolha-contato-cabecalho { font-size: 13px; }
+.wpp-bolha-contato-acoes { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
 .wpp-badge-sla-proximo { background: #d99a1f; }
 .wpp-conversa-item.wpp-conversa-sla-proximo { border-left-color: #d99a1f; }
 

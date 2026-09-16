@@ -3702,6 +3702,19 @@
     </audio>`;
   }
 
+  function htmlContatoCompartilhadoBolha(m) {
+    if (!m.contato_compartilhado_telefone) return "";
+    const nomeContato = m.contato_compartilhado_nome || m.contato_compartilhado_telefone;
+    return `<div class="wpp-bolha-contato-card">
+      <div class="wpp-bolha-contato-cabecalho">👤 <strong>${escapeHtml(nomeContato)}</strong></div>
+      <div class="texto-suave" style="font-size:12.5px;">${escapeHtml(_telefoneBonito(m.contato_compartilhado_telefone))}</div>
+      <div class="wpp-bolha-contato-acoes">
+        <button type="button" class="botao secundario pequeno" data-acao="conversar-com-numero" data-telefone="${escapeHtml(m.contato_compartilhado_telefone)}">💬 Abrir conversa</button>
+        <button type="button" class="botao secundario pequeno" data-acao="salvar-contato-oficial" data-telefone="${escapeHtml(m.contato_compartilhado_telefone)}" data-nome="${escapeHtml(m.contato_compartilhado_nome || "")}">💾 Salvar contato</button>
+      </div>
+    </div>`;
+  }
+
   function htmlAnexoBolha(m) {
     if (!m.midia_url) return "";
     if (m.tipo === "figurinha") return `
@@ -3936,6 +3949,7 @@
       ${htmlSeloApagada(m)}
       ${htmlCitacao(m)}
       ${htmlAnexoBolha(m)}
+      ${htmlContatoCompartilhadoBolha(m)}
       ${m.encaminhada_de ? `<div class="wpp-bolha-encaminhada">↪️ Encaminhada</div>` : ""}
       ${m.texto ? `<div class="wpp-bolha-texto">${textoComTelefones(m.texto)}</div>` : ""}
       ${m.reacao ? `<span class="wpp-reacao" title="O cliente reagiu a esta mensagem${m.reacao_em ? " em " + fmtData(m.reacao_em) : ""}">${escapeHtml(m.reacao)}</span>` : ""}

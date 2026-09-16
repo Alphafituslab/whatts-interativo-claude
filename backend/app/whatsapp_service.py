@@ -2288,6 +2288,36 @@ def _extrair_stanza_citada(dados: dict):
     return None
 
 
+def _extrair_contato_compartilhado(dados: dict):
+    """Cliente compartilhou um cartão de contato -- o Baileys manda
+    isso como contactMessage (um) ou contactsArrayMessage (vários, usa
+    só o primeiro). Sem reconhecer isso a mensagem chegava vazia (nem
+    texto, nem mídia) e sumia pro atendente -- pedido do Clayton
+    (2026-09-16): "deixar visualizar e salvar o contato". Devolve
+    (nome, telefone) -- qualquer um pode vir None se não achar."""
+    conteudo = dados.get("message") or {}
+    contato = conteudo.get("contactMessage")
+    if not contato:
+        contatos = (conteudo.get("contactsArrayMessage") or {}).get("contacts") or []
+        contato = contatos[0] if contatos else None
+    if not contato:
+        return None, None
+    nome = contato.get("displayName")
+    vcard = contato.get("vcard") or ""
+    telefone = None
+    achado = re.search(r"waid=(\d+)", vcard)
+    if achado:
+        telefone = achado.group(1)
+    else:
+        achado = re.search(r"TEL[^:]*:([+\d][\d\s\-()]*)", vcard)
+        if achado:
+            try:
+                telefone = normalizar_telefone(achado.group(1), completar_ddi=False)
+            except ApiError:
+                telefone = None
+    return nome, telefone
+
+
 def _extrair_texto(mensagem: dict) -> str:
     conteudo = mensagem.get("message") or {}
     return (
@@ -3473,6 +3503,9 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
             contato["foto_url"] = nova
     conversa, conversa_nova = obter_ou_criar_conversa(conn, contato["id"])
     texto = _extrair_texto(dados)
+    contato_comp_nome, contato_comp_telefone = _extrair_contato_compartilhado(dados)
+    if contato_comp_telefone and not texto:
+        texto = f"👤 Contato compartilhado: {contato_comp_nome or contato_comp_telefone}"
     agora = _now_iso()
 
     # Cliente citou/respondeu uma mensagem anterior: acha o ID LOCAL
@@ -3513,10 +3546,12 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         conn.execute(
             """
             INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em,
-                                            autor_nome, autor_telefone, responde_a)
-            VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?, ?)
+                                            autor_nome, autor_telefone, responde_a,
+                                            contato_compartilhado_nome, contato_compartilhado_telefone)
+            VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?, ?, ?, ?)
             """,
-            (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone, responde_a),
+            (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone, responde_a,
+             contato_comp_nome, contato_comp_telefone),
         )
         conn.execute(
             "UPDATE whatsapp_conversas SET nao_lidas = nao_lidas + 1, ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
@@ -3580,10 +3615,12 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
     conn.execute(
         """
         INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, externo_id, status, criado_em,
-                                        autor_nome, autor_telefone, responde_a)
-        VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?, ?)
+                                        autor_nome, autor_telefone, responde_a,
+                                        contato_compartilhado_nome, contato_compartilhado_telefone)
+        VALUES (?, 'entrada', ?, ?, ?, ?, 'recebida', ?, ?, ?, ?, ?, ?)
         """,
-        (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone, responde_a),
+        (conversa["id"], tipo_msg, texto, midia_url, externo_id, agora, autor_nome, autor_telefone, responde_a,
+         contato_comp_nome, contato_comp_telefone),
     )
     conn.execute(
         """
