@@ -3612,7 +3612,7 @@
   function iniciarPollingStatusWhatsapp() {
     pararPollingStatusWhatsapp();
     timerStatusWhatsapp = setInterval(async () => {
-      if (location.hash !== "#/configuracao") { pararPollingStatusWhatsapp(); return; }
+      if (location.hash !== "#/configuracao") { pararPollingStatusWhatsapp(); state._tentandoConectarAgora = false; return; }
       try { await atualizarSecaoConexaoNoDom(); }
       catch (e) { /* tenta de novo no próximo tick */ }
     }, 4000);
@@ -6352,10 +6352,10 @@
        </div>`}`,
       "configuracao"
     );
-    if (config.status_conexao === "aguardando_qrcode") state._configSecoesAbertas = new Set([...(state._configSecoesAbertas || []), "Conexão"]);
+    if (state._tentandoConectarAgora) state._configSecoesAbertas = new Set([...(state._configSecoesAbertas || []), "Conexão"]);
     _aplicarAcordeaoCartoes(document.querySelector(".pagina"));
 
-    if (config.status_conexao === "aguardando_qrcode") iniciarPollingStatusWhatsapp();
+    if (state._tentandoConectarAgora) iniciarPollingStatusWhatsapp();
     else pararPollingStatusWhatsapp();
   }
 
@@ -6414,6 +6414,7 @@
     }
     if (config.status_conexao !== "aguardando_qrcode") {
       pararPollingStatusWhatsapp();
+      state._tentandoConectarAgora = false;
       if (config.status_conexao === "conectado") {
         fecharModais(); // some com o código de pareamento (se estava aberto) assim que conecta de verdade
         definirFlash("ok", "WhatsApp conectado!");
@@ -9612,6 +9613,7 @@
         // Pega o código mais recente que a Evolution já gerou (ela troca
         // sozinha o tempo todo) e recomeça a contagem. Sem pedir um
         // "conectar" novo, que reiniciaria a sessão à toa.
+        state._tentandoConectarAgora = true;
         const botao = alvo;
         botao.disabled = true;
         botao.textContent = "Gerando…";
@@ -9642,6 +9644,7 @@
         return;
       }
       case "conectar-whatsapp": {
+        state._tentandoConectarAgora = true;
         await chamarApi("/whatsapp/conectar", { method: "POST" });
         return renderWhatsappConfiguracao();
       }
