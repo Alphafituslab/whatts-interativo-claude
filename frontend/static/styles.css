@@ -289,7 +289,7 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
 .link-nav.ativo { background: color-mix(in srgb, var(--primaria) 12%, transparent); color: var(--primaria); }
 .wpp-badge-sla {
   margin-left: auto; background: var(--vermelho); color: #fff; font-size: 10px; font-weight: 800;
-  padding: 1px 6px; border-radius: var(--raio-pilula);
+  padding: 1px 6px; border-radius: var(--raio-pilula); cursor: pointer;
 }
 .wpp-badge-sla[hidden] { display: none; }
 .wpp-conversa-item.wpp-conversa-sla { border-left-color: var(--vermelho); }

@@ -554,8 +554,8 @@
       .map((it) => {
         let extra = "";
         if (it.chave === "whatsapp") {
-          extra = '<span class="wpp-badge-sla wpp-badge-sla-proximo" data-wpp-sla-proximo-badge hidden title="Conversas perto de estourar o tempo combinado"></span>'
-                + '<span class="wpp-badge-sla" data-wpp-sla-badge hidden title="Conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado"></span>'
+          extra = '<span class="wpp-badge-sla wpp-badge-sla-proximo" data-wpp-sla-proximo-badge data-acao="ir-para-sla-proximo" hidden title="Conversas perto de estourar o tempo combinado -- clique pra ver"></span>'
+                + '<span class="wpp-badge-sla" data-wpp-sla-badge data-acao="ir-para-sla-estourado" hidden title="Conversas paradas: o cliente falou e ninguém respondeu dentro do tempo combinado -- clique pra ver"></span>'
                 + '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-nao-lidas-badge hidden title="Mensagens novas que você ainda não leu"></span>';
         } else if (it.chave === "chat-interno") {
           extra = '<span class="wpp-badge-nao-lidas wpp-badge-nav" data-wpp-chat-interno-nao-lidas-badge hidden title="Mensagens novas de colegas que você ainda não leu"></span>';
@@ -8083,6 +8083,12 @@
           definirFlash("erro", "Não deu pra mexer nas notificações: " + (erro.message || "erro desconhecido"));
         }
         return montarRota();
+      }
+      case "ir-para-sla-proximo":
+      case "ir-para-sla-estourado": {
+        const souMaster = !!(state.usuarioAtual && state.usuarioAtual.super_admin);
+        state.escopoConversas = souMaster ? "todas" : "minhas";
+        return navegarPara("#/whatsapp");
       }
       case "alternar-ausente": {
         const jaAusente = state.usuarioAtual && state.usuarioAtual.ausente;
