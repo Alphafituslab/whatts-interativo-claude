@@ -109,6 +109,7 @@ SCHEMA_FILES = [
     "schema_094_nao_finalizar.sql",
     "schema_094_nao_finalizar.sql",
     "schema_095_limite_qr_e_aviso_desconexao.sql",
+    "schema_096_captacao_fria_intervalo.sql",
 ]
 
 

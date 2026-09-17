@@ -230,6 +230,7 @@ def obter_configuracao(conn, empresa_id: int):
             "setores_nao_finalizar": "[]",
             "qr_tentativas": 0,
             "qr_janela_inicio": None,
+            "captacao_fria_intervalo_minimo_segundos": 90,
         }
     return dict(row)
 
@@ -238,7 +239,7 @@ def config_publica(config):
     d = dict(config)
     for campo, padrao in (("limite_envios_minuto", 20), ("limite_envios_hora", 250),
                           ("limite_novos_contatos_hora", 20), ("limite_repeticao_mensagem", 5),
-                          ("sla_minutos_pre_alerta", 5)):
+                          ("sla_minutos_pre_alerta", 5), ("captacao_fria_intervalo_minimo_segundos", 90)):
         d[campo] = int(config.get(campo) if config.get(campo) is not None else padrao)
     d["apikey_configurada"] = bool(d.get("evolution_apikey"))
     d["webhook_segredo_configurado"] = bool(d.get("webhook_segredo"))
@@ -340,6 +341,12 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     limite_envios_hora = _limite("limite_envios_hora", 250)
     limite_novos_contatos_hora = _limite("limite_novos_contatos_hora", 20)
     limite_repeticao_mensagem = _limite("limite_repeticao_mensagem", 5)
+    # Pedido do Clayton (2026-09-17): abordar vários contatos NOVOS em
+    # rajada foi o que derrubou o número 554834201881 -- mesmo dentro do
+    # limite por hora, abordagens muito próximas umas das outras já
+    # bastam pro WhatsApp desconfiar. Esse freio é sobre ESPAÇAMENTO,
+    # diferente do "novos por hora" (que é sobre TOTAL).
+    captacao_fria_intervalo_minimo_segundos = _limite("captacao_fria_intervalo_minimo_segundos", 90)
     # Quantos minutos esperar antes de jogar na fila de todos um cliente
     # que não escolheu setor nenhum no menu.
     if dados.get("minutos_liberar_sem_menu") not in (None, ""):
@@ -556,8 +563,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
                                               limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
-                                              modelo_cobranca_atraso, setores_nao_finalizar)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -609,6 +616,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             alerta_negocio_parado_dias = excluded.alerta_negocio_parado_dias,
             modelo_cobranca_atraso = excluded.modelo_cobranca_atraso,
             setores_nao_finalizar = excluded.setores_nao_finalizar,
+            captacao_fria_intervalo_minimo_segundos = excluded.captacao_fria_intervalo_minimo_segundos,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -624,7 +632,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
          limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
-         modelo_cobranca_atraso, setores_nao_finalizar),
+         modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos),
     )
     return obter_configuracao(conn, empresa_id)
 
@@ -1416,9 +1424,11 @@ def verificar_ritmo_envio(conn, empresa_id: int, config=None, telefone_destino: 
             status=429, codigo="ritmo_envio",
         )
 
+    captacao_fria_intervalo_minimo_segundos = int(config.get("captacao_fria_intervalo_minimo_segundos") or 0)
+
     # Contato novo = número pra quem a gente escreve sem que ele nunca
     # tenha escrito pra gente. É o padrão que gera denúncia.
-    if novos_por_hora and telefone_destino:
+    if telefone_destino and (novos_por_hora or captacao_fria_intervalo_minimo_segundos):
         nunca_falou = conn.execute(
             """
             SELECT 1 FROM whatsapp_contatos ct
@@ -1430,7 +1440,7 @@ def verificar_ritmo_envio(conn, empresa_id: int, config=None, telefone_destino: 
             """,
             (empresa_id, telefone_destino),
         ).fetchone() is None
-        if nunca_falou:
+        if nunca_falou and novos_por_hora:
             desde = (datetime.datetime.utcnow() - datetime.timedelta(minutes=60)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             iniciados = conn.execute(
                 """
@@ -1451,6 +1461,36 @@ def verificar_ritmo_envio(conn, empresa_id: int, config=None, telefone_destino: 
                     "no WhatsApp — espere um pouco antes de abrir outra.",
                     status=429, codigo="ritmo_contatos_novos",
                 )
+        # Espaçamento mínimo entre abordagens frias -- pedido do Clayton
+        # (2026-09-17), depois de rastrear a queda do número
+        # 554834201881: não foi volume total (o limite por hora nem
+        # chegou perto), foi RAJADA -- 4 contatos novos abordados em ~5
+        # minutos, cada um seguido de anexo, bem no momento em que o
+        # WhatsApp derrubou a sessão (device_removed). O freio "novos
+        # por hora" não pega isso porque olha só o TOTAL na janela, não
+        # o intervalo entre uma abordagem e outra.
+        if nunca_falou and captacao_fria_intervalo_minimo_segundos:
+            ultima = conn.execute(
+                """
+                SELECT c.criado_em FROM whatsapp_conversas c
+                JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+                WHERE ct.empresa_id = ? AND c.origem_lead = 'captacao_propria'
+                ORDER BY c.criado_em DESC LIMIT 1
+                """,
+                (empresa_id,),
+            ).fetchone()
+            if ultima:
+                passou = (datetime.datetime.utcnow() - datetime.datetime.fromisoformat(
+                    ultima["criado_em"].replace("Z", "")
+                )).total_seconds()
+                if passou < captacao_fria_intervalo_minimo_segundos:
+                    faltam = int(captacao_fria_intervalo_minimo_segundos - passou)
+                    raise ApiError(
+                        f"Espere mais {faltam}s antes de abrir outra conversa com um contato novo. "
+                        "Abordar vários desconhecidos em sequência rápida (mesmo dentro do limite por hora) "
+                        "foi o que derrubou o número da última vez — responder quem já escreveu não tem esse limite.",
+                        status=429, codigo="captacao_fria_intervalo",
+                    )
 
 
 def enviar_localizacao(config, telefone: str, lat: float, lng: float, nome: str = None, endereco: str = None) -> str:

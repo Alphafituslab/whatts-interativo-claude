@@ -5924,6 +5924,11 @@
              <span class="dica"><strong>O mais importante.</strong> Conta só quem nunca escreveu pra gente — é daí que vem denúncia.</span>
            </div>
            <div class="campo">
+             <label>Espaçamento entre abordagens frias (segundos)</label>
+             <input type="number" name="captacao_fria_intervalo_minimo_segundos" min="0" max="3600" value="${config.captacao_fria_intervalo_minimo_segundos ?? 90}">
+             <span class="dica">Tempo mínimo entre uma conversa nova e outra com quem nunca escreveu -- mesmo dentro do limite por hora, abordar vários desconhecidos muito rápido já derrubou número antes. Só vale pra abordagem fria; responder quem já escreveu não espera nada. Padrão: 90s. Baixe pra dar mais liberdade à equipe (ex.: 30s), suba se quiser mais cautela.</span>
+           </div>
+           <div class="campo">
              <label>Mesma mensagem repetida</label>
              <input type="number" name="limite_repeticao_mensagem" min="0" max="100" value="${config.limite_repeticao_mensagem ?? 5}">
              <span class="dica">Depois de mandar o texto IDÊNTICO essa quantidade de vezes numa hora, bloqueia -- muda o texto ou espera passar.</span>
@@ -10468,6 +10473,7 @@
             limite_envios_hora: dados.get("limite_envios_hora"),
             limite_novos_contatos_hora: dados.get("limite_novos_contatos_hora"),
             limite_repeticao_mensagem: dados.get("limite_repeticao_mensagem"),
+            captacao_fria_intervalo_minimo_segundos: dados.get("captacao_fria_intervalo_minimo_segundos"),
           },
         });
         definirFlash("ok", "Limites de envio salvos.");
