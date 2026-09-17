@@ -20,7 +20,7 @@
 
   const state = {
     accessToken: null,
-    refreshToken: localStorage.getItem("whatts_refresh_token") || null,
+    refreshToken: sessionStorage.getItem("whatts_refresh_token") || null,
     usuarioAtual: null,
     tema: localStorage.getItem("whatts_tema") || "auto",
     flash: null,
@@ -280,7 +280,7 @@
         // de verdade inválida, é só a outra aba tendo vencido a corrida.
         // Achado pelo Clayton (2026-09-14): "meu whatts deslogou
         // sozinho" com várias abas abertas ao mesmo tempo.
-        const tokenNoStorage = localStorage.getItem("whatts_refresh_token");
+        const tokenNoStorage = sessionStorage.getItem("whatts_refresh_token");
         if (tokenNoStorage && tokenNoStorage !== state.refreshToken) {
           ({ resultado, dados } = await _tentativaRenovacao(tokenNoStorage));
         }
@@ -288,7 +288,7 @@
       if (resultado !== true) return resultado; // false = sessão inválida mesmo; null = sem conexão, não desloga
       state.accessToken = dados.access_token;
       state.refreshToken = dados.refresh_token;
-      localStorage.setItem("whatts_refresh_token", state.refreshToken);
+      sessionStorage.setItem("whatts_refresh_token", state.refreshToken);
       return true;
     })();
     try {
@@ -302,7 +302,7 @@
     state.accessToken = null;
     state.refreshToken = null;
     state.usuarioAtual = null;
-    localStorage.removeItem("whatts_refresh_token");
+    sessionStorage.removeItem("whatts_refresh_token");
   }
 
   // ---------------------------------------------------------------------
@@ -9951,7 +9951,7 @@
   async function _finalizarLogin(resp, email, lembrar) {
     state.accessToken = resp.access_token;
     state.refreshToken = resp.refresh_token;
-    localStorage.setItem("whatts_refresh_token", state.refreshToken);
+    sessionStorage.setItem("whatts_refresh_token", state.refreshToken);
     if (lembrar) localStorage.setItem("whatts_email_lembrado", email);
     else localStorage.removeItem("whatts_email_lembrado");
     state.usuarioAtual = resp.usuario;
