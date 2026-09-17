@@ -228,6 +228,8 @@ def obter_configuracao(conn, empresa_id: int):
             "alerta_negocio_parado_dias": 3,
             "modelo_cobranca_atraso": None,
             "setores_nao_finalizar": "[]",
+            "qr_tentativas": 0,
+            "qr_janela_inicio": None,
         }
     return dict(row)
 
@@ -729,6 +731,48 @@ def _tratar_resposta(resp):
         erro = corpo.get("message") or corpo.get("error") or f"HTTP {resp.status_code}"
         raise ApiError(f"O serviço do WhatsApp rejeitou a requisição: {erro}", status=502)
     return corpo
+
+
+JANELA_LIMITE_QR_SEGUNDOS = 5 * 60
+MAX_TENTATIVAS_QR_POR_JANELA = 3
+
+
+def verificar_limite_qr(conn, config):
+    """Levanta ApiError se já foram geradas MAX_TENTATIVAS_QR_POR_JANELA
+    QR Codes/tentativas de conexão nos últimos JANELA_LIMITE_QR_SEGUNDOS
+    segundos. Senão, registra esta tentativa e segue. Chamado pela rota
+    ANTES de conectar_instancia -- aqui é só a política de limite, a
+    função de conectar continua tratando só da conexão em si."""
+    agora = datetime.datetime.utcnow()
+    janela_inicio_str = config.get("qr_janela_inicio")
+    tentativas = config.get("qr_tentativas") or 0
+    janela_valida = False
+    if janela_inicio_str:
+        try:
+            janela_inicio = datetime.datetime.fromisoformat(janela_inicio_str.replace("Z", ""))
+            janela_valida = (agora - janela_inicio).total_seconds() < JANELA_LIMITE_QR_SEGUNDOS
+        except ValueError:
+            janela_valida = False
+
+    if not janela_valida:
+        tentativas = 0
+        janela_inicio_str = agora.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    if tentativas >= MAX_TENTATIVAS_QR_POR_JANELA:
+        janela_inicio = datetime.datetime.fromisoformat(janela_inicio_str.replace("Z", ""))
+        restante = JANELA_LIMITE_QR_SEGUNDOS - (agora - janela_inicio).total_seconds()
+        minutos = max(1, int(restante // 60) + (1 if restante % 60 else 0))
+        raise ApiError(
+            f"Muitas tentativas de gerar QR Code seguidas. Espere {minutos} minuto(s) e tente de novo "
+            "-- isso evita que o WhatsApp bloqueie o pareamento por excesso de tentativas.",
+            status=429, codigo="limite_qr_code",
+        )
+
+    conn.execute(
+        "UPDATE configuracoes_whatsapp SET qr_tentativas = ?, qr_janela_inicio = ? WHERE empresa_id = ?",
+        (tentativas + 1, janela_inicio_str, config["empresa_id"]),
+    )
+    conn.commit()
 
 
 def conectar_instancia(conn, config, numero=None):
@@ -1964,6 +2008,25 @@ def listar_atividades(conn, empresa_id: int, usuario_id: int = None, limite: int
 # ============================================================
 # WEBHOOK DE ENTRADA
 # ============================================================
+def _avisar_admins_desconexao(conn, config):
+    try:
+        from . import push_service
+        admins = conn.execute(
+            "SELECT id FROM usuarios WHERE empresa_id = ? AND admin = 1 AND ativo = 1", (config["empresa_id"],)
+        ).fetchall()
+        numero = config.get("numero_conectado") or "seu número"
+        for adm in admins:
+            push_service.enviar_push(
+                conn, adm["id"],
+                titulo="⚠️ WhatsApp desconectado",
+                corpo=f"A conexão com {numero} caiu. Entre em Configuração para gerar um novo QR Code quando quiser reconectar.",
+                tag="whatsapp-desconectado",
+                url="/#/configuracao",
+            )
+    except Exception:
+        pass  # aviso é um extra -- nunca pode travar o processamento do evento de conexão em si
+
+
 def processar_evento_webhook(conn, config, payload: dict):
     """config já vem resolvido pelo chamador (routes/whatsapp.py), pela
     empresa dona do webhook_segredo que veio na URL — cada empresa tem o
@@ -1981,6 +2044,8 @@ def processar_evento_webhook(conn, config, payload: dict):
             novo_status = mapa[estado]
             if estado == "close" and config.get("status_conexao") == "aguardando_qrcode":
                 return {"processado": True, "tipo": "conexao"}
+            if novo_status == "desconectado" and config.get("status_conexao") == "conectado":
+                _avisar_admins_desconexao(conn, config)
             _atualizar_estado_conexao(conn, config["empresa_id"], status_conexao=novo_status, limpar_qrcode=(novo_status == "conectado"))
         return {"processado": True, "tipo": "conexao"}
 

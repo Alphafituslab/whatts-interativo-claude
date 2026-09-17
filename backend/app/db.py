@@ -108,6 +108,7 @@ SCHEMA_FILES = [
     "schema_093_contato_compartilhado.sql",
     "schema_094_nao_finalizar.sql",
     "schema_094_nao_finalizar.sql",
+    "schema_095_limite_qr_e_aviso_desconexao.sql",
 ]
 
 

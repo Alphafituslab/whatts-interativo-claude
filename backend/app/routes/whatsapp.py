@@ -320,6 +320,7 @@ def conectar():
                 (base, g.empresa_id),
             )
     config = whatsapp_service.obter_configuracao(conn, g.empresa_id)
+    whatsapp_service.verificar_limite_qr(conn, config)
     resultado = whatsapp_service.conectar_instancia(conn, config, numero=numero)
     return jsonify(resultado)
 
