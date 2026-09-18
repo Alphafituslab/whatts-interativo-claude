@@ -2111,6 +2111,13 @@ def processar_evento_webhook(conn, config, payload: dict):
     if evento in ("messages.upsert", "messages_upsert"):
         return _processar_mensagem_recebida(conn, config, payload.get("data") or {})
 
+    if evento in ("messages.set", "messages_set"):
+        lista = payload.get("data") or []
+        if not isinstance(lista, list):
+            lista = []
+        total = _processar_historico_mensagens(conn, config, lista)
+        return {"processado": True, "tipo": "historico_sincronizado", "total_novas": total}
+
     if evento in ("messages.update", "messages_update"):
         return _processar_status_mensagem(conn, config["empresa_id"], payload.get("data"))
 
@@ -3541,6 +3548,80 @@ def listar_leads_por_regiao(conn, empresa_id: int, regiao: str, origem_lead: str
         })
     leads.sort(key=lambda x: x["criado_em"] or "", reverse=True)
     return leads
+
+
+def _processar_historico_mensagens(conn, config, mensagens: list) -> int:
+    """Lote de mensagens que a Evolution API manda quando o WhatsApp
+    sincroniza histórico ao reconectar um aparelho (evento messages.set).
+    Grava só o TEXTO (sem mídia e sem grupo por enquanto -- escopo
+    deliberadamente mais cauteloso na primeira versão) das mensagens que
+    ainda não temos, sem duplicar (mesma checagem por externo_id de
+    sempre) e sem disparar nada que só faz sentido pra mensagem em tempo
+    real. A prévia da conversa (ultima_mensagem_em/preview) só avança se
+    a mensagem do histórico for mais recente que a que já sabíamos --
+    senão uma mensagem antiga no meio do lote "voltaria no tempo" a
+    prévia de uma conversa que já tinha coisa mais nova."""
+    empresa_id = config["empresa_id"]
+    total_novas = 0
+    for dados in mensagens:
+        chave = dados.get("key") or {}
+        remote_jid = chave.get("remoteJid") or ""
+        if not remote_jid or remote_jid.endswith("@g.us") or remote_jid == "status@broadcast":
+            continue
+        telefone_bruto = remote_jid.split("@")[0].split(":")[0]
+        externo_id = chave.get("id")
+        if not telefone_bruto or not externo_id:
+            continue
+        ja_existe = conn.execute(
+            """
+            SELECT 1 FROM whatsapp_mensagens m
+            JOIN whatsapp_conversas c ON c.id = m.conversa_id
+            JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+            WHERE m.externo_id = ? AND ct.empresa_id = ?
+            """,
+            (externo_id, empresa_id),
+        ).fetchone()
+        if ja_existe:
+            continue
+
+        texto = _extrair_texto(dados)
+        if not texto:
+            continue
+
+        try:
+            telefone = normalizar_telefone(telefone_bruto, completar_ddi=False)
+        except ApiError:
+            telefone = telefone_bruto
+
+        de_mim = bool(chave.get("fromMe"))
+        nome_contato = None if de_mim else dados.get("pushName")
+        contato = obter_ou_criar_contato(conn, empresa_id, telefone, nome_contato)
+        conversa, _ = obter_ou_criar_conversa(conn, contato["id"])
+
+        timestamp = dados.get("messageTimestamp")
+        try:
+            quando = datetime.datetime.utcfromtimestamp(int(timestamp)).strftime("%Y-%m-%dT%H:%M:%S.%fZ") if timestamp else _now_iso()
+        except (TypeError, ValueError, OSError):
+            quando = _now_iso()
+
+        conn.execute(
+            """
+            INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, externo_id, status, criado_em)
+            VALUES (?, ?, 'texto', ?, ?, ?, ?)
+            """,
+            (conversa["id"], "saida" if de_mim else "entrada", texto, externo_id,
+             "enviada" if de_mim else "recebida", quando),
+        )
+        atual = conn.execute(
+            "SELECT ultima_mensagem_em FROM whatsapp_conversas WHERE id = ?", (conversa["id"],)
+        ).fetchone()
+        if not atual["ultima_mensagem_em"] or quando > atual["ultima_mensagem_em"]:
+            conn.execute(
+                "UPDATE whatsapp_conversas SET ultima_mensagem_em = ?, ultima_mensagem_preview = ? WHERE id = ?",
+                (quando, texto[:120], conversa["id"]),
+            )
+        total_novas += 1
+    return total_novas
 
 
 def _processar_mensagem_recebida(conn, config, dados: dict):
