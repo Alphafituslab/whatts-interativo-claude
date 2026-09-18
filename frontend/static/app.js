@@ -1334,11 +1334,30 @@
     const itemEncerrar = state.chatInternoEscopo === "encerradas"
       ? { acao: "reabrir-interno", id, rotulo: "↩️ Reabrir conversa" }
       : { acao: "fechar-interno", id, rotulo: "✅ Encerrar atendimento" };
+    const souAdmin = state.usuarioAtual && state.usuarioAtual.admin;
+    const outroUsuarioId = item.dataset.wppOutroUsuarioId;
+    const outroUsuarioNome = item.dataset.wppOutroUsuarioNome || "";
+    const outroAusente = item.dataset.wppOutroAusente === "1";
     abrirMenuContexto(e.clientX, e.clientY, [
       { acao: "marcar-nao-lida-interno", id, rotulo: "📩 Marcar como não lida" },
       itemEncerrar,
       ..._itensEtiquetaMenu(id, JSON.parse(item.dataset.wppTags || "[]"), etiquetas, true),
+      // Admin marcar/tirar ausência de quem está do outro lado -- pedido
+      // do Clayton (2026-09-18): "ao clicar com o direito sobre o
+      // funcionario poder mudar o status dele".
+      ...(souAdmin && outroUsuarioId ? [{
+        acao: "alternar-ausente-de", id: outroUsuarioId,
+        rotulo: outroAusente ? `🟢 Tirar ausência de ${outroUsuarioNome}` : `🟡 Marcar ${outroUsuarioNome} como ausente`,
+        dados: { nome: outroUsuarioNome, ausente: outroAusente ? "1" : "0" },
+      }] : []),
     ]);
+  });
+
+  document.addEventListener("contextmenu", (e) => {
+    if (!e.target.closest(".usuario-atual-chip")) return;
+    e.preventDefault();
+    const botaoAusente = document.querySelector('[data-acao="alternar-ausente"]');
+    if (botaoAusente) botaoAusente.click();
   });
 
   document.addEventListener("contextmenu", async (e) => {
@@ -4651,6 +4670,41 @@
 
   // O motivo é opcional, mas ajuda muito: "ausente" sozinho faz o colega
   // ficar sem saber se espera 5 minutos ou procura outra pessoa.
+  function modalAusenciaDe(usuarioId, nome) {
+    const wrap = abrirModal(`
+      <h3 style="margin-top:0;">🟡 Marcar ${escapeHtml(nome)} como ausente</h3>
+      <p class="dica">${escapeHtml(nome)} sai das listas de quem pode atender e aparece como <strong>ausente</strong> pros colegas. Fica registrado nas Atividades quem marcou.</p>
+      <div class="campo"><label class="rotulo-forte">Motivo (opcional)</label>
+        <input name="motivo" maxlength="60" placeholder="Ex.: almoço, reunião, atendimento externo" autofocus>
+        <div class="escolha-lista" style="margin-top:8px;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${["Almoço", "Reunião", "Atendimento externo", "Pausa", "Férias"].map((m) =>
+              `<button type="button" class="botao secundario pequeno" data-motivo-rapido="${m}">${m}</button>`).join("")}
+          </div>
+        </div>
+      </div>
+      <div class="rodape-modal">
+        <button type="button" class="botao secundario" data-acao="fechar-modal">Cancelar</button>
+        <button type="button" class="botao" data-confirmar-ausencia-de>Marcar ausente</button>
+      </div>`);
+    const campo = wrap.querySelector('input[name="motivo"]');
+    for (const b of wrap.querySelectorAll("[data-motivo-rapido]")) {
+      b.addEventListener("click", () => { campo.value = b.dataset.motivoRapido; campo.focus(); });
+    }
+    wrap.querySelector("[data-confirmar-ausencia-de]").addEventListener("click", async () => {
+      const motivo = campo.value.trim();
+      try {
+        await chamarApi(`/usuarios/${usuarioId}/ausente`, { method: "PUT", body: { ausente: true, motivo } });
+        fecharModais();
+        definirFlash("ok", motivo ? `${nome} marcado(a) como ausente (${motivo}).` : `${nome} marcado(a) como ausente.`);
+        return montarRota();
+      } catch (erro) {
+        definirFlash("erro", erro.message || "Não deu pra marcar a ausência.");
+      }
+    });
+    return wrap;
+  }
+
   function modalAusencia() {
     const wrap = abrirModal(`
       <h3 style="margin-top:0;">🟡 Marcar ausência</h3>
@@ -4903,7 +4957,12 @@
       // criador na frente -- parecia foto trocada (ex.: "Daiana →
       // Adrian" com a foto do Adrian ao lado do nome da Daiana).
       const outraFoto = souCriador ? c.participante_foto : c.criado_por_foto;
-      return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""} ${naoLidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/chat-interno/${c.id}" data-wpp-interno-id="${c.id}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}'>
+      // Quem está do outro lado desta conversa -- pra admin poder marcar
+      // ausência dessa pessoa pelo clique direito, sem precisar abrir
+      // Usuários. Pedido do Clayton (2026-09-18).
+      const outroUsuarioId = souParticipante ? c.criado_por_id : c.participante_id;
+      const outroUsuarioAusente = souParticipante ? c.criado_por_ausente : c.participante_ausente;
+      return `<a class="wpp-conversa-item ${c.id === ativaId ? "ativa" : ""} ${naoLidas > 0 ? "wpp-conversa-nao-lida" : ""}" href="#/chat-interno/${c.id}" data-wpp-interno-id="${c.id}" data-wpp-tags='${escapeHtml(JSON.stringify((c.tags || []).map((t) => t.id)))}' data-wpp-outro-usuario-id="${outroUsuarioId || ""}" data-wpp-outro-usuario-nome="${escapeHtml(souAlheio ? (c.participante_nome || "") : outroNome)}" data-wpp-outro-ausente="${outroUsuarioAusente ? "1" : "0"}">
         <span style="position:relative; flex-shrink:0;">
           ${htmlAvatarContato(outraFoto, outroNome, outroNome, 36)}
           <span class="wpp-online-bolinha ${outroOnline ? "wpp-online-sim" : "wpp-online-nao"}" title="${outroOnline ? "Online agora" : "Offline"}"></span>
@@ -8176,6 +8235,23 @@
           return montarRota();
         }
         return modalAusencia();
+      }
+      case "alternar-ausente-de": {
+        fecharMenuContexto();
+        const usuarioId = Number(alvo.dataset.id);
+        const nome = alvo.dataset.nome || "essa pessoa";
+        const jaAusente = alvo.dataset.ausente === "1";
+        if (jaAusente) {
+          try {
+            await chamarApi(`/usuarios/${usuarioId}/ausente`, { method: "PUT", body: { ausente: false } });
+            definirFlash("ok", `${nome} voltou a aparecer como disponível.`);
+            return montarRota();
+          } catch (erro) {
+            definirFlash("erro", erro.message || "Não deu pra tirar a ausência.");
+            return;
+          }
+        }
+        return modalAusenciaDe(usuarioId, nome);
       }
       case "alternar-tema": {
         const atual = document.documentElement.getAttribute("data-tema") || "auto";
