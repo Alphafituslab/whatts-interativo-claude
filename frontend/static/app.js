@@ -6170,6 +6170,11 @@
              <label>Ao prorrogar o lembrete, adiar quantos dias</label>
              <input type="number" name="dias_prorrogar_ligacao" min="1" max="90" value="${config.dias_prorrogar_ligacao ?? 3}">
            </div>
+           <div class="campo" style="max-width:260px;">
+             <label>Avisar por no máximo quantos dias seguidos</label>
+             <input type="number" name="max_avisos_ligacoes_seguidos" min="0" max="90" value="${config.max_avisos_ligacoes_seguidos ?? 5}">
+             <span class="dica">Depois desse tanto de dias avisando sem ninguém prorrogar ou mudar a data, para de avisar sozinho (mas a ligação continua na lista, só não incomoda mais). 0 = avisa pra sempre, todo dia.</span>
+           </div>
            <div class="campo campo-checkbox">
              <label><input type="checkbox" name="alerta_negocio_parado_ativo" ${config.alerta_negocio_parado_ativo ? "checked" : ""}>
                Proposta parada no funil de Vendas — avisar quando um negócio fica dias sem mudar de estágio</label>
@@ -10544,6 +10549,7 @@
             aviso_conversa_parada_max_prorrogacoes: Number(dados.get("aviso_conversa_parada_max_prorrogacoes") ?? 3),
             aviso_ligacoes_ativo: !!dados.get("aviso_ligacoes_ativo"),
             dias_prorrogar_ligacao: Number(dados.get("dias_prorrogar_ligacao")) || 3,
+            max_avisos_ligacoes_seguidos: dados.get("max_avisos_ligacoes_seguidos"),
             alerta_negocio_parado_ativo: !!dados.get("alerta_negocio_parado_ativo"),
             alerta_negocio_parado_dias: Number(dados.get("alerta_negocio_parado_dias")) || 3,
             modelo_cobranca_atraso: (dados.get("modelo_cobranca_atraso") || "").trim(),

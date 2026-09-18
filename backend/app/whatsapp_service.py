@@ -231,6 +231,7 @@ def obter_configuracao(conn, empresa_id: int):
             "qr_tentativas": 0,
             "qr_janela_inicio": None,
             "captacao_fria_intervalo_minimo_segundos": 90,
+            "max_avisos_ligacoes_seguidos": 5,
         }
     return dict(row)
 
@@ -239,7 +240,8 @@ def config_publica(config):
     d = dict(config)
     for campo, padrao in (("limite_envios_minuto", 20), ("limite_envios_hora", 250),
                           ("limite_novos_contatos_hora", 20), ("limite_repeticao_mensagem", 5),
-                          ("sla_minutos_pre_alerta", 5), ("captacao_fria_intervalo_minimo_segundos", 90)):
+                          ("sla_minutos_pre_alerta", 5), ("captacao_fria_intervalo_minimo_segundos", 90),
+                          ("max_avisos_ligacoes_seguidos", 5)):
         d[campo] = int(config.get(campo) if config.get(campo) is not None else padrao)
     d["apikey_configurada"] = bool(d.get("evolution_apikey"))
     d["webhook_segredo_configurado"] = bool(d.get("webhook_segredo"))
@@ -455,6 +457,12 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     else:
         atual_intervalo = anterior.get("envio_massa_intervalo_segundos")
         envio_massa_intervalo_segundos = 8 if atual_intervalo is None else atual_intervalo
+    if dados.get("max_avisos_ligacoes_seguidos") not in (None, ""):
+        max_avisos_ligacoes_seguidos = max(0, int(dados["max_avisos_ligacoes_seguidos"]))
+    else:
+        atual_max_avisos = anterior.get("max_avisos_ligacoes_seguidos")
+        max_avisos_ligacoes_seguidos = 5 if atual_max_avisos is None else atual_max_avisos
+
     if dados.get("dias_prorrogar_ligacao") not in (None, ""):
         dias_prorrogar_ligacao = max(1, int(dados["dias_prorrogar_ligacao"]))
     else:
@@ -563,8 +571,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
                                               limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
-                                              modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                              modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos,
+                                              max_avisos_ligacoes_seguidos)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -617,6 +626,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             modelo_cobranca_atraso = excluded.modelo_cobranca_atraso,
             setores_nao_finalizar = excluded.setores_nao_finalizar,
             captacao_fria_intervalo_minimo_segundos = excluded.captacao_fria_intervalo_minimo_segundos,
+            max_avisos_ligacoes_seguidos = excluded.max_avisos_ligacoes_seguidos,
             atualizado_em = excluded.atualizado_em,
             atualizado_por = excluded.atualizado_por
         """,
@@ -632,7 +642,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
          limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
-         modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos),
+         modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos,
+         max_avisos_ligacoes_seguidos),
     )
     return obter_configuracao(conn, empresa_id)
 

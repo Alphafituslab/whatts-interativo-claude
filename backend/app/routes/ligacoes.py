@@ -129,6 +129,7 @@ def atualizar(ligacao_id):
     # ficaria de uma rodada anterior).
     if "proximo_contato_em" in dados:
         campos.append("aviso_enviado_em = NULL")
+        campos.append("avisos_consecutivos = 0")
     if not campos:
         return jsonify({"ok": True})
     campos.append("atualizado_em = ?")
@@ -155,7 +156,7 @@ def prorrogar(ligacao_id):
     dias = config.get("dias_prorrogar_ligacao") or 3
     nova_data = (datetime.date.today() + datetime.timedelta(days=dias)).isoformat()
     conn.execute(
-        "UPDATE crm_ligacoes SET proximo_contato_em = ?, aviso_enviado_em = NULL, "
+        "UPDATE crm_ligacoes SET proximo_contato_em = ?, aviso_enviado_em = NULL, avisos_consecutivos = 0, "
         "vezes_prorrogado = vezes_prorrogado + 1, atualizado_em = ?, atualizado_por = ? WHERE id = ?",
         (nova_data, _now_iso(), g.usuario_atual["id"], ligacao_id),
     )
@@ -187,17 +188,22 @@ def avisar_ligacoes_pendentes_se_preciso(conn):
         return 0
     hoje = datetime.date.today().isoformat()
     total = 0
+    from .. import whatsapp_service
+
     for emp in empresas:
         empresa_id = emp["empresa_id"]
         remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
         if remetente_id is None:
             continue
+        config = whatsapp_service.obter_configuracao(conn, empresa_id)
+        max_avisos = int(config.get("max_avisos_ligacoes_seguidos") or 0)
         pendentes = conn.execute(
-            "SELECT id, empresa_contatada, contato_nome, criado_por, proximo_contato_em "
+            "SELECT id, empresa_contatada, contato_nome, criado_por, proximo_contato_em, avisos_consecutivos "
             "FROM crm_ligacoes WHERE empresa_id = ? AND proximo_contato_em IS NOT NULL "
             "AND proximo_contato_em <= ? "
-            "AND (aviso_enviado_em IS NULL OR substr(aviso_enviado_em, 1, 10) != ?)",
-            (empresa_id, hoje, hoje),
+            "AND (aviso_enviado_em IS NULL OR substr(aviso_enviado_em, 1, 10) != ?) "
+            "AND (? = 0 OR avisos_consecutivos < ?)",
+            (empresa_id, hoje, hoje, max_avisos, max_avisos),
         ).fetchall()
         for lig in pendentes:
             if not lig["criado_por"] or lig["criado_por"] == remetente_id:
@@ -219,7 +225,10 @@ def avisar_ligacoes_pendentes_se_preciso(conn):
                 chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
             else:
                 chat_interno_service.iniciar_conversa(conn, remetente_id, destino["id"], destino["setor"], texto)
-            conn.execute("UPDATE crm_ligacoes SET aviso_enviado_em = ? WHERE id = ?", (_now_iso(), lig["id"]))
+            conn.execute(
+                "UPDATE crm_ligacoes SET aviso_enviado_em = ?, avisos_consecutivos = avisos_consecutivos + 1 WHERE id = ?",
+                (_now_iso(), lig["id"]),
+            )
             total += 1
     return total
 
