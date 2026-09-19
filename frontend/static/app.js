@@ -1364,6 +1364,24 @@
     ]);
   });
 
+  // Clique direito num contato salvo (tela Contatos, separada da lista
+  // de Conversas) -- pedido do Clayton (2026-09-19): "ao clicar com o
+  // direto sobre o contato ter a opção ali tbm limpar histórico de
+  // conversas". Limpa TODAS as conversas já tidas com essa pessoa, não
+  // só a mais recente (ver limpar_mensagens_contato no backend).
+  document.addEventListener("contextmenu", (e) => {
+    const linha = e.target.closest("[data-wpp-contato-id]");
+    if (!linha) return;
+    const souAdmin = state.usuarioAtual && state.usuarioAtual.admin;
+    const podeLimpar = souAdmin || (state.usuarioAtual && state.usuarioAtual.pode_limpar_conversa);
+    if (!podeLimpar) return; // nada a oferecer -- sem essa permissão, o clique direito não faz nada aqui
+    e.preventDefault();
+    abrirMenuContexto(e.clientX, e.clientY, [
+      { acao: "limpar-historico-contato", id: linha.dataset.wppContatoId, rotulo: "🧹 Limpar histórico de conversas",
+        dados: { nome: linha.dataset.wppContatoNome } },
+    ]);
+  });
+
   document.addEventListener("contextmenu", (e) => {
     if (!e.target.closest(".usuario-atual-chip")) return;
     e.preventDefault();
@@ -5445,7 +5463,7 @@
   function htmlListaContatosModal(contatos) {
     if (!contatos.length) return '<p class="texto-suave">Nenhum contato ainda — importe um arquivo acima, ou eles aparecem aqui sozinhos assim que alguém escrever pela primeira vez.</p>';
     return contatos.map((c) => `
-      <div class="wpp-contato-linha">
+      <div class="wpp-contato-linha" data-wpp-contato-id="${c.id}" data-wpp-contato-nome="${escapeHtml(c.nome || c.telefone)}">
         ${htmlAvatarContato(c.foto_url, c.nome, c.telefone, 32)}
         <div style="flex:1; min-width:0;"><strong>${c.eh_grupo ? "👥 " : ""}${escapeHtml(c.nome || c.telefone)}</strong>${c.nome && !c.eh_grupo ? `<div class="texto-suave">${escapeHtml(c.telefone)}</div>` : ""}${c.eh_grupo ? '<div class="texto-suave">Grupo</div>' : ""}</div>
         <button type="button" class="botao-icone" data-acao="editar-contato" data-id="${c.id}" data-nome="${escapeHtml(c.nome || "")}" data-telefone="${escapeHtml(c.telefone)}" title="Corrigir o nome deste contato">✏️</button>
@@ -9672,6 +9690,20 @@
         await chamarApi(`/whatsapp/conversas/${id}`, { method: "DELETE" });
         definirFlash("ok", "Conversa excluída.");
         return renderWhatsapp(null);
+      }
+      case "limpar-historico-contato": {
+        fecharMenuContexto();
+        const id = Number(alvo.dataset.id);
+        const nome = alvo.dataset.nome || "este contato";
+        if (!confirm(`Limpar o histórico de conversas com ${nome}? TODAS as mensagens de TODAS as conversas já tidas com essa pessoa somem da tela pra sempre, e os arquivos (fotos, áudios, vídeos, documentos) são apagados do servidor. Não é possível desfazer por aqui.`)) return;
+        try {
+          await chamarApi(`/whatsapp/contatos/${id}/mensagens`, { method: "DELETE" });
+          definirFlash("ok", `Histórico de ${nome} limpo.`);
+          fecharModais();
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não deu pra limpar esse histórico.");
+        }
+        return;
       }
       case "limpar-conversa": {
         fecharMenuContexto();

@@ -1916,17 +1916,50 @@ def concluir_lembrete(conn, lembrete_id: int):
 # ============================================================
 # EXCLUIR MENSAGEM (ex.: mandada pro cliente errado por engano)
 # ============================================================
+def _apagar_arquivos_midia_da_conversa(conn, conversa_id: int):
+    """Apaga do DISCO (não só do banco) os arquivos de mídia das
+    mensagens ativas de uma conversa -- pedido do Clayton (2026-09-19):
+    "limpar" precisa liberar espaço de verdade na VPS, não só esconder
+    da tela. Silencioso se o arquivo já não existir (nome antigo, já
+    apagado antes, etc.) -- o que importa é garantir que não sobra."""
+    linhas = conn.execute(
+        "SELECT midia_url FROM whatsapp_mensagens WHERE conversa_id = ? AND excluida_em IS NULL AND midia_url IS NOT NULL",
+        (conversa_id,),
+    ).fetchall()
+    prefixo = "/api/v1/whatsapp/uploads/"
+    for linha in linhas:
+        url = linha["midia_url"] or ""
+        if not url.startswith(prefixo):
+            continue
+        nome_arquivo = url[len(prefixo):]
+        # Só o nome do arquivo, nunca um caminho -- barra o mesmo tipo
+        # de truque de "../.." que send_from_directory já bloqueia na
+        # hora de SERVIR o arquivo; aqui é na hora de APAGAR, onde um
+        # erro custaria muito mais caro.
+        if "/" in nome_arquivo or ".." in nome_arquivo:
+            continue
+        caminho = os.path.join(PASTA_UPLOADS, nome_arquivo)
+        try:
+            os.remove(caminho)
+        except OSError:
+            pass
+
+
 def limpar_mensagens_conversa(conn, conversa_id: int, excluida_por: int) -> int:
-    """Apaga (soft-delete) TODAS as mensagens de uma conversa de uma
-    vez -- diferente de excluir_mensagem (uma por vez, que também tenta
-    apagar do lado do WhatsApp). Aqui é só local: mandar apagar cada
-    mensagem de verdade no WhatsApp, uma por uma, seria impraticável
-    (a maioria já passou da janela curta que o próprio WhatsApp
-    permite) e lento numa conversa com muita mensagem. Mesmo padrão de
-    sempre (excluida_em/excluida_por): some da tela, mas fica no
-    registro -- quem estiver em supervisão continua enxergando o que
-    foi apagado. Pedido do Clayton (2026-09-19), ação configurável por
-    usuário (ver pode_limpar_conversa)."""
+    """Apaga (soft-delete no banco + apaga de verdade do disco/VPS os
+    arquivos de mídia) TODAS as mensagens de uma conversa de uma vez --
+    diferente de excluir_mensagem (uma por vez, que também tenta apagar
+    do lado do WhatsApp). Aqui é só local: mandar apagar cada mensagem
+    de verdade no WhatsApp, uma por uma, seria impraticável (a maioria
+    já passou da janela curta que o próprio WhatsApp permite) e lento
+    numa conversa com muita mensagem. A LINHA no banco fica marcada
+    (excluida_em/excluida_por, mesmo padrão de sempre) -- some da tela,
+    mas quem estiver em supervisão continua enxergando que existiu uma
+    mensagem ali. Só o ARQUIVO em si (foto/áudio/vídeo/documento) é
+    removido de verdade do disco -- pedido do Clayton (2026-09-19):
+    "deve apagar tbm do vps". Ação configurável por usuário (ver
+    pode_limpar_conversa)."""
+    _apagar_arquivos_midia_da_conversa(conn, conversa_id)
     agora = _now_iso()
     cur = conn.execute(
         "UPDATE whatsapp_mensagens SET excluida_em = ?, excluida_por = ? WHERE conversa_id = ? AND excluida_em IS NULL",
@@ -1934,6 +1967,23 @@ def limpar_mensagens_conversa(conn, conversa_id: int, excluida_por: int) -> int:
     )
     recalcular_preview_apos_exclusao(conn, conversa_id)
     return cur.rowcount
+
+
+def limpar_mensagens_contato(conn, contato_id: int, excluida_por: int) -> int:
+    """Igual limpar_mensagens_conversa, mas pra TODAS as conversas já
+    tidas com um contato ao longo do tempo (não só a mais recente) --
+    pedido do Clayton (2026-09-19): "ao clicar com o direito sobre o
+    contato" (tela Contatos, não a lista de Conversas), "limpar
+    histórico de conversas" -- histórico no plural, então cobre
+    qualquer conversa antiga que tenha sido reaberta/recriada com essa
+    pessoa, não só a atual."""
+    conversas = conn.execute(
+        "SELECT id FROM whatsapp_conversas WHERE contato_id = ?", (contato_id,)
+    ).fetchall()
+    total = 0
+    for c in conversas:
+        total += limpar_mensagens_conversa(conn, c["id"], excluida_por)
+    return total
 
 
 def excluir_mensagem(conn, config, mensagem: dict, excluida_por: int = None) -> bool:

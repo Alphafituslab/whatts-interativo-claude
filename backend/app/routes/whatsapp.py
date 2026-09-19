@@ -1170,6 +1170,33 @@ def definir_apelido_contato(contato_id):
     return jsonify({"ok": True})
 
 
+@bp.delete("/contatos/<int:contato_id>/mensagens")
+@requires_auth
+def limpar_historico_contato(contato_id):
+    """Limpa TODAS as conversas já tidas com este contato ao longo do
+    tempo de uma vez -- pedido do Clayton (2026-09-19): clique direito
+    na tela de Contatos, "limpar histórico de conversas". Diferente de
+    limpar_conversa (uma conversa por vez, pela lista de Conversas):
+    aqui não tem um "dono" único pra checar (o contato pode ter tido
+    conversas com atendentes diferentes ao longo do tempo) -- a
+    permissão é só a mesma trava configurável de sempre."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    contato = conn.execute(
+        "SELECT * FROM whatsapp_contatos WHERE id = ? AND empresa_id = ?", (contato_id, g.empresa_id)
+    ).fetchone()
+    if contato is None:
+        raise ApiError("Contato não encontrado.", status=404, codigo="nao_encontrado")
+    if not (usuario["admin"] or usuario.get("pode_limpar_conversa")):
+        raise ApiError(
+            "Você não tem permissão pra limpar conversas. Peça a um administrador para liberar em Usuários.",
+            status=403, codigo="sem_permissao",
+        )
+    total = whatsapp_service.limpar_mensagens_contato(conn, contato_id, usuario["id"])
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "historico_contato_limpo", f"{contato['telefone']} ({total} mensagens)")
+    return jsonify({"ok": True, "total": total})
+
+
 @bp.put("/contatos/<int:contato_id>")
 @requires_auth
 def editar_contato(contato_id):
