@@ -1676,6 +1676,28 @@ def excluir_mensagem(conversa_id, mensagem_id):
     return jsonify({"ok": True, "apagada_no_whatsapp": apagada_no_whatsapp})
 
 
+@bp.delete("/conversas/<int:conversa_id>/mensagens")
+@requires_auth
+def limpar_conversa(conversa_id):
+    """Apaga TODAS as mensagens desta conversa de uma vez (diferente de
+    excluir uma mensagem por vez) -- ação configurável: só quem tem a
+    permissão ligada (ou admin) pode usar. Pedido do Clayton
+    (2026-09-19): ação sensível demais pra deixar liberada por padrão."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar_conversa(conn, g.empresa_id, conversa_id)
+    if not _pode_agir(usuario, conversa):
+        raise ApiError(_recusa_atribuida(conversa), status=403, codigo="sem_permissao")
+    if not (usuario["admin"] or usuario.get("pode_limpar_conversa")):
+        raise ApiError(
+            "Você não tem permissão pra limpar conversas. Peça a um administrador para liberar em Usuários.",
+            status=403, codigo="sem_permissao",
+        )
+    total = whatsapp_service.limpar_mensagens_conversa(conn, conversa_id, usuario["id"])
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_limpa", f"{conversa['telefone']} ({total} mensagens)", conversa_id)
+    return jsonify({"ok": True, "total": total})
+
+
 @bp.put("/conversas/<int:conversa_id>/mensagens/<int:mensagem_id>")
 @requires_auth
 def editar_mensagem(conversa_id, mensagem_id):

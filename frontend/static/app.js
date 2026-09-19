@@ -1313,6 +1313,14 @@
         rotulo: naoFinalizarAtivo ? "✅ Voltar a cobrar resposta normalmente" : "🚫 Não encerrar este cliente",
         dados: { ativo: naoFinalizarAtivo ? "0" : "1" },
       }] : []),
+      // "Limpar conversa" -- pedido do Clayton (2026-09-19): apaga
+      // todas as mensagens de uma conversa de uma vez (a conversa em
+      // si continua existindo, só o conteúdo some). Ação configurável:
+      // só quem tem a permissão ligada em Usuários (ou admin) vê essa
+      // opção.
+      ...((souAdmin || (state.usuarioAtual && state.usuarioAtual.pode_limpar_conversa)) ? [
+        { acao: "limpar-conversa", id, rotulo: "🧹 Limpar mensagens" },
+      ] : []),
       { acao: "excluir-conversa", id, rotulo: "🗑️ Excluir conversa" },
       ..._itensEtiquetaMenu(id, marcadas, etiquetas),
     ]);
@@ -1350,6 +1358,9 @@
         rotulo: outroAusente ? `🟢 Tirar ausência de ${outroUsuarioNome}` : `🟡 Marcar ${outroUsuarioNome} como ausente`,
         dados: { nome: outroUsuarioNome, ausente: outroAusente ? "1" : "0" },
       }] : []),
+      ...((souAdmin || (state.usuarioAtual && state.usuarioAtual.pode_limpar_conversa)) ? [
+        { acao: "limpar-conversa-interna", id, rotulo: "🧹 Limpar mensagens" },
+      ] : []),
     ]);
   });
 
@@ -7815,6 +7826,8 @@
           ${htmlEscolhaSetores(setores, u.setores || (u.setor ? [u.setor] : []))}
         </div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="offline_forcado" ${u.offline_forcado ? "checked" : ""}> Marcar como offline manualmente (afastado/férias — some das listas de "online" e do menu automático mesmo se ele estiver logado)</label></div>
+        <div class="campo campo-checkbox"><label><input type="checkbox" name="pode_limpar_conversa" ${u.pode_limpar_conversa || u.admin ? "checked" : ""} ${u.admin ? "disabled" : ""}> Pode limpar conversas (apaga todas as mensagens de uma conversa de uma vez — ação irreversível pra tela; admin sempre pode)</label></div>
+        ${u.admin ? `<input type="hidden" name="pode_limpar_conversa" value="1">` : ""}
         <div class="campo">
           <label>Redefinir senha (opcional — deixe em branco pra não mexer)</label>
           <div class="campo-senha">
@@ -8645,6 +8658,9 @@
             rotulo: proximo ? `📞 Próximo contato: ${fmtData(proximo)}` : "📞 Agendar próximo contato" },
           { acao: arquivada ? "desarquivar-conversa" : "arquivar-conversa", id,
             rotulo: arquivada ? "📤 Desarquivar" : "🗄️ Arquivar" },
+          ...((state.usuarioAtual && (state.usuarioAtual.admin || state.usuarioAtual.pode_limpar_conversa)) ? [
+            { acao: "limpar-conversa", id, rotulo: "🧹 Limpar mensagens" },
+          ] : []),
           { acao: "excluir-conversa", id, rotulo: "🗑️ Excluir conversa" },
         ]);
       }
@@ -9630,6 +9646,18 @@
         definirFlash("ok", "Marcada como não lida.");
         return renderWhatsapp(null);
       }
+      case "limpar-conversa-interna": {
+        fecharMenuContexto();
+        const id = Number(alvo.dataset.id);
+        if (!confirm("Limpar esta conversa? TODAS as mensagens somem da tela pra sempre — a conversa continua na lista, só fica vazia. Não é possível desfazer por aqui.")) return;
+        try {
+          await chamarApi(`/chat-interno/conversas/${id}/mensagens`, { method: "DELETE" });
+          definirFlash("ok", "Conversa limpa.");
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não deu pra limpar essa conversa.");
+        }
+        return renderChatInterno(id);
+      }
       case "marcar-nao-lida-interno": {
         const id = Number(alvo.dataset.id);
         fecharMenuContexto();
@@ -9644,6 +9672,18 @@
         await chamarApi(`/whatsapp/conversas/${id}`, { method: "DELETE" });
         definirFlash("ok", "Conversa excluída.");
         return renderWhatsapp(null);
+      }
+      case "limpar-conversa": {
+        fecharMenuContexto();
+        const id = Number(alvo.dataset.id);
+        if (!confirm("Limpar esta conversa? TODAS as mensagens (enviadas e recebidas) somem da tela pra sempre — a conversa continua na lista, só fica vazia. Não é possível desfazer por aqui.")) return;
+        try {
+          await chamarApi(`/whatsapp/conversas/${id}/mensagens`, { method: "DELETE" });
+          definirFlash("ok", "Conversa limpa.");
+        } catch (erro) {
+          definirFlash("erro", erro.message || "Não deu pra limpar essa conversa.");
+        }
+        return renderWhatsapp(id);
       }
       case "alternar-nao-finalizar": {
         fecharMenuContexto();
@@ -10809,6 +10849,7 @@
             setores: dados.getAll("setores"),
             offline_forcado: !!dados.get("offline_forcado"),
             acesso_conversas: !!dados.get("acesso_conversas"),
+            pode_limpar_conversa: !!dados.get("pode_limpar_conversa"),
           },
         });
         const senhaNova = dados.get("senha_nova");

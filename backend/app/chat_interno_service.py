@@ -356,6 +356,21 @@ def encaminhar_conversa(conn, conversa_id: int, novo_participante_id: int, novo_
 _ROTULOS_TIPO = {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento", "audio": "🎵 Áudio"}
 
 
+def limpar_mensagens_conversa(conn, conversa_id: int, excluida_por: int) -> int:
+    """Apaga (soft-delete) TODAS as mensagens de uma conversa interna
+    de uma vez -- mesmo padrão de excluir_mensagem (uma por vez):
+    excluida_em/excluida_por, some da tela mas fica no registro. Pedido
+    do Clayton (2026-09-19), ação configurável por usuário (ver
+    pode_limpar_conversa em usuarios)."""
+    agora = _now_iso()
+    cur = conn.execute(
+        "UPDATE chat_interno_mensagens SET excluida_em = ?, excluida_por = ? WHERE conversa_id = ? AND excluida_em IS NULL",
+        (agora, excluida_por, conversa_id),
+    )
+    recalcular_preview_apos_exclusao(conn, conversa_id)
+    return cur.rowcount
+
+
 def recalcular_preview_apos_exclusao(conn, conversa_id: int):
     """Quando a mensagem apagada era a que aparecia como prévia na
     lista de conversas, a prévia tem que voltar a refletir a última

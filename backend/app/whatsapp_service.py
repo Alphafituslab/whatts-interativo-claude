@@ -1916,6 +1916,26 @@ def concluir_lembrete(conn, lembrete_id: int):
 # ============================================================
 # EXCLUIR MENSAGEM (ex.: mandada pro cliente errado por engano)
 # ============================================================
+def limpar_mensagens_conversa(conn, conversa_id: int, excluida_por: int) -> int:
+    """Apaga (soft-delete) TODAS as mensagens de uma conversa de uma
+    vez -- diferente de excluir_mensagem (uma por vez, que também tenta
+    apagar do lado do WhatsApp). Aqui é só local: mandar apagar cada
+    mensagem de verdade no WhatsApp, uma por uma, seria impraticável
+    (a maioria já passou da janela curta que o próprio WhatsApp
+    permite) e lento numa conversa com muita mensagem. Mesmo padrão de
+    sempre (excluida_em/excluida_por): some da tela, mas fica no
+    registro -- quem estiver em supervisão continua enxergando o que
+    foi apagado. Pedido do Clayton (2026-09-19), ação configurável por
+    usuário (ver pode_limpar_conversa)."""
+    agora = _now_iso()
+    cur = conn.execute(
+        "UPDATE whatsapp_mensagens SET excluida_em = ?, excluida_por = ? WHERE conversa_id = ? AND excluida_em IS NULL",
+        (agora, excluida_por, conversa_id),
+    )
+    recalcular_preview_apos_exclusao(conn, conversa_id)
+    return cur.rowcount
+
+
 def excluir_mensagem(conn, config, mensagem: dict, excluida_por: int = None) -> bool:
     """Some da nossa conversa sempre (exclusão local garantida). Também
     TENTA apagar do lado do WhatsApp ("apagar para todos" via a Evolution

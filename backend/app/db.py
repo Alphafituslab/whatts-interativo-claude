@@ -111,6 +111,7 @@ SCHEMA_FILES = [
     "schema_095_limite_qr_e_aviso_desconexao.sql",
     "schema_096_captacao_fria_intervalo.sql",
     "schema_097_max_avisos_ligacoes.sql",
+    "schema_098_pode_limpar_conversa.sql",
 ]
 
 

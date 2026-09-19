@@ -433,6 +433,27 @@ def excluir_mensagem(conversa_id, mensagem_id):
     return jsonify({"ok": True})
 
 
+@bp.delete("/conversas/<int:conversa_id>/mensagens")
+@requires_auth
+def limpar_conversa(conversa_id):
+    """Apaga TODAS as mensagens desta conversa interna de uma vez --
+    ação configurável: só quem tem a permissão ligada (ou admin) pode
+    usar. Pedido do Clayton (2026-09-19)."""
+    usuario = g.usuario_atual
+    conn = get_db()
+    conversa = _carregar(conn, usuario["empresa_id"], conversa_id)
+    if usuario["id"] not in (conversa["criado_por_id"], conversa["participante_id"]):
+        raise ApiError("Esta conversa é privada entre outras duas pessoas.", status=403, codigo="sem_permissao")
+    if not (usuario["admin"] or usuario.get("pode_limpar_conversa")):
+        raise ApiError(
+            "Você não tem permissão pra limpar conversas. Peça a um administrador para liberar em Usuários.",
+            status=403, codigo="sem_permissao",
+        )
+    total = chat_interno_service.limpar_mensagens_conversa(conn, conversa_id, usuario["id"])
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_interna_limpa", f"conversa interna #{conversa_id} ({total} mensagens)")
+    return jsonify({"ok": True, "total": total})
+
+
 @bp.post("/conversas/<int:conversa_id>/anexo")
 @requires_auth
 def enviar_anexo(conversa_id):

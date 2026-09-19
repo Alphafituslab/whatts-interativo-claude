@@ -42,6 +42,7 @@ def _publico(u, setores=None):
         "setores": u["_setores"] if "_setores" in u.keys() else None,
         "offline_forcado": bool(u["offline_forcado"]) if "offline_forcado" in u.keys() else False,
         "acesso_conversas": bool(u["acesso_conversas"]) if "acesso_conversas" in u.keys() else True,
+        "pode_limpar_conversa": bool(u["pode_limpar_conversa"]) if "pode_limpar_conversa" in u.keys() else False,
         "online": _online(u),
         "ausente": bool(u["ausente"]) if "ausente" in u.keys() else False,
         "ausente_motivo": u["ausente_motivo"] if "ausente_motivo" in u.keys() else None,
@@ -210,10 +211,11 @@ def criar():
         raise ApiError("Já existe um usuário com este email.", status=409, codigo="email_duplicado")
 
     cur = conn.execute(
-        "INSERT INTO usuarios (nome, email, senha_hash, admin, super_admin, ativo, horario_permitido, setor, criado_em, empresa_id, acesso_conversas) "
-        "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+        "INSERT INTO usuarios (nome, email, senha_hash, admin, super_admin, ativo, horario_permitido, setor, criado_em, empresa_id, acesso_conversas, pode_limpar_conversa) "
+        "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
         (nome, email, security.hash_password(senha), admin, super_admin, horario_permitido, setores[0] if setores else None,
-         _now_iso(), g.empresa_id, 1 if (admin or dados.get("acesso_conversas", True)) else 0),
+         _now_iso(), g.empresa_id, 1 if (admin or dados.get("acesso_conversas", True)) else 0,
+         1 if (admin or dados.get("pode_limpar_conversa")) else 0),
     )
     whatsapp_service.definir_setores_do_usuario(conn, cur.lastrowid, setores)
     whatsapp_service.avisar_boasvindas_se_ativo(conn, g.empresa_id, cur.lastrowid, nome)
@@ -262,9 +264,12 @@ def editar(usuario_id):
     # Admin sempre enxerga as conversas — guardar 0 aqui pra um admin só
     # criaria um estado contraditório (menu escondido, API liberada).
     acesso_conversas = 1 if (admin or dados.get("acesso_conversas")) else 0
+    # Mesma lógica pro "limpar conversa" -- admin sempre pode, resto só
+    # se liberado explicitamente aqui. Pedido do Clayton (2026-09-19).
+    pode_limpar_conversa = 1 if (admin or dados.get("pode_limpar_conversa")) else 0
     conn.execute(
-        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, super_admin = ?, offline_forcado = ?, acesso_conversas = ? WHERE id = ?",
-        (nome, email, admin, super_admin, offline_forcado, acesso_conversas, usuario_id),
+        "UPDATE usuarios SET nome = ?, email = ?, admin = ?, super_admin = ?, offline_forcado = ?, acesso_conversas = ?, pode_limpar_conversa = ? WHERE id = ?",
+        (nome, email, admin, super_admin, offline_forcado, acesso_conversas, pode_limpar_conversa, usuario_id),
     )
     # Regrava a lista e acerta o setor principal (usuarios.setor) junto.
     whatsapp_service.definir_setores_do_usuario(conn, usuario_id, setores)
