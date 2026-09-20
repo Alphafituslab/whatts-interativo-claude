@@ -152,8 +152,12 @@ h1, h2, h3 { letter-spacing: -0.02em; font-weight: 800; }
 .campo input:focus, .campo select:focus, .campo textarea:focus {
   outline: none; border-color: var(--primaria); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primaria) 18%, transparent);
 }
-.campo-checkbox label { display: flex; align-items: center; gap: 8px; font-weight: 500; color: var(--texto); }
-.campo-checkbox input { width: auto; }
+.campo-checkbox label { display: flex; align-items: center; gap: 10px; font-weight: 500; color: var(--texto); }
+/* Pedido do Clayton (2026-09-20): a caixinha padrão do navegador é
+   minúscula demais pra marcar/desmarcar com conforto (sobretudo no
+   celular) -- aumentada e com acento na cor do app pra ficar visível
+   quando marcada. */
+.campo-checkbox input { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--primaria); cursor: pointer; }
 
 .botao {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
