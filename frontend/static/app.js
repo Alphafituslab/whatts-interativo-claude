@@ -3462,7 +3462,12 @@
       try {
         if (await mudouAlgo()) {
           await atualizarListaConversasInternasNoDom();
-          if (conversaId) await atualizarMensagensInternasNoDom(conversaId);
+          // Só busca (e por tabela marca como "visto") a conversa aberta
+          // quando a pessoa está de olho de verdade -- em segundo plano,
+          // a lista/contador de não-lidas ainda atualiza acima, só a
+          // marcação de "visto" dessa conversa específica espera a
+          // pessoa voltar a olhar.
+          if (conversaId && !document.hidden && document.hasFocus()) await atualizarMensagensInternasNoDom(conversaId);
         }
       } catch (e) { /* próxima tentativa corrige */ }
       if (timerChatInterno !== null) timerChatInterno = setTimeout(tick, _ritmoDoPulso());
