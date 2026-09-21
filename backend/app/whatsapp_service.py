@@ -223,6 +223,8 @@ def obter_configuracao(conn, empresa_id: int):
             "notificacao_desktop_ativo": 1,
             "notificacao_desktop_usuarios_ocultos": "[]",
             "limite_repeticao_mensagem": 5,
+            "limite_repeticao_anexo": 5,
+            "janela_repeticao_anexo_minutos": 30,
             "numeros_monitorados": "[]",
             "alerta_negocio_parado_ativo": 0,
             "alerta_negocio_parado_dias": 3,
@@ -240,6 +242,7 @@ def config_publica(config):
     d = dict(config)
     for campo, padrao in (("limite_envios_minuto", 20), ("limite_envios_hora", 250),
                           ("limite_novos_contatos_hora", 20), ("limite_repeticao_mensagem", 5),
+                          ("limite_repeticao_anexo", 5), ("janela_repeticao_anexo_minutos", 30),
                           ("sla_minutos_pre_alerta", 5), ("captacao_fria_intervalo_minimo_segundos", 90),
                           ("max_avisos_ligacoes_seguidos", 5)):
         d[campo] = int(config.get(campo) if config.get(campo) is not None else padrao)
@@ -343,6 +346,11 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     limite_envios_hora = _limite("limite_envios_hora", 250)
     limite_novos_contatos_hora = _limite("limite_novos_contatos_hora", 20)
     limite_repeticao_mensagem = _limite("limite_repeticao_mensagem", 5)
+    # Pedido do Clayton (2026-09-21): "5 anexos ou pdfs iguais... somente
+    # após 30 minutos" -- mesmo freio do texto, mas pro CONTEÚDO do
+    # anexo (hash), com quantidade e janela configuráveis à parte.
+    limite_repeticao_anexo = _limite("limite_repeticao_anexo", 5)
+    janela_repeticao_anexo_minutos = _limite("janela_repeticao_anexo_minutos", 30)
     # Pedido do Clayton (2026-09-17): abordar vários contatos NOVOS em
     # rajada foi o que derrubou o número 554834201881 -- mesmo dentro do
     # limite por hora, abordagens muito próximas umas das outras já
@@ -570,10 +578,11 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-                                              limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
+                                              limite_repeticao_mensagem, limite_repeticao_anexo, janela_repeticao_anexo_minutos,
+                                              numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
                                               modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos,
                                               max_avisos_ligacoes_seguidos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -620,6 +629,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             notificacao_desktop_ativo = excluded.notificacao_desktop_ativo,
             notificacao_desktop_usuarios_ocultos = excluded.notificacao_desktop_usuarios_ocultos,
             limite_repeticao_mensagem = excluded.limite_repeticao_mensagem,
+            limite_repeticao_anexo = excluded.limite_repeticao_anexo,
+            janela_repeticao_anexo_minutos = excluded.janela_repeticao_anexo_minutos,
             numeros_monitorados = excluded.numeros_monitorados,
             alerta_negocio_parado_ativo = excluded.alerta_negocio_parado_ativo,
             alerta_negocio_parado_dias = excluded.alerta_negocio_parado_dias,
@@ -641,7 +652,8 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          aviso_conversa_parada_max_prorrogacoes, aviso_ligacoes_ativo, dias_prorrogar_ligacao,
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
-         limite_repeticao_mensagem, numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
+         limite_repeticao_mensagem, limite_repeticao_anexo, janela_repeticao_anexo_minutos,
+         numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
          modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos,
          max_avisos_ligacoes_seguidos),
     )
@@ -1394,6 +1406,45 @@ def verificar_repeticao_mensagem(conn, empresa_id: int, texto: str, config=None)
             "Mude o texto ou espere cerca de 1 hora antes de enviar de novo — isso evita que o número "
             "seja identificado como robô pelo WhatsApp.",
             status=429, codigo="mensagem_repetida",
+        )
+
+
+def verificar_repeticao_anexo(conn, empresa_id: int, midia_hash: str, config=None):
+    """Mesma lógica de verificar_repeticao_mensagem, mas pro CONTEÚDO de
+    um anexo (foto, vídeo, documento, áudio) em vez de texto -- mandar a
+    MESMA imagem/PDF repetidas vezes é o mesmo padrão de risco de robô.
+
+    Pedido do Clayton (2026-09-21): "5 anexos ou pdfs iguais... somente
+    após 30 minutos será possível novas imagens e anexos" -- quantidade
+    (limite_repeticao_anexo, padrão 5) e janela de espera
+    (janela_repeticao_anexo_minutos, padrão 30) configuráveis à parte
+    do freio de texto (que é sempre 1h). Contado por empresa (soma de
+    todos os usuários, não só quem está mandando agora), porque quem
+    corre risco de ban é o número da empresa, não o atendente
+    individual. 0 desliga, igual os outros freios."""
+    if not midia_hash:
+        return
+    config = config or obter_configuracao(conn, empresa_id)
+    limite = int(config.get("limite_repeticao_anexo") if config.get("limite_repeticao_anexo") is not None else 5)
+    if not limite:
+        return
+    janela_minutos = int(config.get("janela_repeticao_anexo_minutos") if config.get("janela_repeticao_anexo_minutos") is not None else 30)
+    desde = (datetime.datetime.utcnow() - datetime.timedelta(minutes=janela_minutos)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    linha = conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM whatsapp_mensagens m
+        JOIN whatsapp_conversas c ON c.id = m.conversa_id
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        WHERE m.direcao = 'saida' AND m.midia_hash = ? AND m.criado_em >= ? AND ct.empresa_id = ?
+        """,
+        (midia_hash, desde, empresa_id),
+    ).fetchone()
+    if linha["n"] >= limite:
+        raise ApiError(
+            f"Esse mesmo anexo já foi enviado {limite} vezes nos últimos {janela_minutos} minutos. "
+            f"Espere cerca de {janela_minutos} minutos ou mande um arquivo diferente -- isso evita que o número "
+            "seja identificado como robô pelo WhatsApp.",
+            status=429, codigo="anexo_repetido",
         )
 
 

@@ -10,6 +10,7 @@ import csv
 import io
 import json
 import datetime
+import hashlib
 import os
 import re
 import secrets
@@ -4110,6 +4111,8 @@ def enviar_anexo(conversa_id):
     tipo = tipo_forcado if tipo_forcado in EXTENSOES_TIPO else _classificar_tipo(arquivo.filename)
     legenda = (request.form.get("legenda") or "").strip() or None
     whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
+    midia_hash = hashlib.sha256(dados_bytes).hexdigest()
+    whatsapp_service.verificar_repeticao_anexo(conn, g.empresa_id, midia_hash)
 
     os.makedirs(PASTA_UPLOADS, exist_ok=True)
     nome_seguro = f"{secrets.token_hex(8)}_{secure_filename(arquivo.filename)}"
@@ -4141,10 +4144,10 @@ def enviar_anexo(conversa_id):
 
     cur = conn.execute(
         """
-        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, nome_arquivo, externo_id, usuario_id, status, erro, criado_em)
-        VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO whatsapp_mensagens (conversa_id, direcao, tipo, texto, midia_url, nome_arquivo, midia_hash, externo_id, usuario_id, status, erro, criado_em)
+        VALUES (?, 'saida', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (conversa_id, tipo, legenda, midia_url, arquivo.filename, externo_id, usuario["id"], status_msg, erro, agora),
+        (conversa_id, tipo, legenda, midia_url, arquivo.filename, midia_hash, externo_id, usuario["id"], status_msg, erro, agora),
     )
     conn.execute(
         "UPDATE whatsapp_conversas SET status = 'aberta', fechada_em = NULL, ultima_mensagem_em = ?, ultima_mensagem_preview = ?, "

@@ -6037,6 +6037,16 @@
              <input type="number" name="limite_repeticao_mensagem" min="0" max="100" value="${config.limite_repeticao_mensagem ?? 5}">
              <span class="dica">Depois de mandar o texto IDÊNTICO essa quantidade de vezes numa hora, bloqueia -- muda o texto ou espera passar.</span>
            </div>
+           <div class="campo">
+             <label>Mesmo anexo/foto/PDF repetido</label>
+             <input type="number" name="limite_repeticao_anexo" min="0" max="100" value="${config.limite_repeticao_anexo ?? 5}">
+             <span class="dica">Depois de mandar o MESMO arquivo (foto, PDF, vídeo, áudio) essa quantidade de vezes na janela abaixo, bloqueia -- manda um arquivo diferente ou espera passar.</span>
+           </div>
+           <div class="campo">
+             <label>Janela de espera do anexo repetido (minutos)</label>
+             <input type="number" name="janela_repeticao_anexo_minutos" min="0" max="1440" value="${config.janela_repeticao_anexo_minutos ?? 30}">
+             <span class="dica">Depois de atingir o limite acima, quanto tempo esperar antes de liberar de novo o mesmo arquivo. Padrão: 30 minutos.</span>
+           </div>
            <div class="campo" style="align-self:end;">
              <button type="submit" class="botao secundario">Salvar limites</button>
            </div>
@@ -10671,6 +10681,8 @@
             limite_envios_hora: dados.get("limite_envios_hora"),
             limite_novos_contatos_hora: dados.get("limite_novos_contatos_hora"),
             limite_repeticao_mensagem: dados.get("limite_repeticao_mensagem"),
+            limite_repeticao_anexo: dados.get("limite_repeticao_anexo"),
+            janela_repeticao_anexo_minutos: dados.get("janela_repeticao_anexo_minutos"),
             captacao_fria_intervalo_minimo_segundos: dados.get("captacao_fria_intervalo_minimo_segundos"),
           },
         });
