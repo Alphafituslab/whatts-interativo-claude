@@ -3906,7 +3906,7 @@ def _processar_mensagem_recebida(conn, config, dados: dict):
         """
         UPDATE whatsapp_conversas
         SET status = 'aberta', nao_lidas = nao_lidas + 1, ultima_mensagem_em = ?, ultima_mensagem_preview = ?,
-            ultima_msg_cliente_em = ?, followup_adiado_ate = NULL
+            ultima_msg_cliente_em = ?, followup_adiado_ate = NULL, ultimo_aviso_sla_proximo_em = NULL
         WHERE id = ?
         """,
         (agora, preview[:120], agora, conversa["id"]),
@@ -4189,6 +4189,55 @@ def avisar_sla_estourado_se_preciso(conn):
             conn.execute(
                 "UPDATE whatsapp_conversas SET ultimo_aviso_sla_em = ? WHERE id = ?",
                 (agora.strftime("%Y-%m-%dT%H:%M:%S.%fZ"), c["id"]),
+            )
+            avisados += 1
+    return avisados
+
+
+def avisar_sla_proximo_se_preciso(conn):
+    """Chamado periodicamente pelo agendador (ver scheduler.py), igual
+    avisar_sla_estourado_se_preciso -- mas pro alerta ANTECIPADO (antes
+    de estourar de vez, janela configurável em Configuração). Pedido do
+    Clayton (2026-09-21): "sendo automatico o envio se ja nao for e
+    manual tbm" -- automático aqui; o manual é a rota
+    PUT /conversas/<id>/sla-proximo-avisado + o mesmo endpoint de chat
+    interno que o botão usa direto do frontend."""
+    from . import chat_interno_service, followup_service
+    empresas = conn.execute(
+        "SELECT empresa_id FROM configuracoes_whatsapp WHERE aviso_sla_ativo = 1"
+    ).fetchall()
+    if not empresas:
+        return 0
+    agora = _now_iso()
+    avisados = 0
+    for emp in empresas:
+        empresa_id = emp["empresa_id"]
+        remetente_id = followup_service._remetente_do_sistema(conn, empresa_id)
+        if remetente_id is None:
+            continue
+        for c in listar_conversas_sla_proximo(conn, empresa_id):
+            if not c.get("atribuida_usuario_id") or c["atribuida_usuario_id"] == remetente_id:
+                continue
+            if c.get("ultimo_aviso_sla_proximo_em"):
+                continue  # já avisou desta vez -- só reavisa quando sair e entrar de novo na janela (nova mensagem do cliente reseta)
+            participante = conn.execute(
+                "SELECT id, setor FROM usuarios WHERE id = ? AND ativo = 1", (c["atribuida_usuario_id"],)
+            ).fetchone()
+            if participante is None:
+                continue
+            texto = (
+                "🟡 *" + str(c.get("contato_nome") or c.get("telefone")) +
+                "* está perto de estourar o tempo combinado de resposta. Ainda dá tempo!"
+            )
+            conversa_interna_id = chat_interno_service.buscar_conversa_existente(conn, remetente_id, participante["id"])
+            if conversa_interna_id:
+                chat_interno_service.reabrir_conversa(conn, conversa_interna_id)
+                chat_interno_service.enviar_mensagem(conn, conversa_interna_id, remetente_id, texto)
+            else:
+                chat_interno_service.iniciar_conversa(conn, remetente_id, participante["id"], participante["setor"], texto)
+            conn.execute(
+                "UPDATE whatsapp_conversas SET ultimo_aviso_sla_proximo_em = ? WHERE id = ?",
+                (agora, c["id"]),
             )
             avisados += 1
     return avisados

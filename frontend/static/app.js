@@ -4278,8 +4278,16 @@
     // pra acontecer em breve (ver aviso_conversa_parada_* em
     // Configuração) -- dá pra prorrogar antes que feche sozinha.
     const contandoParaFechar = !fechada && conversa.aviso_fechamento_automatico_em;
+    const pertoDeEstourar = !fechada && emSupervisao && (state.slaProximoIds || new Set()).has(conversa.id);
     return `
       ${avisoFechamentoAuto ? `<div class="wpp-aviso-fechamento-auto">${avisoFechamentoAuto} Se não for o caso, é só clicar em "Reabrir".</div>` : ""}
+      ${pertoDeEstourar ? `
+        <div class="wpp-aviso-fechamento-auto">
+          🟡 Perto de estourar o tempo combinado de resposta.
+          <button type="button" class="botao secundario pequeno" data-acao="avisar-sla-proximo" data-id="${conversa.id}"
+            data-usuario="${conversa.atribuida_usuario_id}" data-nome="${escapeHtml(nome)}"
+            data-responsavel="${escapeHtml(conversa.atribuida_usuario_nome || "responsável")}" style="margin-left:8px;">🔔 Avisar ${escapeHtml(conversa.atribuida_usuario_nome || "responsável")}</button>
+        </div>` : ""}
       ${contandoParaFechar ? `<div class="wpp-aviso-fechamento-auto">
           ⏳ O cliente não responde há um tempo e essa conversa vai ser encerrada automaticamente em breve${conversa.vezes_prorrogada ? ` (já prorrogada ${conversa.vezes_prorrogada}x)` : ""}.
           ${conversa.pode_prorrogar
@@ -4524,6 +4532,7 @@
       contatosSemConversa = contatos.filter((c) => !telefonesComConversa.has(c.telefone));
     } else {
       conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
+      if (state._filtroSlaIds) conversas = conversas.filter((c) => state._filtroSlaIds.has(c.id));
     }
 
     // Etiquetas e a contagem de cada uma alimentam a barra de filtro.
@@ -4587,6 +4596,7 @@
              ${(state.buscaConversas || state.buscaData) ? `<button type="button" class="botao-icone" data-acao="limpar-busca-conversas" title="Limpar busca">✕</button>` : ""}
            </form>
            ${(state.buscaConversas || state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px;">Resultados${state.buscaConversas ? ` para "${escapeHtml(state.buscaConversas)}"` : ""}${state.buscaData ? ` em ${_rotuloDoDia(state.buscaData)}` : ""}</p>` : htmlAbasConversas() + htmlFiltroAtendente(usuariosParaFiltro) + htmlFiltrosExtras() + htmlFiltroEtiquetas(etiquetas, contagemEtiquetas)}
+           ${(state._filtroSlaIds && !state.buscaConversas && !state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px; display:flex; align-items:center; gap:6px;"><span>🟡 Mostrando só as ${state._filtroSlaIds.size} perto de estourar o SLA</span><button type="button" class="botao-icone" data-acao="limpar-filtro-sla" title="Ver todas de novo">✕</button></p>` : ""}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes)}</div>
@@ -4621,7 +4631,8 @@
     const lista = document.querySelector("[data-wpp-lista]");
     if (!lista) return;
     if (state.buscaConversas || state.buscaData) return; // não sobrescreve um resultado de busca ativo
-    const conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
+    let conversas = await chamarApi(`/whatsapp/conversas?${_queryConversas()}`);
+    if (state._filtroSlaIds) conversas = conversas.filter((c) => state._filtroSlaIds.has(c.id));
     const conversaAtivaId = Number(location.hash.split("/")[2]) || null;
     if (!conversas.length) { _pintarSeMudou(lista, htmlListaConversas(conversas, conversaAtivaId)); return; }
     lista._htmlPintado = null;
@@ -8253,8 +8264,12 @@
       }
       case "ir-para-sla-proximo":
       case "ir-para-sla-estourado": {
+        const ids = [...((alvo.dataset.acao === "ir-para-sla-proximo" ? state.slaProximoIds : state.slaAlertasIds) || [])];
         const souMaster = !!(state.usuarioAtual && state.usuarioAtual.super_admin);
         state.escopoConversas = souMaster ? "todas" : "minhas";
+        state._filtroSlaIds = null;
+        if (ids.length === 1) return navegarPara(`#/whatsapp/${ids[0]}`);
+        if (ids.length > 1) state._filtroSlaIds = new Set(ids);
         return navegarPara("#/whatsapp");
       }
       case "alternar-ausente": {
@@ -8493,7 +8508,12 @@
         state.tagFiltro = String(state.tagFiltro) === String(id) ? null : id;
         return renderWhatsapp(null);
       }
+      case "limpar-filtro-sla": {
+        state._filtroSlaIds = null;
+        return renderWhatsapp(null);
+      }
       case "trocar-escopo-conversas": {
+        state._filtroSlaIds = null; // trocar de aba manualmente sai do "só as marcadas"
         state.escopoConversas = alvo.dataset.escopo;
         // O filtro de atendente só faz sentido dentro de "Todas" — sair
         // de lá sem limpar fazia outras abas (ex.: Arquivadas) mostrarem
@@ -9158,6 +9178,26 @@
           dias: alvo.dataset.dias || 0, prazo: alvo.dataset.prazo || 0,
         });
         return;
+      }
+      case "avisar-sla-proximo": {
+        const conversaId = Number(alvo.dataset.id);
+        const usuarioId = Number(alvo.dataset.usuario);
+        const nome = alvo.dataset.nome || "o cliente";
+        const responsavel = alvo.dataset.responsavel || "responsável";
+        alvo.disabled = true;
+        alvo.textContent = "Avisando…";
+        const texto = `🟡 *${nome}* está perto de estourar o tempo combinado de resposta. Dá uma olhada quando puder!`;
+        try {
+          await chamarApi("/chat-interno/conversas", { method: "POST", body: { participante_id: usuarioId, texto, como_sistema: true } });
+          await chamarApi(`/whatsapp/conversas/${conversaId}/sla-proximo-avisado`, { method: "PUT" });
+          definirFlash("ok", `${responsavel} avisado(a).`);
+        } catch (erro) {
+          alvo.disabled = false;
+          alvo.textContent = `🔔 Avisar ${responsavel}`;
+          definirFlash("erro", "Não deu pra avisar: " + erro.message);
+          return;
+        }
+        return renderWhatsapp(conversaId);
       }
       case "avisar-followup-confirmar": {
         const usuarioId = Number(alvo.dataset.usuario);

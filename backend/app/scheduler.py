@@ -48,6 +48,7 @@ def _loop():
                     followup_service.processar_avisos_automaticos(conn)
                     whatsapp_service.avisar_fila_sem_escolha_se_preciso(conn)
                     whatsapp_service.avisar_sla_estourado_se_preciso(conn)
+                    whatsapp_service.avisar_sla_proximo_se_preciso(conn)
                     whatsapp_service.enviar_resumo_diario_se_preciso(conn)
                     whatsapp_service.avisar_conversa_parada_se_preciso(conn)
                     ligacoes_routes.avisar_ligacoes_pendentes_se_preciso(conn)

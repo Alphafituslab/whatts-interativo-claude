@@ -2698,6 +2698,23 @@ def atribuir_conversa(conversa_id):
     return jsonify({"ok": True})
 
 
+@bp.put("/conversas/<int:conversa_id>/sla-proximo-avisado")
+@requires_auth
+def marcar_sla_proximo_avisado(conversa_id):
+    """Registra que já mandou o aviso de "perto de estourar o SLA"
+    manualmente (botão na conversa) -- pra avisar_sla_proximo_se_preciso
+    não mandar OUTRO aviso automático em cima do manual que acabou de
+    sair. Mesmo padrão de PUT /followup/conversas/<id>/avisado. Pedido
+    do Clayton (2026-09-21)."""
+    conn = get_db()
+    _carregar_conversa(conn, g.empresa_id, conversa_id)  # 404 se não for desta empresa
+    conn.execute(
+        "UPDATE whatsapp_conversas SET ultimo_aviso_sla_proximo_em = ? WHERE id = ?",
+        (_now_iso(), conversa_id),
+    )
+    return jsonify({"ok": True})
+
+
 @bp.post("/conversas/<int:conversa_id>/fechar")
 @requires_auth
 def fechar_conversa(conversa_id):

@@ -112,6 +112,7 @@ SCHEMA_FILES = [
     "schema_096_captacao_fria_intervalo.sql",
     "schema_097_max_avisos_ligacoes.sql",
     "schema_098_pode_limpar_conversa.sql",
+    "schema_099_aviso_sla_proximo.sql",
 ]
 
 
