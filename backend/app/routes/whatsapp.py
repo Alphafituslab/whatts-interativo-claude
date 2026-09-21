@@ -147,7 +147,13 @@ EXTENSOES_PERIGOSAS = {
 }
 
 
-def _extensao_perigosa(nome_arquivo: str) -> bool:
+def _extensao_perigosa(nome_arquivo: str, usuario=None) -> bool:
+    # Admin MASTER pode mandar (é quem responde pela empresa e às vezes
+    # precisa distribuir o próprio instalador/ferramenta interna por
+    # aqui mesmo) -- ninguém mais, nem admin comum, passa por cima
+    # desse freio. Pedido do Clayton (2026-09-21).
+    if usuario and usuario.get("super_admin"):
+        return False
     ext = nome_arquivo.rsplit(".", 1)[-1].lower() if "." in nome_arquivo else ""
     return ext in EXTENSOES_PERIGOSAS
 
@@ -3881,7 +3887,7 @@ def agendar_mensagem(conversa_id):
     tipo, midia_url, nome_arquivo = "texto", None, None
     arquivo = request.files.get("arquivo") if eh_multipart else None
     if arquivo and arquivo.filename:
-        if _extensao_perigosa(arquivo.filename):
+        if _extensao_perigosa(arquivo.filename, usuario):
             raise ApiError("Esse tipo de arquivo não pode ser enviado por aqui.", status=400)
         dados_bytes = arquivo.read()
         if len(dados_bytes) > MAX_ANEXO_MB * 1024 * 1024:
@@ -4088,7 +4094,7 @@ def enviar_anexo(conversa_id):
     arquivo = request.files.get("arquivo")
     if not arquivo or not arquivo.filename:
         raise ApiError("Nenhum arquivo enviado.", status=400)
-    if _extensao_perigosa(arquivo.filename):
+    if _extensao_perigosa(arquivo.filename, usuario):
         raise ApiError("Esse tipo de arquivo não pode ser enviado por aqui.", status=400)
 
     dados_bytes = arquivo.read()
