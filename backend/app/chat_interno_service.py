@@ -70,15 +70,31 @@ def _atualizar_preview(conn, conversa_id, texto, agora):
 def chamar_atencao(conn, conversa_id: int, quem_id: int):
     """Registra um toque de quem_id pro OUTRO lado da conversa — botão
     "chamar atenção" no chat interno (som insistente no destinatário,
-    repetível). Só grava o instante; quem detecta a mudança e toca o
-    alerta é o navegador do destinatário, via polling (ver
-    atualizarBadgesNaoLidos no app.js)."""
+    repetível). Grava o instante (quem já está com a aba aberta detecta
+    a mudança e toca o alerta via polling, ver atualizarBadgesNaoLidos
+    no app.js) E manda notificação push de verdade -- pedido do Clayton
+    (2026-09-22): "não está aparecendo o aviso de push pra ele" --
+    sem isso, quem estava com o app fechado (não só minimizado) nunca
+    era avisado, porque o polling só roda com a aba aberta."""
     conversa = conn.execute(
         "SELECT criado_por_id, participante_id FROM chat_interno_conversas WHERE id = ?", (conversa_id,)
     ).fetchone()
     agora = _now_iso()
     campo = "aviso_participante_em" if quem_id == conversa["criado_por_id"] else "aviso_criador_em"
     conn.execute(f"UPDATE chat_interno_conversas SET {campo} = ? WHERE id = ?", (agora, conversa_id))
+    destinatario_id = conversa["participante_id"] if quem_id == conversa["criado_por_id"] else conversa["criado_por_id"]
+    try:
+        from . import push_service
+        quem = conn.execute("SELECT nome FROM usuarios WHERE id = ?", (quem_id,)).fetchone()
+        push_service.enviar_push(
+            conn, destinatario_id,
+            titulo="📣 Chamando sua atenção",
+            corpo=f"{quem['nome'] if quem else 'Alguém'} está chamando sua atenção no chat interno!",
+            tag="chamar-atencao-" + str(conversa_id),
+            url=f"/#/chat-interno/{conversa_id}",
+        )
+    except Exception:
+        pass  # push é um extra -- nunca pode travar o toque de atenção em si
 
 
 SEGUNDOS_DIGITANDO = 6
@@ -93,7 +109,8 @@ def marcar_digitando(conn, conversa_id: int, lado: str):
 def enviar_mensagem(conn, conversa_id: int, usuario_id: int, texto: str, tipo="texto", midia_url=None, nome_arquivo=None, responde_a=None):
     conversa = conn.execute("SELECT * FROM chat_interno_conversas WHERE id = ?", (conversa_id,)).fetchone()
     agora = _inserir_mensagem(conn, conversa_id, usuario_id, texto, tipo, midia_url, nome_arquivo, responde_a)
-    _atualizar_preview(conn, conversa_id, texto if tipo == "texto" else {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento", "audio": "🎵 Áudio"}.get(tipo, "📎 Anexo"), agora)
+    preview = texto if tipo == "texto" else {"imagem": "📷 Imagem", "video": "🎥 Vídeo", "documento": "📄 Documento", "audio": "🎵 Áudio"}.get(tipo, "📎 Anexo")
+    _atualizar_preview(conn, conversa_id, preview, agora)
     # Quem mandou não soma não-lida pra si mesmo — só pro outro lado.
     campo = "nao_lidas_participante" if usuario_id == conversa["criado_por_id"] else "nao_lidas_criador"
     conn.execute(
@@ -101,6 +118,24 @@ def enviar_mensagem(conn, conversa_id: int, usuario_id: int, texto: str, tipo="t
         f"fechada_para_criador_em = NULL, fechada_para_participante_em = NULL, {campo} = {campo} + 1 WHERE id = ?",
         (conversa_id,),
     )
+    # Notificação push de verdade pro OUTRO lado -- pedido do Clayton
+    # (2026-09-22): "mandar uma mensagem escrita deve aparecer na tela
+    # dele mesmo que o whats esteja minimizado". Sem isso, só quem tinha
+    # a aba aberta (mesmo minimizada) era avisado, via polling -- igual
+    # ao mesmo problema que o "chamar atenção" tinha.
+    destinatario_id = conversa["participante_id"] if usuario_id == conversa["criado_por_id"] else conversa["criado_por_id"]
+    try:
+        from . import push_service
+        quem = conn.execute("SELECT nome FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+        push_service.enviar_push(
+            conn, destinatario_id,
+            titulo=f"💬 {quem['nome'] if quem else 'Alguém'}",
+            corpo=(preview or "Nova mensagem")[:120],
+            tag=f"chat-interno-{conversa_id}",
+            url=f"/#/chat-interno/{conversa_id}",
+        )
+    except Exception:
+        pass  # push é um extra -- nunca pode travar o envio da mensagem em si
 
 
 def obter_apelidos(conn, usuario_id: int):
