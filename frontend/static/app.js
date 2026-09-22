@@ -57,6 +57,30 @@
       .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   }
 
+  // Marca d'água discreta nas conversas -- pedido do Clayton
+  // (2026-09-22): desencorajar print e deixar rastro se vazar. Por
+  // usuário (cada um configura no próprio cadastro, ou o admin escolhe
+  // pra quem mais). Nome + email + hora de quem está vendo, repetidos
+  // em diagonal, bem de leve -- SVG num background-image porque é um
+  // padrão que se repete sozinho (background-repeat), sem precisar
+  // gerar dezenas de elementos no DOM.
+  function _estiloMarcaDagua() {
+    const u = state.usuarioAtual;
+    if (!u || !u.marca_dagua_ativa) return "";
+    // Preto fixo só aparecia no tema claro -- no escuro (fundo escuro)
+    // ficava preto sobre escuro, invisível. Pedido do Clayton
+    // (2026-09-22): "nao esta aparecendo nada... modo escuro".
+    const temaAttr = document.documentElement.getAttribute("data-tema");
+    const escuro = temaAttr === "escuro" || (temaAttr !== "claro" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const cor = escuro ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)";
+    const hora = new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+    const texto = escapeHtml(`${u.nome} · ${u.email} · ${hora}`);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="340" height="150">`
+      + `<text x="0" y="50" transform="rotate(-28 170 75)" fill="${cor}" `
+      + `font-size="12" font-family="sans-serif" font-weight="600">${texto}</text></svg>`;
+    return ` style="background-image:url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}'); background-repeat:repeat;"`;
+  }
+
   function fmtNomeBackup(nome) {
     const m = nome.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
     if (!m) return nome;
@@ -4386,7 +4410,7 @@
           <button type="button" class="botao pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>
         </div>` : ""}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens data-conversa-id="${conversa.id}" data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}" data-contato-nome="${escapeHtml(conversa.contato_nome || "")}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo, conversa.contato_nome)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens data-conversa-id="${conversa.id}" data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}" data-contato-nome="${escapeHtml(conversa.contato_nome || "")}"${_estiloMarcaDagua()}>${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo, conversa.contato_nome)).join("")}</div>
       ${htmlAgendadas(agendadas)}
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem" data-conversa-id="${conversa.id}">
@@ -5172,7 +5196,7 @@
         <button type="button" class="botao-icone" data-acao="fechar-busca-mensagens" title="Fechar busca">✕</button>
       </div>
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens-interno data-conversa-id="${conversa.id}">${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens-interno data-conversa-id="${conversa.id}"${_estiloMarcaDagua()}>${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolhaInterna(it.mensagem, conversa)).join("")}</div>
       <div data-wpp-citando></div>
       ${souAlheio ? `<p class="wpp-conversa-fechada-aviso">👁️ Você está só visualizando esta conversa (supervisão) — não é possível responder nem interagir aqui.</p>` : `
       <form class="wpp-chat-input" data-form="enviar-mensagem-interna" data-conversa-id="${conversa.id}">
@@ -7912,6 +7936,7 @@
         <div class="campo campo-checkbox"><label><input type="checkbox" name="offline_forcado" ${u.offline_forcado ? "checked" : ""}> Marcar como offline manualmente (afastado/férias — some das listas de "online" e do menu automático mesmo se ele estiver logado)</label></div>
         <div class="campo campo-checkbox"><label><input type="checkbox" name="pode_limpar_conversa" ${u.pode_limpar_conversa || u.admin ? "checked" : ""} ${u.admin ? "disabled" : ""}> Pode limpar conversas (apaga todas as mensagens de uma conversa de uma vez — ação irreversível pra tela; admin sempre pode)</label></div>
         ${u.admin ? `<input type="hidden" name="pode_limpar_conversa" value="1">` : ""}
+        <div class="campo campo-checkbox"><label><input type="checkbox" name="marca_dagua_ativa" ${u.marca_dagua_ativa ? "checked" : ""}> Marca d'água nas conversas dele (nome, email e hora, discreto por cima da tela — desencoraja print e deixa rastro se vazar)</label></div>
         <div class="campo">
           <label>Redefinir senha (opcional — deixe em branco pra não mexer)</label>
           <div class="campo-senha">
@@ -11006,6 +11031,7 @@
             offline_forcado: !!dados.get("offline_forcado"),
             acesso_conversas: !!dados.get("acesso_conversas"),
             pode_limpar_conversa: !!dados.get("pode_limpar_conversa"),
+            marca_dagua_ativa: !!dados.get("marca_dagua_ativa"),
           },
         });
         const senhaNova = dados.get("senha_nova");

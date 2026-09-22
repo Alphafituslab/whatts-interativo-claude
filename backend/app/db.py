@@ -116,6 +116,7 @@ SCHEMA_FILES = [
     "schema_100_limite_repeticao_anexo.sql",
     "schema_101_limite_anexos_dia.sql",
     "schema_102_downloads_codigo_temporario.sql",
+    "schema_103_marca_dagua.sql",
 ]
 
 

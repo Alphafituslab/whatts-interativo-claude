@@ -83,6 +83,7 @@ def _usuario_publico(u):
         # pessoa só descobria o bloqueio ao clicar e levar 403.
         "acesso_conversas": bool(u["acesso_conversas"]) if "acesso_conversas" in u.keys() else True,
         "pode_limpar_conversa": bool(u["pode_limpar_conversa"]) if "pode_limpar_conversa" in u.keys() else False,
+        "marca_dagua_ativa": bool(u["marca_dagua_ativa"]) if "marca_dagua_ativa" in u.keys() else False,
         "setor": u["setor"] if "setor" in u.keys() else None,
         "setores": whatsapp_service.setores_do_usuario(get_db(), u["id"]),
         # Pra tela não oferecer "transcrever" num servidor onde o
