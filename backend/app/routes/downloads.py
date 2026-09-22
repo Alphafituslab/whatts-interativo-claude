@@ -246,7 +246,7 @@ def gerar_codigo():
     de 6 dígitos, uso único, com prazo (padrão 60min, entre 5min e 24h).
     Ele copia daqui e manda manualmente (WhatsApp etc.) pra quem
     precisar baixar sem ter login no sistema."""
-    minutos = int((request.get_json(silent=True) or {}).get("minutos") or 60)
+    minutos = int((request.get_json(silent=True) or {}).get("minutos") or 30)
     minutos = max(5, min(minutos, 24 * 60))
     conn = get_db()
     codigo = f"{random.randint(0, 999999):06d}"

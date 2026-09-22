@@ -8187,7 +8187,7 @@
         const _resp = await fetch("/downloads/gerar-codigo", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.accessToken },
-          body: JSON.stringify({ minutos: 60 }),
+          body: JSON.stringify({ minutos: 30 }),
         });
         const r = await _resp.json();
         if (!_resp.ok) { definirFlash("erro", r.mensagem || "Não deu pra gerar o código."); return; }
