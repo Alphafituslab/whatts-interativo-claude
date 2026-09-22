@@ -180,6 +180,27 @@ def listar():
     return jsonify([_publico(r, mapa.get(r["id"], [])) for r in rows])
 
 
+@bp.get("/push-status")
+@requires_admin
+def push_status():
+    """Pedido do Clayton (2026-09-22): "onde eu olho os dados do push de
+    cadastro em nosso sistema" -- quantos aparelhos cada usuário tem
+    inscrito pra notificação push de verdade (funciona com o app
+    fechado). 0 = nunca ativou em nenhum aparelho."""
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT u.id AS usuario_id, COUNT(p.id) AS dispositivos
+        FROM usuarios u
+        LEFT JOIN whatsapp_push_subscricoes p ON p.usuario_id = u.id
+        WHERE u.empresa_id = ?
+        GROUP BY u.id
+        """,
+        (g.empresa_id,),
+    ).fetchall()
+    return jsonify({str(r["usuario_id"]): r["dispositivos"] for r in rows})
+
+
 @bp.post("")
 @requires_admin
 def criar():

@@ -450,8 +450,33 @@
     // Clayton (2026-09-08): "se chamar atenção abrindo a tela o
     // usuário não pode dizer que não viu".
     if (state._notifDesktopAtiva && window.Notification && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
+      Notification.requestPermission().then((p) => { if (p === "granted") _garantirInscricaoPush(); }).catch(() => {});
+    } else if (state._notifDesktopAtiva && window.Notification && Notification.permission === "granted") {
+      _garantirInscricaoPush();
     }
+  }
+
+  // Completa a inscrição de push sozinha (sem precisar do botão manual
+  // "Ativar notificações") sempre que o navegador já autorizou --
+  // idempotente: se já tem inscrição, só confirma o estado e sai. Quem
+  // não quiser continua podendo desativar depois no botão (vira "🔔
+  // Notificações ativas", clicar de novo desliga).
+  async function _garantirInscricaoPush() {
+    if (!state._pushSuportado) return;
+    if (!(window.Notification && Notification.permission === "granted")) return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const existente = await reg.pushManager.getSubscription();
+      if (existente) { state.pushInscrito = true; return; }
+      const { chave, disponivel } = await chamarApi("/push/chave-publica");
+      if (!disponivel) return;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: _urlBase64ToUint8Array(chave),
+      });
+      await chamarApi("/push/inscrever", { method: "POST", body: { subscription: sub.toJSON() } });
+      state.pushInscrito = true;
+    } catch (e) { /* melhor esforço -- a pessoa ainda pode ativar manualmente depois */ }
   }
 
   // Mostra uma notificação de verdade do navegador quando a pessoa
@@ -5925,7 +5950,7 @@
     // a plataforma tem acesso — o servidor barra de qualquer jeito, aqui
     // é só pra não mostrar uma seção que daria erro ao usar.
     const ehSuperAdmin = !!state.usuarioAtual.super_admin;
-    const [{ config, webhookUrl }, setoresDetalhado, backups, catalogos, usuarios, feriados, numerosMonitoradosHistorico] = await Promise.all([
+    const [{ config, webhookUrl }, setoresDetalhado, backups, catalogos, usuarios, feriados, numerosMonitoradosHistorico, pushStatus] = await Promise.all([
       buscarConfigECriarWebhookUrl(),
       chamarApi("/usuarios/setores/detalhado"),
       ehSuperAdmin ? chamarApi("/sistema/backups") : Promise.resolve([]),
@@ -5933,6 +5958,7 @@
       chamarApi("/usuarios").catch(() => []),
       chamarApi("/whatsapp/feriados").catch(() => []),
       ehSuperAdmin ? chamarApi(`/whatsapp/numeros-monitorados/mensagens${state.filtroNumeroMonitorado ? `?telefone=${encodeURIComponent(state.filtroNumeroMonitorado)}` : ""}`).catch(() => []) : Promise.resolve([]),
+      chamarApi("/usuarios/push-status").catch(() => ({})),
     ]);
     const setoresAtuais = setoresDetalhado.map((s) => s.nome);
 
@@ -6435,12 +6461,20 @@
            </div>
            <p class="dica" style="margin-top:10px;">Desmarque quem NÃO deve receber esse aviso reforçado (o resto do time recebe):</p>
            <div class="escolha-lista">
-             ${usuarios.filter((u) => u.ativo).map((u) => `
+             ${usuarios.filter((u) => u.ativo).map((u) => {
+               const dispositivos = pushStatus[String(u.id)] || 0;
+               const selo = dispositivos > 0
+                 ? `<span class="texto-suave" style="font-size:11px;">🔔 ${dispositivos} aparelho${dispositivos > 1 ? "s" : ""}</span>`
+                 : `<span class="texto-suave" style="font-size:11px;">— nunca ativou</span>`;
+               return `
                <label class="escolha-item">
                  <input type="checkbox" name="notif_usuario" value="${u.id}" ${(config.notificacao_desktop_usuarios_ocultos || []).includes(u.id) ? "" : "checked"}>
                  <span class="escolha-texto">${escapeHtml(u.nome)}</span>
-               </label>`).join("")}
+                 ${selo}
+               </label>`;
+             }).join("")}
            </div>
+           <p class="dica" style="margin-top:6px;">"🔔 N aparelhos" = quantos navegadores/celulares dessa pessoa já têm notificação push de verdade ativa (funciona com o app fechado). "— nunca ativou" = ainda depende só do aviso com a aba aberta em segundo plano. A partir de agora isso ativa sozinho assim que a pessoa autorizar a notificação no navegador -- não precisa mais achar nenhum botão.</p>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
@@ -10994,6 +11028,7 @@
       .then((reg) => reg.pushManager.getSubscription())
       .then((sub) => {
         state.pushInscrito = !!sub;
+        if (!sub) _garantirInscricaoPush().then(() => { if (state.usuarioAtual) montarRota(); });
         if (state.usuarioAtual) montarRota();
       })
       .catch(() => {});
