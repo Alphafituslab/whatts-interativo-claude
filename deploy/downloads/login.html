@@ -71,5 +71,10 @@
       <a href="/">← Ir para o sistema</a>
     </p>
   </form>
+  <form class="caixa" method="post" action="/downloads/entrar-codigo" style="margin-top:16px;">
+    <label for="codigo">Recebeu um código temporário do Clayton?</label>
+    <input id="codigo" name="codigo" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+    <button type="submit">Entrar com o código</button>
+  </form>
 </body>
 </html>

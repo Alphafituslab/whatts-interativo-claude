@@ -11,17 +11,19 @@ Como a página é aberta digitando o endereço no navegador (e não pelo app,
 que manda o token no cabeçalho), a sessão daqui é um cookie assinado
 próprio, curto, separado do token do app.
 """
+import datetime
 import io
 import os
+import random
 import re
 import time
 import zipfile
 
 import jwt
-from flask import Blueprint, make_response, redirect, request, send_file, send_from_directory
+from flask import Blueprint, g, jsonify, make_response, redirect, request, send_file, send_from_directory
 
 from .. import VERSAO_SERVIDOR, security
-from ..context import get_db, requires_auth
+from ..context import get_db, requires_admin, requires_auth
 
 bp = Blueprint("downloads", __name__, url_prefix="/downloads")
 
@@ -52,9 +54,15 @@ def _usuario_logado():
         return None
     try:
         dados = jwt.decode(token, security._get_jwt_secret(), algorithms=["HS256"])
-        if dados.get("tipo") != "downloads":
-            return None
     except jwt.PyJWTError:
+        return None
+    # Sessão vinda de um código temporário (ver /entrar-codigo) -- não é
+    # um usuário de verdade do sistema, então devolve um "convidado"
+    # sintético: nunca admin, então nunca vê o bloco de ferramentas
+    # técnicas nem os arquivos SO_ADMIN, igual a régua de sempre.
+    if dados.get("tipo") == "downloads_codigo":
+        return {"id": None, "nome": "Acesso temporário", "email": None, "admin": False}
+    if dados.get("tipo") != "downloads":
         return None
     return get_db().execute(
         "SELECT id, nome, email, admin FROM usuarios WHERE id = ? AND ativo = 1", (dados["sub"],)
@@ -226,6 +234,54 @@ def entrar():
     resposta.set_cookie(
         COOKIE, _emitir_cookie(row["id"]),
         max_age=SESSAO_SEGUNDOS, httponly=True, secure=True, samesite="Lax", path="/",
+    )
+    return resposta
+
+
+@bp.post("/gerar-codigo")
+@requires_admin
+def gerar_codigo():
+    """Pedido do Clayton (2026-09-22): "a senha seja enviada por mim,
+    uma senha provisória que deve expirar" -- gera um código numérico
+    de 6 dígitos, uso único, com prazo (padrão 60min, entre 5min e 24h).
+    Ele copia daqui e manda manualmente (WhatsApp etc.) pra quem
+    precisar baixar sem ter login no sistema."""
+    minutos = int((request.get_json(silent=True) or {}).get("minutos") or 60)
+    minutos = max(5, min(minutos, 24 * 60))
+    conn = get_db()
+    codigo = f"{random.randint(0, 999999):06d}"
+    agora_dt = datetime.datetime.utcnow()
+    agora = agora_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    expira = (agora_dt + datetime.timedelta(minutes=minutos)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    conn.execute(
+        "INSERT INTO downloads_codigos_temporarios (empresa_id, codigo, criado_por_id, criado_em, expira_em) VALUES (?, ?, ?, ?, ?)",
+        (g.empresa_id, codigo, g.usuario_atual["id"], agora, expira),
+    )
+    conn.commit()
+    return jsonify({"codigo": codigo, "expira_em": expira, "minutos": minutos})
+
+
+@bp.post("/entrar-codigo")
+def entrar_codigo():
+    codigo = (request.form.get("codigo") or "").strip()
+    conn = get_db()
+    agora = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    row = conn.execute(
+        "SELECT id FROM downloads_codigos_temporarios WHERE codigo = ? AND usado_em IS NULL AND expira_em > ?",
+        (codigo, agora),
+    ).fetchone()
+    if row is None:
+        html, status = _tela_login("Código inválido ou expirado.")
+        return html, status
+    conn.execute("UPDATE downloads_codigos_temporarios SET usado_em = ? WHERE id = ?", (agora, row["id"]))
+    conn.commit()
+    token = jwt.encode(
+        {"tipo": "downloads_codigo", "iat": int(time.time()), "exp": int(time.time()) + SESSAO_SEGUNDOS},
+        security._get_jwt_secret(), algorithm="HS256",
+    )
+    resposta = make_response(redirect("/downloads/"))
+    resposta.set_cookie(
+        COOKIE, token, max_age=SESSAO_SEGUNDOS, httponly=True, secure=True, samesite="Lax", path="/",
     )
     return resposta
 

@@ -644,6 +644,7 @@
                 <input type="file" class="wpp-input-camera-oculto" accept="image/*" capture="environment" hidden>
                 <button class="botao secundario pequeno" style="width:100%; margin-top:8px;" data-acao="instalar-app">📲 Instalar no aparelho</button>
                 <a class="botao secundario pequeno" href="/downloads/WhattsInbox-instalador.zip" style="display:block; text-align:center; text-decoration:none; margin-top:8px;">⬇ Instalar em outra máquina</a>
+                <button class="botao secundario pequeno" style="width:100%; margin-top:8px;" data-acao="gerar-codigo-downloads" title="Gera um código de uso único pra quem não tem login baixar o instalador">🔑 Código temporário p/ downloads</button>
               </div>` : ""}
             ${state._pushSuportado ? `
             <button type="button" class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="alternar-push"
@@ -8178,6 +8179,28 @@
         document.querySelector(".barra-lateral").classList.toggle("aberta");
         document.querySelector(".fundo-menu-mobile").classList.toggle("visivel");
         return;
+      case "gerar-codigo-downloads": {
+        // Pedido do Clayton (2026-09-22): "a senha seja enviada por
+        // mim, uma senha provisória que deve expirar" -- gera um
+        // código de uso único pra ele mandar manualmente (WhatsApp
+        // etc.) pra quem precisar baixar o instalador sem ter login.
+        const _resp = await fetch("/downloads/gerar-codigo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.accessToken },
+          body: JSON.stringify({ minutos: 60 }),
+        });
+        const r = await _resp.json();
+        if (!_resp.ok) { definirFlash("erro", r.mensagem || "Não deu pra gerar o código."); return; }
+        abrirModal(`
+          <h3 style="margin-top:0;">🔑 Código temporário de downloads</h3>
+          <p class="dica">Válido por ${r.minutos} minutos, uso único. Envie este código pra quem precisar entrar em
+            <strong>${location.origin}/downloads</strong> sem ter login no sistema -- a pessoa digita o código em vez de email/senha.</p>
+          <p style="font-size:32px; font-weight:700; letter-spacing:4px; text-align:center; margin:20px 0; font-variant-numeric:tabular-nums;">${escapeHtml(r.codigo)}</p>
+          <div class="rodape-modal">
+            <button type="button" class="botao" data-acao="fechar-modal">Concluído</button>
+          </div>`);
+        return;
+      }
       case "alternar-menu-desktop": {
         const recolhido = document.body.classList.toggle("menu-recolhido");
         try { localStorage.setItem("whatts_menu_recolhido", recolhido ? "1" : "0"); } catch (e) { /* segue sem salvar */ }
