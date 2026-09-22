@@ -4111,6 +4111,7 @@ def enviar_anexo(conversa_id):
     tipo = tipo_forcado if tipo_forcado in EXTENSOES_TIPO else _classificar_tipo(arquivo.filename)
     legenda = (request.form.get("legenda") or "").strip() or None
     whatsapp_service.verificar_ritmo_envio(conn, g.empresa_id, telefone_destino=conversa["telefone"])
+    whatsapp_service.verificar_limite_anexos_dia(conn, g.empresa_id)
     midia_hash = hashlib.sha256(dados_bytes).hexdigest()
     whatsapp_service.verificar_repeticao_anexo(conn, g.empresa_id, midia_hash)
 

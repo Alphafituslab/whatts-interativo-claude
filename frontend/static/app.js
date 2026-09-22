@@ -6047,6 +6047,11 @@
              <input type="number" name="janela_repeticao_anexo_minutos" min="0" max="1440" value="${config.janela_repeticao_anexo_minutos ?? 30}">
              <span class="dica">Depois de atingir o limite acima, quanto tempo esperar antes de liberar de novo o mesmo arquivo. Padrão: 30 minutos.</span>
            </div>
+           <div class="campo">
+             <label>Total de anexos por dia (soma de todos os atendentes)</label>
+             <input type="number" name="limite_anexos_dia" min="0" max="1000" value="${config.limite_anexos_dia ?? 6}">
+             <span class="dica">Teto diário pra QUALQUER anexo (foto, PDF, vídeo, áudio) -- repetido ou não -- somando o que todos os atendentes mandaram juntos. Libera de novo à meia-noite. Padrão: 6.</span>
+           </div>
            <div class="campo" style="align-self:end;">
              <button type="submit" class="botao secundario">Salvar limites</button>
            </div>
@@ -10683,9 +10688,14 @@
             limite_repeticao_mensagem: dados.get("limite_repeticao_mensagem"),
             limite_repeticao_anexo: dados.get("limite_repeticao_anexo"),
             janela_repeticao_anexo_minutos: dados.get("janela_repeticao_anexo_minutos"),
+            limite_anexos_dia: dados.get("limite_anexos_dia"),
             captacao_fria_intervalo_minimo_segundos: dados.get("captacao_fria_intervalo_minimo_segundos"),
           },
         });
+        // Pedido do Clayton (2026-09-22): ao salvar, a seção fecha
+        // sozinha de volta -- é a confirmação visual de que deu certo
+        // (só ao SALVAR, não some sozinha por nenhum outro motivo).
+        state._configSecoesAbertas?.delete("🛡️ Proteção contra bloqueio do WhatsApp");
         definirFlash("ok", "Limites de envio salvos.");
         return renderWhatsappConfiguracao();
       }

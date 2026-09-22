@@ -225,6 +225,7 @@ def obter_configuracao(conn, empresa_id: int):
             "limite_repeticao_mensagem": 5,
             "limite_repeticao_anexo": 5,
             "janela_repeticao_anexo_minutos": 30,
+            "limite_anexos_dia": 6,
             "numeros_monitorados": "[]",
             "alerta_negocio_parado_ativo": 0,
             "alerta_negocio_parado_dias": 3,
@@ -243,6 +244,7 @@ def config_publica(config):
     for campo, padrao in (("limite_envios_minuto", 20), ("limite_envios_hora", 250),
                           ("limite_novos_contatos_hora", 20), ("limite_repeticao_mensagem", 5),
                           ("limite_repeticao_anexo", 5), ("janela_repeticao_anexo_minutos", 30),
+                          ("limite_anexos_dia", 6),
                           ("sla_minutos_pre_alerta", 5), ("captacao_fria_intervalo_minimo_segundos", 90),
                           ("max_avisos_ligacoes_seguidos", 5)):
         d[campo] = int(config.get(campo) if config.get(campo) is not None else padrao)
@@ -351,6 +353,9 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
     # anexo (hash), com quantidade e janela configuráveis à parte.
     limite_repeticao_anexo = _limite("limite_repeticao_anexo", 5)
     janela_repeticao_anexo_minutos = _limite("janela_repeticao_anexo_minutos", 30)
+    # Pedido do Clayton (2026-09-22), ano de eleição: teto DIÁRIO da SOMA
+    # de todos os anexos (repetidos ou não) de todos os usuários juntos.
+    limite_anexos_dia = _limite("limite_anexos_dia", 6)
     # Pedido do Clayton (2026-09-17): abordar vários contatos NOVOS em
     # rajada foi o que derrubou o número 554834201881 -- mesmo dentro do
     # limite por hora, abordagens muito próximas umas das outras já
@@ -579,10 +584,11 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
                                               envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
                                               catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
                                               limite_repeticao_mensagem, limite_repeticao_anexo, janela_repeticao_anexo_minutos,
+                                              limite_anexos_dia,
                                               numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
                                               modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos,
                                               max_avisos_ligacoes_seguidos)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status_conexao FROM configuracoes_whatsapp WHERE empresa_id = ?), 'desconectado'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(empresa_id) DO UPDATE SET
             ativo = excluded.ativo,
             evolution_url = excluded.evolution_url,
@@ -631,6 +637,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
             limite_repeticao_mensagem = excluded.limite_repeticao_mensagem,
             limite_repeticao_anexo = excluded.limite_repeticao_anexo,
             janela_repeticao_anexo_minutos = excluded.janela_repeticao_anexo_minutos,
+            limite_anexos_dia = excluded.limite_anexos_dia,
             numeros_monitorados = excluded.numeros_monitorados,
             alerta_negocio_parado_ativo = excluded.alerta_negocio_parado_ativo,
             alerta_negocio_parado_dias = excluded.alerta_negocio_parado_dias,
@@ -653,6 +660,7 @@ def salvar_configuracao(conn, dados, usuario_id, empresa_id: int):
          envio_massa_ativo, envio_massa_intervalo_segundos, ia_ativa, ia_api_key, ia_modo, ia_openai_api_key,
          catalogo_proposta_ativo, menu_itens_ocultos, notificacao_desktop_ativo, notificacao_desktop_usuarios_ocultos,
          limite_repeticao_mensagem, limite_repeticao_anexo, janela_repeticao_anexo_minutos,
+         limite_anexos_dia,
          numeros_monitorados, alerta_negocio_parado_ativo, alerta_negocio_parado_dias,
          modelo_cobranca_atraso, setores_nao_finalizar, captacao_fria_intervalo_minimo_segundos,
          max_avisos_ligacoes_seguidos),
@@ -1445,6 +1453,58 @@ def verificar_repeticao_anexo(conn, empresa_id: int, midia_hash: str, config=Non
             f"Espere cerca de {janela_minutos} minutos ou mande um arquivo diferente -- isso evita que o número "
             "seja identificado como robô pelo WhatsApp.",
             status=429, codigo="anexo_repetido",
+        )
+
+
+def _inicio_do_dia_brasilia() -> str:
+    """Meia-noite de HOJE no horário de Brasília, em ISO-UTC (tudo no
+    banco é guardado em UTC) -- pra contar 'anexos de hoje' do jeito que
+    humano entende dia, não meia-noite UTC (que seria 21h de ontem em
+    Brasília). Mesma lógica de fuso de app.py::_numero_da_versao: cai
+    pra UTC se o servidor não tiver a base de fusos instalada, em vez
+    de quebrar."""
+    try:
+        from zoneinfo import ZoneInfo
+        agora_br = datetime.datetime.now(ZoneInfo("America/Sao_Paulo"))
+        inicio_br = agora_br.replace(hour=0, minute=0, second=0, microsecond=0)
+        inicio_utc = inicio_br.astimezone(datetime.timezone.utc)
+    except Exception:
+        inicio_utc = datetime.datetime.now(datetime.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return inicio_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+TIPOS_ANEXO = ("imagem", "video", "documento", "audio")
+
+
+def verificar_limite_anexos_dia(conn, empresa_id: int, config=None):
+    """Teto DIÁRIO pra soma de anexos/fotos/PDFs mandados por TODOS os
+    usuários da empresa juntos -- pedido do Clayton (2026-09-22), ano de
+    eleição: "a menor deslize podemos perder o número". Diferente de
+    verificar_repeticao_anexo (que só pega o MESMO arquivo repetido),
+    esse aqui conta QUALQUER anexo, repetido ou não -- é um teto geral
+    de volume de mídia por dia. N configurável (limite_anexos_dia,
+    padrão 6). 0 desliga, igual os outros freios. Reseta à meia-noite
+    (horário de Brasília)."""
+    config = config or obter_configuracao(conn, empresa_id)
+    limite = int(config.get("limite_anexos_dia") if config.get("limite_anexos_dia") is not None else 6)
+    if not limite:
+        return
+    desde = _inicio_do_dia_brasilia()
+    placeholders = ",".join("?" * len(TIPOS_ANEXO))
+    linha = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n FROM whatsapp_mensagens m
+        JOIN whatsapp_conversas c ON c.id = m.conversa_id
+        JOIN whatsapp_contatos ct ON ct.id = c.contato_id
+        WHERE m.direcao = 'saida' AND m.tipo IN ({placeholders}) AND m.criado_em >= ? AND ct.empresa_id = ?
+        """,
+        (*TIPOS_ANEXO, desde, empresa_id),
+    ).fetchone()
+    if linha["n"] >= limite:
+        raise ApiError(
+            f"Limite diário de {limite} anexos (fotos, PDFs, vídeos, áudios -- somando todos os atendentes) já foi atingido hoje. "
+            "Libera de novo à meia-noite -- ano de eleição pede cautela redobrada com o número.",
+            status=429, codigo="limite_anexos_dia",
         )
 
 
