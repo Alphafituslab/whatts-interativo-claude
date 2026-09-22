@@ -897,7 +897,13 @@ def conectar_instancia(conn, config, numero=None):
 # leitura, nem mensagens recebidas), porque a Evolution API não tem pra
 # onde mandar os eventos.
 _WEBHOOK_BASE_URL_PADRAO = "http://host.docker.internal:5050"
-_WEBHOOK_EVENTOS = ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "PRESENCE_UPDATE"]
+# MESSAGES_SET faltava aqui -- achado em 2026-09-22 verificando por que
+# o histórico não sincronizou depois da queda de 21/09: o código que
+# PROCESSA o evento messages.set (histórico sincronizado ao reconectar,
+# ver _processar_evento_webhook) já existia, mas a Evolution API nunca
+# tinha sido avisada de mandar esse evento -- o recurso estava "pronto"
+# só na metade, nunca funcionou de verdade desde que foi criado.
+_WEBHOOK_EVENTOS = ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_SET", "CONNECTION_UPDATE", "QRCODE_UPDATED", "PRESENCE_UPDATE"]
 SEGUNDOS_DIGITANDO_WHATSAPP = 8
 
 
