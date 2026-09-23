@@ -683,7 +683,7 @@
               <button class="botao-icone" data-acao="alternar-tema" title="Alternar tema">🌓</button>
               <button class="botao secundario pequeno" data-acao="logout" style="margin-left:auto;">Sair</button>
             </div>
-            ${usuario && usuario.admin ? `<div class="wpp-versao-rodape" data-wpp-versao title="Versão do sistema — muda a cada atualização">${state.versaoServidor ? `v${_versaoCurta(state.versaoServidor)}` : ""}</div>` : ""}
+            <div class="wpp-versao-rodape" data-wpp-versao title="Versão do sistema — muda a cada atualização">${state.versaoServidor ? `Versão ${_versaoCurta(state.versaoServidor)}` : ""}</div>
           </div>
         </aside>
         <div class="conteudo-principal">
@@ -3268,7 +3268,7 @@
       if (!state.versaoServidor) {
         state.versaoServidor = resp.versao;
         const badge = document.querySelector("[data-wpp-versao]");
-        if (badge) badge.textContent = `v${_versaoCurta(resp.versao)}`;
+        if (badge) badge.textContent = `Versão ${_versaoCurta(resp.versao)}`;
         return;
       }
       if (resp.versao === state.versaoServidor) return;
