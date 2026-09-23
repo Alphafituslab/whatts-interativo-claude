@@ -693,8 +693,8 @@
               </div>` : ""}
             ${state._pushSuportado ? `
             <button type="button" class="botao secundario pequeno" style="width:100%; margin-top:10px;" data-acao="alternar-push"
-              title="${state.pushInscrito ? "Este aparelho já recebe aviso de mensagem nova mesmo com o app fechado" : "Avisa de mensagem nova mesmo com o app fechado ou o celular travado"}">
-              ${state.pushInscrito ? "🔔 Notificações ativas" : "🔕 Ativar notificações no celular"}
+              title="${state.pushInscrito ? "Este aparelho já recebe aviso de mensagem nova mesmo com o app fechado" : "Avisa de mensagem nova mesmo com o app fechado ou o aparelho travado"}">
+              ${state.pushInscrito ? "🔔 Notificações ativas" : "🔕 Ativar notificações neste aparelho"}
             </button>` : ""}
             <button class="botao secundario pequeno ${usuario && usuario.ausente ? "botao-ausente-ligado" : ""}" style="width:100%; margin-top:10px;" data-acao="alternar-ausente"
               title="${usuario && usuario.ausente ? "Você está marcado como ausente — clique pra voltar" : "Avise que você saiu (almoço, reunião). Some das listas de quem pode atender."}">
@@ -6611,7 +6611,7 @@
                </label>`;
              }).join("")}
            </div>
-           <p class="dica" style="margin-top:6px;">"🔔 N aparelhos" = quantos navegadores/celulares dessa pessoa já têm notificação push de verdade ativa (funciona com o app fechado). "— nunca ativou" = ainda depende só do aviso com a aba aberta em segundo plano. A partir de agora isso ativa sozinho assim que a pessoa autorizar a notificação no navegador -- não precisa mais achar nenhum botão.</p>
+           <p class="dica" style="margin-top:6px;">"🔔 N aparelhos" = quantos navegadores (computador ou celular) dessa pessoa já têm notificação push de verdade ativa (funciona com o app fechado). "— nunca ativou" = ainda depende só do aviso com a aba aberta em segundo plano. A partir de agora isso ativa sozinho assim que a pessoa autorizar a notificação no navegador -- não precisa mais achar nenhum botão.</p>
            <div class="rodape-modal" style="padding:0; justify-content:flex-start;"><button type="submit" class="botao">Salvar</button></div>
          </form>
        </div>
