@@ -2664,11 +2664,9 @@
         if (antes === undefined) continue; // primeira leitura: só guarda, não avisa
         if (minhasNaoLidas > antes) {
           const nomeDeQuemEscreveu = souCriadorAviso ? c.participante_nome : c.criado_por_nome;
-          _notificarSeMinimizado(
-            `💬 ${nomeDeQuemEscreveu || "Alguém"}`,
-            (c.ultima_mensagem_preview || "Nova mensagem no chat interno").slice(0, 120),
-            `chat-interno-${c.id}`,
-          );
+          const previa = (c.ultima_mensagem_preview || "Nova mensagem no chat interno").slice(0, 120);
+          _notificarSeMinimizado(`💬 ${nomeDeQuemEscreveu || "Alguém"}`, previa, `chat-interno-${c.id}`);
+          _mostrarAvisoMensagemInterna(nomeDeQuemEscreveu, previa, c.id);
         }
       }
 
@@ -2734,6 +2732,27 @@
       { hz: 1046, inicio: 0,    duracao: 0.09, volume: 0.11 },
       { hz: 1568, inicio: 0.10, duracao: 0.13, volume: 0.12 },
     ]);
+  }
+
+  // Banner flutuante de "fulano mandou uma mensagem" — mesmo padrão do
+  // "chamar atenção" (aparece em cima de QUALQUER tela), só que pra
+  // mensagem normal do chat interno. Pedido do Clayton (2026-09-23):
+  // "quando alguem manda mensagem e nao esta maximizado, avisar em
+  // tela como vc ja faz com chamar atençao".
+  function _mostrarAvisoMensagemInterna(nome, texto, conversaId) {
+    const existente = document.querySelector("[data-wpp-aviso-mensagem-interna]");
+    if (existente) existente.remove();
+    const banner = document.createElement("div");
+    banner.className = "wpp-aviso-atencao";
+    banner.setAttribute("data-wpp-aviso-mensagem-interna", "");
+    banner.innerHTML = `
+      <span>💬 <strong>${escapeHtml(nome || "Alguém")}</strong>: ${escapeHtml((texto || "").slice(0, 80))}</span>
+      <a class="botao pequeno" href="#/chat-interno/${conversaId}">Ver conversa</a>
+      <button type="button" class="botao-icone" title="Fechar">✕</button>`;
+    banner.querySelector("button").addEventListener("click", () => banner.remove());
+    banner.querySelector("a").addEventListener("click", () => banner.remove());
+    document.body.appendChild(banner);
+    setTimeout(() => { if (banner.isConnected) banner.remove(); }, 9000);
   }
 
   // Banner flutuante de "fulano está chamando sua atenção" — aparece
@@ -6593,7 +6612,7 @@
 
        <div class="cartao">
          <h3 style="margin-top:0;">Backup</h3>
-         <p class="dica">Backup automático todo dia, guardando os últimos 14 dias. Baixe uma cópia de vez em quando pra guardar fora deste computador — se algo acontecer, é só importar de volta.</p>
+         <p class="dica">Backup automático todo dia, guardando só os últimos 3. Baixe uma cópia de vez em quando pra guardar fora deste computador — se algo acontecer, é só importar de volta.</p>
          <div class="barra-acoes" style="margin-bottom:14px;">
            <button type="button" class="botao secundario" data-acao="fazer-backup-agora">Fazer backup agora</button>
          </div>

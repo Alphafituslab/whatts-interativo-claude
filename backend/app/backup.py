@@ -1,8 +1,11 @@
 """
 Backup automático em segundo plano — copia o banco (whatsapp.db) e a
 pasta de uploads (anexos + fotos de perfil) pra data/backups/, uma vez
-por dia, mantendo só os últimos DIAS_MANTIDOS backups (o mais antigo é
-apagado a cada rodada nova).
+por dia, mantendo só os últimos BACKUPS_MANTIDOS backups (os mais
+antigos são apagados a cada rodada nova) -- pedido do Clayton
+(2026-09-23): "bkps devem ficar apenas os ultimos 3 sempre... nem
+aqui e nem no vps" (o disco É o VPS -- não tem cópia separada pra
+"aqui" e "lá").
 
 Roda numa thread daemon, mesmo padrão do scheduler.py — inicia com o
 processo, sem travar o servidor esperando o backup terminar.
@@ -29,7 +32,7 @@ from . import db as db_module
 NOME_ARQUIVO_DB = "whatsapp.db"
 
 INTERVALO_SEGUNDOS = 6 * 60 * 60  # confere a cada 6h se já passou 1 dia do último backup
-DIAS_MANTIDOS = 14
+BACKUPS_MANTIDOS = 3
 _thread_iniciada = False
 
 
@@ -85,7 +88,7 @@ def _rotacionar(pasta_backups):
         (e for e in os.listdir(pasta_backups) if os.path.isdir(os.path.join(pasta_backups, e))),
         reverse=True,
     )
-    for antiga in entradas[DIAS_MANTIDOS:]:
+    for antiga in entradas[BACKUPS_MANTIDOS:]:
         shutil.rmtree(os.path.join(pasta_backups, antiga), ignore_errors=True)
 
 
@@ -186,18 +189,46 @@ def importar_e_restaurar(origem_zip):
         shutil.rmtree(pasta_temp, ignore_errors=True)
 
 
+def _avisar_falha_backup(erro: Exception):
+    """Push pra todo admin ativo -- antes disso, uma falha de backup só
+    aparecia no log do servidor, que ninguém fica olhando. Backup é a
+    rede de segurança; se ela quebrar sem ninguém saber, só descobre
+    tarde demais, precisando restaurar algo. Mesmo padrão de
+    _avisar_admins_desconexao (whatsapp_service.py) -- push é sempre
+    um extra, nunca pode travar o que chamou."""
+    try:
+        from . import push_service
+        conn = db_module._connect()
+        try:
+            admins = conn.execute("SELECT id FROM usuarios WHERE admin = 1 AND ativo = 1").fetchall()
+            for adm in admins:
+                push_service.enviar_push(
+                    conn, adm["id"],
+                    titulo="⚠️ Backup do Seja Alpha falhou",
+                    corpo=f"O backup automático de hoje não saiu: {erro}",
+                    tag="backup-falhou",
+                    url="/#/configuracao",
+                )
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def _loop():
     while True:
         try:
             pasta_backups = _pasta_backups()
             if not _ja_fez_backup_hoje(pasta_backups):
                 executar_backup()
-        except Exception:
+        except Exception as erro:
             # Backup é justamente a rede de segurança — se ele quebrar
             # em silêncio, ninguém percebe até precisar restaurar algo
-            # e descobrir que não tem backup nenhum. Loga sempre.
+            # e descobrir que não tem backup nenhum. Loga sempre, e
+            # agora também avisa os admins de verdade.
             print("[backup] erro ao executar backup automático:")
             traceback.print_exc()
+            _avisar_falha_backup(erro)
         time.sleep(INTERVALO_SEGUNDOS)
 
 
