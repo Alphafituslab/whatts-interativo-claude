@@ -4062,6 +4062,52 @@
     return tel || "";
   }
 
+  let _contadorBolhaOtimista = 0;
+
+  function _inserirBolhaOtimista(texto, citada) {
+    const painel = document.querySelector("[data-wpp-mensagens]");
+    if (!painel) return;
+    const ehGrupo = painel.dataset.ehGrupo === "1";
+    const contatoNome = painel.dataset.contatoNome || "";
+    const mensagemTemp = {
+      id: `otimista-${Date.now()}-${_contadorBolhaOtimista++}`,
+      direcao: "saida", status: "pendente", tipo: "texto", texto,
+      criado_em: new Date().toISOString(),
+      usuario_id: state.usuarioAtual ? state.usuarioAtual.id : null,
+      usuario_nome: state.usuarioAtual ? state.usuarioAtual.nome : null,
+      responde_a: citada || null,
+    };
+    const molde = document.createElement("div");
+    molde.innerHTML = htmlBolha(mensagemTemp, ehGrupo, contatoNome);
+    const el = molde.firstElementChild;
+    if (!el) return;
+    el.dataset.chaveSync = String(mensagemTemp.id);
+    el._htmlSync = molde.innerHTML;
+    painel.appendChild(el);
+    painel.scrollTop = painel.scrollHeight;
+  }
+
+  function _inserirBolhaOtimistaInterna(texto, citada) {
+    const painel = document.querySelector("[data-wpp-mensagens-interno]");
+    const conversa = state._ultimaConversaInterna;
+    if (!painel || !conversa) return;
+    const mensagemTemp = {
+      id: `otimista-${Date.now()}-${_contadorBolhaOtimista++}`,
+      status: "pendente", tipo: "texto", texto,
+      criado_em: new Date().toISOString(),
+      usuario_id: state.usuarioAtual ? state.usuarioAtual.id : null,
+      responde_a: citada || null,
+    };
+    const molde = document.createElement("div");
+    molde.innerHTML = htmlBolhaInterna(mensagemTemp, conversa);
+    const el = molde.firstElementChild;
+    if (!el) return;
+    el.dataset.chaveSync = String(mensagemTemp.id);
+    el._htmlSync = molde.innerHTML;
+    painel.appendChild(el);
+    painel.scrollTop = painel.scrollHeight;
+  }
+
   function htmlBolha(m, ehGrupo, contatoNome) {
     const saida = m.direcao === "saida";
     const iconeStatus = { pendente: "🕓", enviada: "✓", entregue: "✓✓", lida: "✓✓", falhou: "⚠️", recebida: "" }[m.status] || "";
@@ -5143,6 +5189,7 @@
   }
 
   function htmlChatInterno(conversa, mensagens) {
+    if (conversa) state._ultimaConversaInterna = conversa;
     if (!conversa) {
       return `<div class="wpp-chat-vazio"><div class="wpp-chat-vazio-icone">🗨️</div><p class="texto-suave">Selecione uma conversa à esquerda, ou inicie uma nova.</p></div>`;
     }
@@ -10484,6 +10531,7 @@
         const citada = state.citando && !state.citando.interna ? state.citando.id : null;
         state.citando = null;
         _desenharBarraCitacao();
+        _inserirBolhaOtimista(texto, citada);
         await chamarApi(`/whatsapp/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto, responde_a: citada } });
         // Atualização leve — só a lista de mensagens e a prévia na lista
         // de conversas, sem reconstruir a tela inteira (cabeçalho,
@@ -10522,6 +10570,7 @@
         const citada = state.citando && state.citando.interna ? state.citando.id : null;
         state.citando = null;
         _desenharBarraCitacao();
+        _inserirBolhaOtimistaInterna(texto, citada);
         await chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`, { method: "POST", body: { texto, responde_a: citada } });
         await Promise.all([atualizarMensagensInternasNoDom(conversaId), atualizarListaConversasInternasNoDom()]);
         // Mesma regra do WhatsApp: quem manda sempre vê a própria
