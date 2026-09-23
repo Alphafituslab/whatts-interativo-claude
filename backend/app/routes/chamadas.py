@@ -208,6 +208,24 @@ def iniciar(conversa_id):
         (conversa_id, usuario["id"], outro, agora),
     )
     conn.commit()
+    # Notificação push de verdade -- pedido do Clayton (2026-09-23):
+    # "quando alguem chama minha atençao aparece mas se alguem esta
+    # falando nao". "Chamar atenção" já tinha sido corrigido antes; a
+    # chamada de voz nunca teve NENHUM push -- só dependia do navegador
+    # de quem recebe estar aberto (mesmo minimizado) fazendo polling.
+    # Com o app fechado de verdade, ninguém nunca sabia que alguém
+    # estava ligando.
+    try:
+        from .. import push_service
+        push_service.enviar_push(
+            conn, outro,
+            titulo="📞 Chamada recebida",
+            corpo=f"{usuario['nome']} está te ligando…",
+            tag="chamada-recebendo",
+            url="/#/chat-interno",
+        )
+    except Exception:
+        pass  # push é um extra -- nunca pode travar o início da chamada em si
     chamada = _carregar_chamada(conn, usuario["empresa_id"], cur.lastrowid)
     return jsonify(_chamada_publica(conn, chamada)), 201
 
