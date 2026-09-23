@@ -901,45 +901,26 @@ def pulso():
             (conversa_id,),
         ).fetchone()["v"]
         status = f"{linha['total']}.{linha['lidas'] or 0}.{linha['entregues'] or 0}.{reagidas}"
-    # O que espera resposta, na visão DESTA pessoa. Vai no pulso (e não
-    # numa consulta à parte) porque é a única chamada que já roda sempre:
-    # um número a mais aqui é de graça, uma requisição a mais não seria.
-    #
-    # Conta duas coisas, porque as duas exigem alguém: o que já é meu e
-    # tem mensagem não lida, MAIS quem está na fila esperando ser pego.
-    # Só o primeiro seria enganoso — o ícone ficaria limpo com cinco
-    # clientes esperando na fila.
-    # Administrador enxerga a empresa: pra ele o número é tudo o que está
-    # sem resposta, de quem quer que seja. Pro atendente é o que está com
-    # ELE — o alheio não é problema dele e só faria barulho.
-    if usuario["admin"]:
-        dono = ""
-        params_dono = (g.empresa_id,)
-    else:
-        dono = "AND c.atribuida_usuario_id = ?"
-        params_dono = (g.empresa_id, usuario["id"])
+    # O que é MEU e tem mensagem não lida -- pedido do Clayton
+    # (2026-09-23): "preciso que as mensagens ali sejam apenas as
+    # minhas, contando chat interno e whatts" + "e dos outros sejam
+    # somente a deles... cada um tem a contagem das suas mensagens".
+    # Antes, admin via a empresa inteira (todo mundo sem resposta) MAIS
+    # a fila inteira somada no mesmo número -- deixava o ícone com uma
+    # contagem que não tinha a ver com "o que EU preciso responder".
+    # Agora todo mundo (admin incluso) só vê o que está atribuído a ele
+    # mesmo -- mesma régua pra todos, sem caso especial.
     nao_lidas_cliente = conn.execute(
-        f"""
+        """
         SELECT COALESCE(SUM(c.nao_lidas), 0) AS v
         FROM whatsapp_conversas c
         JOIN whatsapp_contatos ct ON ct.id = c.contato_id
         WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0
-          {dono}
+          AND c.atribuida_usuario_id = ?
         """,
-        params_dono,
+        (g.empresa_id, usuario["id"]),
     ).fetchone()["v"]
 
-    base_fila = ("FROM whatsapp_conversas c JOIN whatsapp_contatos ct ON ct.id = c.contato_id "
-                 "WHERE ct.empresa_id = ? AND c.excluida_em IS NULL AND c.arquivada = 0 "
-                 "AND c.atribuida_usuario_id IS NULL "
-                 "AND (ct.eh_grupo = 0 OR NOT EXISTS (SELECT 1 FROM whatsapp_conversa_usuarios cu "
-                 "WHERE cu.conversa_id = c.id))")
-    if usuario["admin"]:
-        na_fila = conn.execute(f"SELECT COUNT(*) AS v {base_fila}", (g.empresa_id,)).fetchone()["v"]
-    else:
-        sql_v, pv = _sql_visivel_nao_admin(conn, usuario)
-        na_fila = conn.execute(f"SELECT COUNT(*) AS v {base_fila} AND {sql_v}",
-                               (g.empresa_id, *pv)).fetchone()["v"]
     nao_lidas_interna = conn.execute(
         """
         SELECT COALESCE(SUM(CASE WHEN c.criado_por_id = ? THEN c.nao_lidas_criador
@@ -951,9 +932,8 @@ def pulso():
     ).fetchone()["v"]
 
     return jsonify({"c": ultima_cliente, "i": ultima_interna, "v": vistos, "s": status,
-                    "n": int(nao_lidas_cliente) + int(nao_lidas_interna) + int(na_fila),
-                    "nc": int(nao_lidas_cliente), "ni": int(nao_lidas_interna),
-                    "nf": int(na_fila)})
+                    "n": int(nao_lidas_cliente) + int(nao_lidas_interna),
+                    "nc": int(nao_lidas_cliente), "ni": int(nao_lidas_interna)})
 
 
 @bp.get("/conversas/<int:conversa_id>")
