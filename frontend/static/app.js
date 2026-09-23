@@ -1213,7 +1213,16 @@
     // fim enquanto ela lê.
     let cancelado = false;
     const parar = () => { cancelado = true; };
-    ["wheel", "touchstart", "keydown", "mousedown"].forEach((ev) =>
+    // Pedido do Clayton (2026-09-23): "ao abrir uma conversa já deve
+    // aparecer a última mensagem". Achado: "mousedown" e "keydown"
+    // cancelavam esse ajuste -- mas clicar no campo pra já responder
+    // (ou começar a digitar), que é o mais comum logo depois de abrir
+    // uma conversa, NÃO é a pessoa tentando ler mensagem antiga, é só
+    // o normal. Isso cancelava o acerto fino que ainda ia rodar (depois
+    // de mídia carregar, ou a rede estar lenta), deixando a tela
+    // parada no meio da conversa em vez do fim. Só "wheel"/"touchstart"
+    // são de verdade "a pessoa rolando pra cima" -- só esses cancelam.
+    ["wheel", "touchstart"].forEach((ev) =>
       painel.addEventListener(ev, parar, { once: true, passive: true }));
 
     const ir = () => { if (!cancelado) painel.scrollTop = painel.scrollHeight; };
