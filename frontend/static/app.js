@@ -477,7 +477,28 @@
       Notification.requestPermission().then((p) => { if (p === "granted") _garantirInscricaoPush(); }).catch(() => {});
     } else if (state._notifDesktopAtiva && window.Notification && Notification.permission === "granted") {
       _garantirInscricaoPush();
+    } else if (state._notifDesktopAtiva && window.Notification && Notification.permission === "denied") {
+      // Achado ao vivo (2026-09-23): "com a tela aberta chega, minimizado
+      // não" -- o banner dentro da tela não depende de permissão nenhuma
+      // (por isso funciona sempre), mas o aviso de verdade (minimizado ou
+      // app fechado) precisa do navegador ter autorizado -- se a pessoa
+      // recusou uma vez ou o navegador bloqueou sozinho, nem o JS nem o
+      // servidor conseguem mais nada: só reautorizando manualmente nas
+      // configurações do site resolve.
+      _avisarPermissaoNotificacaoBloqueada();
     }
+  }
+
+  function _avisarPermissaoNotificacaoBloqueada() {
+    if (document.querySelector("[data-wpp-aviso-permissao-bloqueada]")) return;
+    const banner = document.createElement("div");
+    banner.className = "wpp-aviso-atencao";
+    banner.setAttribute("data-wpp-aviso-permissao-bloqueada", "");
+    banner.innerHTML = `
+      <span>🔕 Notificação bloqueada neste navegador — com a tela minimizada ou fechada, você não vai ser avisado. Clique no 🔒/ⓘ ao lado do endereço, em "Notificações", escolha "Permitir" e recarregue a página.</span>
+      <button type="button" class="botao-icone" title="Fechar">✕</button>`;
+    banner.querySelector("button").addEventListener("click", () => banner.remove());
+    document.body.appendChild(banner);
   }
 
   // Completa a inscrição de push sozinha (sem precisar do botão manual
