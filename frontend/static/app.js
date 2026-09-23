@@ -2647,6 +2647,31 @@
       if (state.naoLidasInterno !== null && total > state.naoLidasInterno) tocarAvisoChatInterno();
       state.naoLidasInterno = total;
 
+      // Aviso visual (mesmo com a tela minimizada) pra mensagem NORMAL
+      // do chat interno -- antes só existia som aqui; o aviso visual só
+      // rodava pra "chamar atenção". Pedido do Clayton (2026-09-23):
+      // "quando alguem estiver falando e eu nao estiver maximizado...
+      // deve me informar" e "pode deixar o som tbm e o aviso visual".
+      // Compara por CONVERSA (não só o total) pra saber quem mandou e
+      // não avisar de novo a mesma conversa sem nada novo.
+      if (!state._naoLidasInternaPorConversa) state._naoLidasInternaPorConversa = {};
+      const meuIdAviso = state.usuarioAtual && state.usuarioAtual.id;
+      for (const c of conversasInternas) {
+        const souCriadorAviso = c.criado_por_id === meuIdAviso;
+        const minhasNaoLidas = souCriadorAviso ? (c.nao_lidas_criador || 0) : (c.nao_lidas_participante || 0);
+        const antes = state._naoLidasInternaPorConversa[c.id];
+        state._naoLidasInternaPorConversa[c.id] = minhasNaoLidas;
+        if (antes === undefined) continue; // primeira leitura: só guarda, não avisa
+        if (minhasNaoLidas > antes) {
+          const nomeDeQuemEscreveu = souCriadorAviso ? c.participante_nome : c.criado_por_nome;
+          _notificarSeMinimizado(
+            `💬 ${nomeDeQuemEscreveu || "Alguém"}`,
+            (c.ultima_mensagem_preview || "Nova mensagem no chat interno").slice(0, 120),
+            `chat-interno-${c.id}`,
+          );
+        }
+      }
+
       // "Chamar atenção": cada toque muda o instante gravado pro MEU
       // lado (ver chamar_atencao no backend). Comparar com o que a
       // gente já viu detecta toques novos, mesmo repetidos na mesma
