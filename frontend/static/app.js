@@ -3655,8 +3655,26 @@
   document.addEventListener("pointerup", () => { setTimeout(() => { _apertando = false; }, 60); }, true);
   document.addEventListener("pointercancel", () => { _apertando = false; }, true);
 
+  // _apertando sozinho só cobre o instante do clique em si (aperta →
+  // solta). Pedido do Clayton (2026-09-23): "as vezes tem que clicar
+  // duas vezes ou mais" -- ainda acontecia porque a lista podia
+  // reordenar um instante ANTES do clique começar (enquanto o mouse já
+  // estava mirando a linha, mas o dedo ainda não tinha encostado) --
+  // troca a posição embaixo do cursor bem na hora de clicar. Agora
+  // também pausa reordenação enquanto o mouse estiver simplesmente EM
+  // CIMA da lista, não só durante o clique -- volta a atualizar assim
+  // que o mouse sai.
+  let _ultimoMousePos = { x: -1, y: -1 };
+  document.addEventListener("mousemove", (e) => { _ultimoMousePos = { x: e.clientX, y: e.clientY }; }, true);
+  function _mouseSobre(elemento) {
+    if (!elemento) return false;
+    const r = elemento.getBoundingClientRect();
+    return _ultimoMousePos.x >= r.left && _ultimoMousePos.x <= r.right
+        && _ultimoMousePos.y >= r.top && _ultimoMousePos.y <= r.bottom;
+  }
+
   function _pintarSeMudou(elemento, html) {
-    if (_apertando) return false;
+    if (_apertando || _mouseSobre(elemento)) return false;
     if (elemento._htmlPintado === html) return false;
     elemento._htmlPintado = html;
     elemento.innerHTML = html;
@@ -3672,7 +3690,7 @@
   // mudou é trocado sozinho, item novo entra, item que saiu é removido.
   // Com ninguém conversando, nada acontece na tela — nem um pixel.
   function _sincronizarLista(container, itens, chaveDe, htmlDe) {
-    if (_apertando) return false;
+    if (_apertando || _mouseSobre(container)) return false;
     const antigos = new Map();
     for (const el of Array.from(container.children)) {
       if (el.dataset.chaveSync) antigos.set(el.dataset.chaveSync, el);
@@ -10608,6 +10626,21 @@
         // é diferente do polling normal, que respeita onde a pessoa
         // estava lendo quando é mensagem de OUTRA pessoa chegando.
         _rolarParaOFimAgora("[data-wpp-mensagens]");
+        // Reforço -- pedido do Clayton (2026-09-23): "o cursor de
+        // digitação deve voltar para dentro do quadro... não sendo
+        // preciso clicar para escrever de novo". O foco já era posto
+        // antes do POST (lá em cima), mas se algo em segundo plano
+        // (polling, redesenho) roubar o foco durante a espera do
+        // servidor, essa segunda tentativa recupera -- só se a mesma
+        // conversa ainda estiver aberta (senão a pessoa já navegou pra
+        // outro lugar de propósito, não faz sentido puxar o foco de volta).
+        {
+          const painelAtual = document.querySelector("[data-wpp-mensagens]");
+          if (painelAtual && Number(painelAtual.dataset.conversaId) === conversaId) {
+            const textareaAtual = document.querySelector('form[data-form="enviar-mensagem"] textarea[name="texto"]');
+            if (textareaAtual) textareaAtual.focus();
+          }
+        }
         return;
       }
       case "iniciar-conversa-interna": {
@@ -10641,6 +10674,14 @@
         // Mesma regra do WhatsApp: quem manda sempre vê a própria
         // mensagem, mesmo tendo rolado pra cima antes de escrever.
         _rolarParaOFimAgora("[data-wpp-mensagens-interno]");
+        // Mesmo reforço de foco do WhatsApp, acima.
+        {
+          const painelAtual = document.querySelector("[data-wpp-mensagens-interno]");
+          if (painelAtual && Number(painelAtual.dataset.conversaId) === conversaId) {
+            const textareaAtual = document.querySelector('form[data-form="enviar-mensagem-interna"] textarea[name="texto"]');
+            if (textareaAtual) textareaAtual.focus();
+          }
+        }
         return;
       }
       case "encaminhar-interno": {
