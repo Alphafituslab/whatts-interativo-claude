@@ -71,6 +71,10 @@ def _outro_lado(conversa, usuario_id):
     return None
 
 
+_ULTIMA_LIMPEZA_CHAMADAS = 0.0
+_INTERVALO_MINIMO_LIMPEZA_SEGUNDOS = 5
+
+
 def _limpar_chamadas_travadas(conn):
     """Achado ao vivo (2026-09-04): uma chamada 'atendida' pode ficar
     presa pra sempre se o navegador travar, a rede cair, ou o aviso de
@@ -78,7 +82,22 @@ def _limpar_chamadas_travadas(conn):
     fica bloqueada pra qualquer chamada nova. Chamado no início das
     rotas mais usadas (iniciar/pendente/sinais) -- a de sinais sozinha
     já roda a cada 1s durante QUALQUER chamada ativa no sistema, então
-    isto aqui vira, na prática, uma limpeza quase contínua."""
+    isto aqui vira, na prática, uma limpeza quase contínua.
+
+    Achado em 2026-09-23, investigando "cliquei em enviar e não
+    enviou" do Clayton: esse UPDATE+commit disparava em TODA chamada
+    dessas rotas, sem limite -- com várias pessoas usando ao mesmo
+    tempo (e principalmente durante uma ligação ativa, 1x por
+    segundo), virava a maior fonte de disputa de escrita no banco
+    inteiro, gerando "database is locked" pra quem só queria mandar
+    uma mensagem normal. Uma chamada travada "perder" ou "encerrar"
+    alguns segundos depois do ideal é inofensivo -- não precisa rodar
+    mais que 1x a cada 5s."""
+    global _ULTIMA_LIMPEZA_CHAMADAS
+    agora = time.monotonic()
+    if agora - _ULTIMA_LIMPEZA_CHAMADAS < _INTERVALO_MINIMO_LIMPEZA_SEGUNDOS:
+        return
+    _ULTIMA_LIMPEZA_CHAMADAS = agora
     conn.execute(
         "UPDATE chat_interno_chamadas SET status = 'perdida' "
         "WHERE status = 'chamando' AND datetime(criado_em) < datetime('now', '-60 seconds')"
