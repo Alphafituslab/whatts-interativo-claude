@@ -409,6 +409,22 @@ th { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; fon
   width: 290px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px;
   background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio);
   box-shadow: var(--sombra); overflow: hidden; padding: 8px;
+  /* Pedido do Clayton (2026-09-23): agora que o painel é arrastável
+     (ver wpp-divisor-redimensionar) pra qualquer largura, o conteúdo
+     de dentro (busca + data lado a lado, 4 abas espremidas) precisa
+     reagir à largura do PRÓPRIO painel, não da tela inteira -- container
+     query em vez de media query, porque a estreiteza aqui não tem nada
+     a ver com o tamanho da janela do navegador. */
+  container-type: inline-size;
+  container-name: wpp-lista;
+}
+
+@container wpp-lista (max-width: 260px) {
+  .wpp-busca-form { flex-wrap: wrap; }
+  .wpp-busca-input { flex: 1 1 100%; }
+  .wpp-busca-data { flex: 1 1 100%; width: auto; }
+  .wpp-abas { flex-wrap: wrap; }
+  .wpp-aba { flex: 1 1 40%; }
 }
 .wpp-lista-conversas { flex: 1; overflow-y: auto; margin: 0 -10px; }
 
