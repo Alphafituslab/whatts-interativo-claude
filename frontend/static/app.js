@@ -1206,6 +1206,45 @@
   }
   function fecharModais() { document.querySelectorAll(".fundo-modal").forEach((m) => m.remove()); }
 
+  const LARGURA_PAINEL_LISTA_PADRAO = 290;
+  const LARGURA_PAINEL_LISTA_MIN = 220;
+  const LARGURA_PAINEL_LISTA_MAX = 520;
+
+  function _aplicarLarguraPainelLista() {
+    const painel = document.querySelector(".wpp-painel-lista");
+    if (!painel) return;
+    let largura = LARGURA_PAINEL_LISTA_PADRAO;
+    try {
+      const salva = Number(localStorage.getItem("whatts_largura_painel_lista"));
+      if (salva) largura = Math.min(LARGURA_PAINEL_LISTA_MAX, Math.max(LARGURA_PAINEL_LISTA_MIN, salva));
+    } catch (e) { /* segue com o padrão */ }
+    painel.style.width = largura + "px";
+  }
+
+  document.addEventListener("pointerdown", (e) => {
+    const alca = e.target.closest("[data-wpp-divisor-redimensionar]");
+    if (!alca) return;
+    e.preventDefault();
+    const painel = document.querySelector(".wpp-painel-lista");
+    if (!painel) return;
+    const larguraInicial = painel.getBoundingClientRect().width;
+    const xInicial = e.clientX;
+    document.body.classList.add("wpp-redimensionando");
+    const mover = (ev) => {
+      const nova = larguraInicial + (ev.clientX - xInicial);
+      painel.style.width = Math.min(LARGURA_PAINEL_LISTA_MAX, Math.max(LARGURA_PAINEL_LISTA_MIN, nova)) + "px";
+    };
+    const soltar = () => {
+      document.body.classList.remove("wpp-redimensionando");
+      document.removeEventListener("pointermove", mover);
+      document.removeEventListener("pointerup", soltar);
+      try { localStorage.setItem("whatts_largura_painel_lista", String(parseInt(painel.style.width, 10))); }
+      catch (e) { /* sem localStorage, só não persiste entre sessões */ }
+    };
+    document.addEventListener("pointermove", mover);
+    document.addEventListener("pointerup", soltar);
+  });
+
   function _irParaOFim(painel) {
     if (!painel) return;
     // Se a pessoa rolar pra cima pra ler algo antigo, paramos na hora: o
@@ -4792,11 +4831,13 @@
            ${(state._filtroSlaIds && !state.buscaConversas && !state.buscaData) ? `<p class="texto-suave" style="padding:0 4px 8px; display:flex; align-items:center; gap:6px;"><span>🟡 Mostrando só as ${state._filtroSlaIds.size} perto de estourar o SLA</span><button type="button" class="botao-icone" data-acao="limpar-filtro-sla" title="Ver todas de novo">✕</button></p>` : ""}
            <div class="wpp-lista-conversas" data-wpp-lista>${htmlListaConversas(conversas, conversaId)}${htmlContatosDaBusca(contatosSemConversa)}</div>
          </div>
+         <div class="wpp-divisor-redimensionar" data-wpp-divisor-redimensionar title="Arraste pra aumentar ou diminuir"></div>
          <div class="wpp-painel-chat">${htmlChat(conversaAtual, mensagens, agendadas, respostasProntas, notas, emojisSalvos, figurinhas, negociacoes)}</div>
        </div>`,
       "whatsapp"
     );
 
+    _aplicarLarguraPainelLista();
     _irParaOFim(document.querySelector("[data-wpp-mensagens]"));
     if (abrirNegociacoes && conversaAtual) {
       const negociacoesFrescas = await chamarApi(`/whatsapp/conversas/${conversaAtual.id}/negociacoes`).catch(() => []);
@@ -5464,11 +5505,13 @@
            ${htmlFiltroEtiquetasInterno(etiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista-interno>${htmlListaConversasInternas(conversas, conversaId)}</div>
          </div>
+         <div class="wpp-divisor-redimensionar" data-wpp-divisor-redimensionar title="Arraste pra aumentar ou diminuir"></div>
          <div class="wpp-painel-chat">${htmlChatInterno(conversaAtual, mensagens)}</div>
        </div>`,
       "chat-interno"
     );
 
+    _aplicarLarguraPainelLista();
     _irParaOFim(document.querySelector("[data-wpp-mensagens-interno]"));
     _mostrarBotaoCatalogo("[data-wpp-catalogo-envolucro-interno]");
     iniciarPollingChatInterno(conversaId);
