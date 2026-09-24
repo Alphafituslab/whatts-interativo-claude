@@ -71,10 +71,12 @@ def listar_conversas():
     # cai pro comportamento normal: só as próprias conversas.
     todas = request.args.get("todas") == "1" and bool(usuario.get("super_admin"))
     conn = get_db()
+    usuario_filtro = request.args.get("usuario_id")
     return jsonify(chat_interno_service.listar_conversas(
         conn, usuario["id"], incluir_encerradas,
         empresa_id_admin=usuario["empresa_id"] if todas else None,
         tag_id=request.args.get("tag_id"),
+        usuario_filtro=int(usuario_filtro) if todas and usuario_filtro and usuario_filtro.isdigit() else None,
     ))
 
 

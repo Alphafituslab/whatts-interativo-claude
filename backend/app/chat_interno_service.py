@@ -231,7 +231,7 @@ def definir_tags_da_conversa(conn, empresa_id: int, usuario_id: int, conversa_id
         )
 
 
-def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, empresa_id_admin: int = None, tag_id=None, tags_de: int = None):
+def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, empresa_id_admin: int = None, tag_id=None, tags_de: int = None, usuario_filtro: int = None):
     """Por padrão só mostra as em aberto — encerrar uma conversa faz ela
     sumir da lista (sem apagar nada, ver fechar_conversa), pra tela não
     ficar poluída de conversas antigas. incluir_encerradas=True mostra só
@@ -239,7 +239,13 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
 
     empresa_id_admin: só um admin deveria pedir isso — em vez de filtrar
     por quem participa, mostra TODAS as conversas da empresa (mesma
-    régua de supervisão de 'escopo=todas' nas conversas de clientes)."""
+    régua de supervisão de 'escopo=todas' nas conversas de clientes).
+
+    usuario_filtro: só faz sentido junto de empresa_id_admin -- pedido
+    do Clayton (2026-09-24): "ao visualizar todas, gostaria de filtrar
+    por usuário também, assim não fica tudo misturado". Mostra só as
+    conversas em que esse usuário participa de QUALQUER lado (criou ou
+    foi o participante), independente de com quem ele estava falando."""
     if empresa_id_admin is not None:
         # Supervisão: usa o status geral (fechada só quando os DOIS
         # lados já encerraram) -- não faz sentido escopar por "usuário
@@ -247,6 +253,9 @@ def listar_conversas(conn, usuario_id: int, incluir_encerradas: bool = False, em
         condicao_status = "c.status = 'fechada'" if incluir_encerradas else "c.status = 'aberta'"
         condicao_dono = "uc.empresa_id = ?"
         params = (empresa_id_admin,)
+        if usuario_filtro:
+            condicao_dono += " AND (c.criado_por_id = ? OR c.participante_id = ?)"
+            params = params + (usuario_filtro, usuario_filtro)
     else:
         # Cada lado fecha só pra si (ver fechar_conversa/reabrir_conversa)
         # -- olha a coluna certa dependendo de qual dos dois é quem está

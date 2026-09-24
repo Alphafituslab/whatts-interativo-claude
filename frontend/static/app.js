@@ -3800,11 +3800,26 @@
     </div>`;
   }
 
+  // Pedido do Clayton (2026-09-24): "ao visualizar todas, gostaria de
+  // filtrar por usuario tambem, assim nao fica tudo misturado". So faz
+  // sentido na aba "Todas" (supervisao) -- nas outras, ja e "minhas"
+  // ou "encerradas", que já são implicitamente por usuário.
+  function htmlFiltroUsuarioInterno(usuarios) {
+    if (!state.usuarioAtual.admin || state.chatInternoEscopo !== "todas" || !usuarios || !usuarios.length) return "";
+    return `<div class="wpp-filtro-atendente">
+      <select data-acao-change="filtrar-por-usuario-interno" title="Ver só as conversas em que um usuário participa">
+        <option value="">👤 Todos os usuários</option>
+        ${usuarios.map((u) => `<option value="${u.id}" ${String(state.usuarioFiltroInterno) === String(u.id) ? "selected" : ""}>${escapeHtml(u.nome)}</option>`).join("")}
+      </select>
+    </div>`;
+  }
+
   function _queryChatInterno() {
     const partes = [];
     if (state.chatInternoEscopo === "encerradas") partes.push("encerradas=1");
     if (state.chatInternoEscopo === "todas") partes.push("todas=1");
     if (state.tagFiltroInterno) partes.push(`tag_id=${state.tagFiltroInterno}`);
+    if (state.chatInternoEscopo === "todas" && state.usuarioFiltroInterno) partes.push(`usuario_id=${state.usuarioFiltroInterno}`);
     return partes.length ? `?${partes.join("&")}` : "";
   }
 
@@ -5429,10 +5444,11 @@
     // tela abria, e isso pesava especialmente ao alternar entre
     // WhatsApp e Chat interno, onde tudo recomeça do zero. Pedido do
     // Clayton (2026-08-31): "como se estivesse pesado" ao ir e voltar.
-    const [etiquetas, conversas, mensagensAdiantadas] = await Promise.all([
+    const [etiquetas, conversas, mensagensAdiantadas, usuariosParaFiltroInterno] = await Promise.all([
       obterEtiquetas(),
       chamarApi(`/chat-interno/conversas${_queryChatInterno()}`),
       conversaId ? chamarApi(`/chat-interno/conversas/${conversaId}/mensagens`).catch(() => null) : Promise.resolve(null),
+      usuario.admin ? chamarApi("/usuarios").catch(() => []) : Promise.resolve([]),
     ]);
 
     let conversaAtual = null, mensagens = [];
@@ -5502,6 +5518,7 @@
        </div>
        <div class="wpp-layout ${conversaId ? "wpp-conversa-aberta" : ""}">
          <div class="wpp-painel-lista">
+           ${htmlFiltroUsuarioInterno(usuariosParaFiltroInterno)}
            ${htmlFiltroEtiquetasInterno(etiquetas)}
            <div class="wpp-lista-conversas" data-wpp-lista-interno>${htmlListaConversasInternas(conversas, conversaId)}</div>
          </div>
@@ -8809,6 +8826,10 @@
       case "filtrar-por-atendente": {
         state.usuarioFiltroAtendente = alvo.value || null;
         return renderWhatsapp(null);
+      }
+      case "filtrar-por-usuario-interno": {
+        state.usuarioFiltroInterno = alvo.value || null;
+        return renderChatInterno(null);
       }
       case "alternar-filtro-negociacao": {
         state.filtroNegociacaoFechada = !state.filtroNegociacaoFechada;
