@@ -1481,7 +1481,7 @@ def iniciar_conversa():
         status_msg, erro = "enviada", None
     except ApiError as e:
         externo_id, status_msg = None, "falhou"
-        erro = whatsapp_service._mensagem_erro_envio(config, telefone, e.mensagem)
+        erro = whatsapp_service._mensagem_erro_envio(config, telefone, e.mensagem, conversa["id"], conn)
 
     conn.execute(
         """
@@ -1644,7 +1644,7 @@ def enviar_mensagem(conversa_id):
     except ApiError as e:
         externo_id = None
         status_msg = "falhou"
-        erro = whatsapp_service._mensagem_erro_envio(config, conversa["telefone"], e.mensagem)
+        erro = whatsapp_service._mensagem_erro_envio(config, conversa["telefone"], e.mensagem, conversa_id, conn)
 
     cur = conn.execute(
         """

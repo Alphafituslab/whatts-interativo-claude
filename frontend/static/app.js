@@ -4281,7 +4281,7 @@
         ${saida && !m.excluida_em && m.tipo === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem" data-id="${m.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
         ${htmlEditada(m)}
         ${saida && m.status === "falhou" ? `<button type="button" class="wpp-bolha-excluir" data-acao="reenviar-mensagem" data-id="${m.id}" title="Tentar enviar de novo">🔄</button>` : ""}
-        ${saida && m.status === "falhou" && m.erro === "Este número não tem WhatsApp ativo." ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-contato-sem-whatsapp" data-contato-id="${contatoId || ""}" title="Confirmado: este número não tem WhatsApp. Clique pra excluir o contato">🗑️ Sem WhatsApp — excluir?</button>` : ""}
+        ${saida && m.status === "falhou" && (m.erro || "").startsWith("Este número não tem WhatsApp") ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-contato-sem-whatsapp" data-contato-id="${contatoId || ""}" title="Confirmado: este número não tem WhatsApp. Clique pra excluir o contato">🗑️ Sem WhatsApp — excluir?</button>` : ""}
         ${saida && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem" data-id="${m.id}" title="Excluir mensagem (ex.: enviada por engano)">🗑️</button>` : ""}
         <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
         ${saida ? `<span class="wpp-bolha-status wpp-status-${m.status}" title="${m.erro ? escapeHtml(m.erro) : ""}">${iconeStatus}</span>` : ""}

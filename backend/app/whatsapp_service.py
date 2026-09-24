@@ -1706,15 +1706,68 @@ def numero_existe_no_whatsapp(config, telefone: str):
         return None
 
 
-def _mensagem_erro_envio(config, telefone: str, erro_original: str) -> str:
+def _numero_alternativo_provavel(telefone: str):
+    """Pedido do Clayton (2026-09-24): "verificar tambem a forma que foi
+    cadastrado, pois isso tambem pode ser algo que eles errem" -- antes
+    de desistir e dizer "sem WhatsApp", tenta a outra leitura possível
+    do mesmo número: quem cadastrou pode ter posto um "9" a mais (achando
+    que era celular) ou faltando (achando que era fixo). Só None quando
+    não dá pra montar uma segunda tentativa plausível."""
+    digitos = _somente_digitos(telefone)
+    # 55 + DDD(2) + local -- local de CELULAR tem 9 dígitos (total 13),
+    # de FIXO tem 8 (total 12). O bug da primeira versão: só aceitava
+    # len==12, nunca testava o caso mais comum (celular com 9 a mais
+    # que na real era fixo, que chega aqui com 13 dígitos).
+    if len(digitos) not in (12, 13) or not digitos.startswith("55"):
+        return None
+    local = digitos[4:]
+    if len(local) == 9 and local.startswith("9"):
+        return digitos[:4] + local[1:]  # tira o 9 -- talvez seja fixo
+    if len(local) == 8 and local[0] in "6789":
+        return digitos[:4] + "9" + local  # bota o 9 -- talvez seja celular sem ele
+    return None
+
+
+def _mensagem_erro_envio(config, telefone: str, erro_original: str, conversa_id: int = None, conn=None) -> str:
     """Enriquece o erro genérico de envio com essa checagem real --
     troca o "Bad Request" técnico por algo que a equipe entende e pode
     agir em cima (ver MENSAGEM_SEM_WHATSAPP, e o botão de excluir
-    contato que aparece no frontend quando a mensagem bate com essa
-    frase exata)."""
-    if numero_existe_no_whatsapp(config, telefone) is False:
-        return MENSAGEM_SEM_WHATSAPP
-    return erro_original
+    contato que aparece no frontend quando a mensagem começa com essa
+    frase). Também testa uma segunda leitura plausível do número (ver
+    _numero_alternativo_provavel) -- se ELA tiver WhatsApp, a mensagem
+    já aponta o número certo em vez de só dizer "não tem", pra equipe
+    saber que é caso de corrigir o cadastro, não de desistir do
+    cliente. conversa_id/conn opcionais: quando informados, avisa por
+    push o responsável pela conversa (pedido do Clayton: "avisar
+    sempre ao usuario")."""
+    existe = numero_existe_no_whatsapp(config, telefone)
+    if existe is not False:
+        return erro_original
+    mensagem = MENSAGEM_SEM_WHATSAPP
+    alternativo = _numero_alternativo_provavel(telefone)
+    if alternativo and numero_existe_no_whatsapp(config, alternativo) is True:
+        mensagem = (
+            f"Este número não tem WhatsApp -- mas encontramos WhatsApp em {alternativo} "
+            f"(parece erro de cadastro, ex.: um 9 a mais ou a menos). Confira e inicie uma "
+            f"conversa nova com o número certo."
+        )
+    if conn is not None and conversa_id is not None:
+        try:
+            from . import push_service
+            conv = conn.execute(
+                "SELECT atribuida_usuario_id FROM whatsapp_conversas WHERE id = ?", (conversa_id,)
+            ).fetchone()
+            if conv and conv["atribuida_usuario_id"]:
+                push_service.enviar_push(
+                    conn, conv["atribuida_usuario_id"],
+                    titulo="⚠️ Número sem WhatsApp",
+                    corpo=mensagem[:150],
+                    tag=f"sem-whatsapp-{conversa_id}",
+                    url=f"/#/whatsapp/{conversa_id}",
+                )
+        except Exception:
+            pass  # push é um extra -- nunca pode travar o registro do erro em si
+    return mensagem
 
 
 def enviar_texto(config, telefone: str, texto: str, citar_externo_id: str = None) -> str:
@@ -2234,7 +2287,7 @@ def reenviar_mensagem(conn, config, mensagem: dict) -> bool:
         conn.execute("UPDATE whatsapp_mensagens SET status = 'enviada', erro = NULL, externo_id = ? WHERE id = ?", (externo_id, mensagem["id"]))
         return True
     except ApiError as e:
-        erro = _mensagem_erro_envio(config, conversa["telefone"], e.mensagem)
+        erro = _mensagem_erro_envio(config, conversa["telefone"], e.mensagem, mensagem["conversa_id"], conn)
         conn.execute("UPDATE whatsapp_mensagens SET status = 'falhou', erro = ? WHERE id = ?", (erro, mensagem["id"]))
         return False
 
