@@ -4846,7 +4846,11 @@ def setores_sem_ninguem(conn, empresa_id: int):
 def setores_com_alguem_online(conn, empresa_id: int):
     """Quais setores têm pelo menos uma pessoa disponível agora. Uma
     consulta só (em vez de uma por setor) porque isso roda a cada menu
-    enviado. Quem atende dois setores conta nos dois."""
+    enviado. Quem atende dois setores conta nos dois.
+
+    Exclui o usuário sistema -- mesmo motivo de usuarios_online_do_setor
+    acima: ele fica "online" 24/7 de propósito, mas não é um atendente
+    de verdade que possa responder o cliente."""
     limite = (datetime.datetime.utcnow() - datetime.timedelta(minutes=MINUTOS_ONLINE)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     rows = conn.execute(
         """
@@ -4854,8 +4858,9 @@ def setores_com_alguem_online(conn, empresa_id: int):
         JOIN usuarios u ON u.id = us.usuario_id
         WHERE u.empresa_id = ? AND u.ativo = 1
           AND u.ultimo_acesso >= ? AND u.offline_forcado = 0 AND u.ausente = 0
+          AND u.id NOT IN (SELECT usuario_sistema_id FROM configuracoes_whatsapp WHERE usuario_sistema_id IS NOT NULL AND empresa_id = ?)
         """,
-        (empresa_id, limite),
+        (empresa_id, limite, empresa_id),
     ).fetchall()
     return {r["setor"] for r in rows}
 
@@ -4919,15 +4924,26 @@ def usuario_esta_online(ultimo_acesso, offline_forcado=0, ausente=0, minutos=Non
 
 
 def usuarios_online_do_setor(conn, empresa_id: int, setor: str):
+    """Achado em 2026-09-23 investigando por que um cliente fora do
+    horário foi encaminhado direto pro "Assistente Seja Alpha" em vez
+    de ouvir "ninguém disponível, você será atendido no próximo dia
+    útil": manter_usuarios_sistema_online() marca o usuário do sistema
+    como "online" 24/7 de propósito (pra ele não aparecer sempre
+    offline na tela de Usuários) -- mas isso fazia ELE TAMBÉM contar
+    aqui como um atendente de verdade disponível, sempre que estivesse
+    cadastrado num setor. Exclui explicitamente o usuário sistema
+    desta contagem -- ele nunca é um atendente de carne e osso que
+    pode responder o cliente."""
     limite = (datetime.datetime.utcnow() - datetime.timedelta(minutes=MINUTOS_ONLINE)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     rows = conn.execute(
         """
         SELECT u.id, u.nome FROM usuarios u
         JOIN usuario_setores us ON us.usuario_id = u.id
         WHERE u.empresa_id = ? AND us.setor = ? AND u.ativo = 1 AND u.ultimo_acesso >= ? AND u.offline_forcado = 0 AND u.ausente = 0
+          AND u.id NOT IN (SELECT usuario_sistema_id FROM configuracoes_whatsapp WHERE usuario_sistema_id IS NOT NULL AND empresa_id = ?)
         ORDER BY u.nome
         """,
-        (empresa_id, setor, limite),
+        (empresa_id, setor, limite, empresa_id),
     ).fetchall()
     return [dict(r) for r in rows]
 
