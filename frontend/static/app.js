@@ -4254,7 +4254,7 @@
     painel.scrollTop = painel.scrollHeight;
   }
 
-  function htmlBolha(m, ehGrupo, contatoNome) {
+  function htmlBolha(m, ehGrupo, contatoNome, contatoId) {
     const saida = m.direcao === "saida";
     const iconeStatus = { pendente: "🕓", enviada: "✓", entregue: "✓✓", lida: "✓✓", falhou: "⚠️", recebida: "" }[m.status] || "";
     return `<div class="wpp-bolha ${saida ? "wpp-bolha-saida" : "wpp-bolha-entrada"} ${m.status === "falhou" ? "wpp-bolha-falhou" : ""} ${m.excluida_em ? "wpp-bolha-apagada" : ""}" data-wpp-bolha-id="${m.id}">
@@ -4281,6 +4281,7 @@
         ${saida && !m.excluida_em && m.tipo === "texto" ? `<button type="button" class="wpp-bolha-excluir" data-acao="editar-mensagem" data-id="${m.id}" data-texto="${escapeHtml(m.texto || "")}" title="Editar o texto">✏️</button>` : ""}
         ${htmlEditada(m)}
         ${saida && m.status === "falhou" ? `<button type="button" class="wpp-bolha-excluir" data-acao="reenviar-mensagem" data-id="${m.id}" title="Tentar enviar de novo">🔄</button>` : ""}
+        ${saida && m.status === "falhou" && m.erro === "Este número não tem WhatsApp ativo." ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-contato-sem-whatsapp" data-contato-id="${contatoId || ""}" title="Confirmado: este número não tem WhatsApp. Clique pra excluir o contato">🗑️ Sem WhatsApp — excluir?</button>` : ""}
         ${saida && !m.excluida_em ? `<button type="button" class="wpp-bolha-excluir" data-acao="excluir-mensagem" data-id="${m.id}" title="Excluir mensagem (ex.: enviada por engano)">🗑️</button>` : ""}
         <span class="wpp-bolha-hora">${fmtHoraCurta(m.criado_em)}</span>
         ${saida ? `<span class="wpp-bolha-status wpp-status-${m.status}" title="${m.erro ? escapeHtml(m.erro) : ""}">${iconeStatus}</span>` : ""}
@@ -4602,7 +4603,7 @@
           <button type="button" class="botao pequeno" data-acao="fechar-conversa" data-id="${conversa.id}">Encerrar atendimento</button>
         </div>` : ""}
       ${fechada ? `<p class="wpp-conversa-fechada-aviso">Esta conversa está fechada${conversa.aguardando_avaliacao ? " — aguardando avaliação do cliente" : ""}. Responder ou reabrir a torna ativa de novo.</p>` : ""}
-      <div class="wpp-mensagens" data-wpp-mensagens data-conversa-id="${conversa.id}" data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}" data-contato-nome="${escapeHtml(conversa.contato_nome || "")}"${_estiloMarcaDagua()}>${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo, conversa.contato_nome)).join("")}</div>
+      <div class="wpp-mensagens" data-wpp-mensagens data-conversa-id="${conversa.id}" data-eh-grupo="${conversa.eh_grupo ? "1" : "0"}" data-contato-nome="${escapeHtml(conversa.contato_nome || "")}" data-contato-id="${conversa.contato_id || ""}"${_estiloMarcaDagua()}>${_comDivisoresDeDia(mensagens).map((it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, !!conversa.eh_grupo, conversa.contato_nome, conversa.contato_id)).join("")}</div>
       ${htmlAgendadas(agendadas)}
       <div data-wpp-citando></div>
       <form class="wpp-chat-input" data-form="enviar-mensagem" data-conversa-id="${conversa.id}">
@@ -4903,9 +4904,10 @@
     // montagem tinha posto.
     const ehGrupo = !!(painel.dataset.ehGrupo === "1");
     const contatoNome = painel.dataset.contatoNome || "";
+    const contatoId = painel.dataset.contatoId || "";
     const itens = _comDivisoresDeDia(mensagens);
     const mudou = _sincronizarLista(painel, itens, (it) => it.chave,
-      (it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, ehGrupo, contatoNome));
+      (it) => it.divisor ? htmlDivisorDeDia(it.divisor) : htmlBolha(it.mensagem, ehGrupo, contatoNome, contatoId));
     if (mudou && estavaNoFim) painel.scrollTop = painel.scrollHeight;
   }
 
@@ -10715,6 +10717,14 @@
           }
         }
         return;
+      }
+      case "excluir-contato-sem-whatsapp": {
+        const contatoId = alvo.dataset.contatoId;
+        if (!contatoId) return;
+        if (!confirm("Confirmado que este número não tem WhatsApp -- excluir o contato e a(s) conversa(s) dele?")) return;
+        await chamarApi(`/whatsapp/contatos/${contatoId}`, { method: "DELETE" });
+        definirFlash("ok", "Contato excluído.");
+        return navegarPara("#/whatsapp");
       }
       case "iniciar-conversa-interna": {
         const participanteId = Number(dados.get("participante_id"));

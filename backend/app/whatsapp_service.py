@@ -1672,6 +1672,51 @@ def enviar_contato(config, telefone: str, nome_contato: str, telefone_contato: s
     return chave.get("id")
 
 
+MENSAGEM_SEM_WHATSAPP = "Este número não tem WhatsApp ativo."
+
+
+def numero_existe_no_whatsapp(config, telefone: str):
+    """Confere DE VERDADE se um número é uma conta ativa do WhatsApp,
+    usando o endpoint próprio da Evolution API -- em vez de só inferir
+    pelo "Bad Request" genérico que uma tentativa de envio devolve
+    (esse mesmo erro também acontece por outros motivos, ex.:
+    instabilidade momentânea). Retorna None quando a própria checagem
+    falhar (rede, instância desconectada) -- nesse caso não dá pra
+    afirmar nada, o chamador deve manter o erro original em vez de
+    arriscar dizer "sem WhatsApp" errado. Pedido do Clayton
+    (2026-09-24), depois de um envio falhar pra um número que
+    realmente não tinha WhatsApp: "avisar... cliente sem whats... e
+    perguntar deseja excluir o contato"."""
+    if not config.get("evolution_url") or config.get("status_conexao") != "conectado":
+        return None
+    requests = _requests()
+    try:
+        resp = requests.post(
+            f"{config['evolution_url']}/chat/whatsappNumbers/{config['instancia_nome']}",
+            json={"numbers": [normalizar_telefone(telefone, completar_ddi=False)]},
+            headers=_cabecalhos(config), timeout=15,
+        )
+        if resp.status_code >= 400:
+            return None
+        corpo = resp.json()
+        if isinstance(corpo, list) and corpo:
+            return bool(corpo[0].get("exists"))
+        return None
+    except Exception:
+        return None
+
+
+def _mensagem_erro_envio(config, telefone: str, erro_original: str) -> str:
+    """Enriquece o erro genérico de envio com essa checagem real --
+    troca o "Bad Request" técnico por algo que a equipe entende e pode
+    agir em cima (ver MENSAGEM_SEM_WHATSAPP, e o botão de excluir
+    contato que aparece no frontend quando a mensagem bate com essa
+    frase exata)."""
+    if numero_existe_no_whatsapp(config, telefone) is False:
+        return MENSAGEM_SEM_WHATSAPP
+    return erro_original
+
+
 def enviar_texto(config, telefone: str, texto: str, citar_externo_id: str = None) -> str:
     """citar_externo_id: id da mensagem que está sendo respondida. Vai no
     campo `quoted` da Evolution API pra que, no celular do cliente, a
@@ -2189,7 +2234,8 @@ def reenviar_mensagem(conn, config, mensagem: dict) -> bool:
         conn.execute("UPDATE whatsapp_mensagens SET status = 'enviada', erro = NULL, externo_id = ? WHERE id = ?", (externo_id, mensagem["id"]))
         return True
     except ApiError as e:
-        conn.execute("UPDATE whatsapp_mensagens SET status = 'falhou', erro = ? WHERE id = ?", (e.mensagem, mensagem["id"]))
+        erro = _mensagem_erro_envio(config, conversa["telefone"], e.mensagem)
+        conn.execute("UPDATE whatsapp_mensagens SET status = 'falhou', erro = ? WHERE id = ?", (erro, mensagem["id"]))
         return False
 
 
@@ -2205,6 +2251,17 @@ def arquivar_conversa(conn, conversa_id: int, arquivar: bool, usuario_id: int = 
         "UPDATE whatsapp_conversas SET arquivada = ?, arquivada_por = ? WHERE id = ?",
         (1 if arquivar else 0, usuario_id if arquivar else None, conversa_id),
     )
+
+
+def excluir_contato(conn, contato_id: int):
+    """Exclui (soft-delete) TODAS as conversas desse contato -- some de
+    todas as listas do sistema, pra todo mundo (mesma régua de
+    excluir_conversa, uma por uma). Não apaga o cadastro do contato em
+    si, só as conversas -- pedido do Clayton (2026-09-24): oferecer
+    excluir quando confirmar que o número não tem WhatsApp."""
+    conversas = conn.execute("SELECT id FROM whatsapp_conversas WHERE contato_id = ?", (contato_id,)).fetchall()
+    for c in conversas:
+        excluir_conversa(conn, c["id"])
 
 
 def excluir_conversa(conn, conversa_id: int):

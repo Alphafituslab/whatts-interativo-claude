@@ -1480,7 +1480,8 @@ def iniciar_conversa():
         externo_id = whatsapp_service.enviar_texto(config, telefone, texto)
         status_msg, erro = "enviada", None
     except ApiError as e:
-        externo_id, status_msg, erro = None, "falhou", e.mensagem
+        externo_id, status_msg = None, "falhou"
+        erro = whatsapp_service._mensagem_erro_envio(config, telefone, e.mensagem)
 
     conn.execute(
         """
@@ -1643,7 +1644,7 @@ def enviar_mensagem(conversa_id):
     except ApiError as e:
         externo_id = None
         status_msg = "falhou"
-        erro = e.mensagem
+        erro = whatsapp_service._mensagem_erro_envio(config, conversa["telefone"], e.mensagem)
 
     cur = conn.execute(
         """
@@ -3146,6 +3147,28 @@ def excluir_conversa(conversa_id):
         raise ApiError("Só o responsável por esta conversa (ou um administrador) pode excluí-la.", status=403, codigo="sem_permissao")
     whatsapp_service.excluir_conversa(conn, conversa_id)
     whatsapp_service.registrar_atividade(conn, usuario["id"], "conversa_excluida", conversa["telefone"], conversa_id)
+    return jsonify({"ok": True})
+
+
+@bp.delete("/contatos/<int:contato_id>")
+@requires_auth
+def excluir_contato(contato_id):
+    """Exclui TODAS as conversas desse contato -- pedido do Clayton
+    (2026-09-24): oferecer isso quando confirmar que o número não tem
+    WhatsApp de verdade (ver MENSAGEM_SEM_WHATSAPP), pra não ficar
+    lixo de contato inválido na lista. Mesma permissão de "limpar
+    histórico do contato" (admin sempre pode, resto só se liberado)."""
+    usuario = g.usuario_atual
+    if not (usuario["admin"] or usuario.get("pode_limpar_conversa")):
+        raise ApiError("Você não tem permissão pra excluir contatos.", status=403, codigo="sem_permissao")
+    conn = get_db()
+    contato = conn.execute(
+        "SELECT id, telefone FROM whatsapp_contatos WHERE id = ? AND empresa_id = ?", (contato_id, g.empresa_id)
+    ).fetchone()
+    if contato is None:
+        raise ApiError("Contato não encontrado.", status=404, codigo="nao_encontrado")
+    whatsapp_service.excluir_contato(conn, contato_id)
+    whatsapp_service.registrar_atividade(conn, usuario["id"], "contato_excluido", contato["telefone"], None)
     return jsonify({"ok": True})
 
 
