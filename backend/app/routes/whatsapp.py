@@ -1438,13 +1438,16 @@ def iniciar_conversa():
     telefone_bruto = (dados.get("telefone") or "").strip()
     nome = (dados.get("nome") or "").strip() or None
     texto = (dados.get("texto") or "").strip()
+    tipo_numero = (dados.get("tipo_numero") or "celular").strip().lower()
+    if tipo_numero not in ("celular", "fixo", "internacional"):
+        tipo_numero = "celular"
     if not telefone_bruto:
         raise ApiError("Informe o telefone.", status=400)
     if not texto:
         raise ApiError("Informe a mensagem inicial.", status=400)
 
     conn = get_db()
-    telefone = whatsapp_service.normalizar_telefone(telefone_bruto)
+    telefone = whatsapp_service.normalizar_telefone_com_tipo(telefone_bruto, tipo_numero)
     contato = whatsapp_service.obter_ou_criar_contato(conn, g.empresa_id, telefone, nome)
 
     conversa_existente = conn.execute(

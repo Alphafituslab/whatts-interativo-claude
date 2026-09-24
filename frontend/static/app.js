@@ -5682,6 +5682,15 @@
       <p class="dica">Começa uma conversa com um número que ainda não falou com a empresa. Ela vai aparecer na sua aba "Minhas" depois de enviada.</p>
       <form data-form="iniciar-conversa">
         <div class="campo"><label>Telefone (com DDD)</label><input name="telefone" type="tel" placeholder="(11) 99999-8888" value="${escapeHtml(telefonePreenchido || "")}" required autofocus></div>
+        <div class="campo">
+          <label>Tipo de número</label>
+          <select name="tipo_numero">
+            <option value="celular" selected>📱 Celular</option>
+            <option value="fixo">☎️ Fixo</option>
+            <option value="internacional">🌍 Internacional (fora do Brasil)</option>
+          </select>
+          <span class="dica">Celular já vem marcado (é 90% dos casos) — só troca se souber que é fixo ou de outro país.</span>
+        </div>
         <div class="campo"><label>Nome do contato (opcional)</label><input name="nome" placeholder="Ex.: João da Padaria" value="${escapeHtml(nomePreenchido || "")}"></div>
         <div class="campo"><label>Mensagem</label><textarea name="texto" rows="3" required></textarea></div>
         <p class="dica"><a href="#" data-acao="abrir-contatos">📇 Escolher de um contato salvo</a></p>
@@ -11222,7 +11231,7 @@
         try {
           resp = await chamarApi("/whatsapp/conversas", {
             method: "POST",
-            body: { telefone: dados.get("telefone"), nome: dados.get("nome") || undefined, texto: dados.get("texto") },
+            body: { telefone: dados.get("telefone"), nome: dados.get("nome") || undefined, texto: dados.get("texto"), tipo_numero: dados.get("tipo_numero") || undefined },
           });
         } catch (erro) {
           if (erro.codigo === "conversa_atribuida" || erro.codigo === "conversa_existente") {

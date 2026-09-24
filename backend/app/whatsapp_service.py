@@ -187,6 +187,40 @@ def normalizar_telefone(numero: str, completar_ddi: bool = True) -> str:
     return digitos
 
 
+def normalizar_telefone_com_tipo(numero: str, tipo: str = "celular") -> str:
+    """Versão explícita de normalizar_telefone, pra quando quem está
+    cadastrando já sabe o tipo do número -- pedido do Clayton
+    (2026-09-24): "ter a opção de ao cadastrar o número, ele saber se
+    for fixo é uma maneira, se for celular é outra e se for
+    internacional é outra, mas sempre dar a opção celular de primeira
+    pois 90% dos casos é celular". Tira a ambiguidade que
+    normalizar_telefone só resolve adivinhando pelo primeiro dígito --
+    aqui a pessoa já disse o que é, não precisa adivinhar."""
+    bruto = (numero or "").strip()
+    if tipo == "internacional" or bruto.startswith("+") or bruto.startswith("00"):
+        digitos = _somente_digitos(numero)
+        if not digitos:
+            raise ApiError("Telefone inválido.", status=400)
+        return digitos
+    digitos = _somente_digitos(numero)
+    if not digitos:
+        raise ApiError("Telefone inválido.", status=400)
+    if not (len(digitos) in (12, 13) and digitos.startswith("55")):
+        digitos = "55" + digitos
+    local = digitos[4:]
+    if tipo == "fixo":
+        # Fixo brasileiro nunca tem 9 dígitos -- se veio com 9 (campo
+        # reaproveitado de uma tentativa anterior, ou digitado errado),
+        # tira o primeiro em vez de mandar um fixo de 9 dígitos, que
+        # não existe.
+        if len(local) == 9:
+            local = local[1:]
+    else:  # celular -- padrão, 90% dos casos
+        if len(local) == 8:
+            local = "9" + local
+    return digitos[:4] + local
+
+
 # ============================================================
 # CONFIGURAÇÃO
 # ============================================================
